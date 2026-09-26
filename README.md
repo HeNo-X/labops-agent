@@ -18,7 +18,21 @@ npm install
 cp .env.example .env          # 可选。留空 AGNES_API_KEY 即为演示引擎模式
 ```
 
-### 方式 A · 开发模式（推荐日常用）
+### 方式 0 · 双击启动（完全不用碰终端）
+
+直接双击项目根目录的 **`start.cmd`**。它会依次：
+
+1. 检查环境（Node 版本 / 依赖 / 前端产物 / 数据源 / 引擎 / 端口占用）
+2. 缺依赖就 `npm install`，缺产物就 `npm run build`（首次会慢一点）
+3. 起服务端，**3 秒后自动打开浏览器**到 <http://127.0.0.1:8787>
+4. **关掉那个黑窗口 = 停止服务**
+
+想放桌面：右键 `start.cmd` → 显示更多选项 → 发送到 → 桌面快捷方式（可以重命名成「LabOps Agent」）。
+
+> 只做检查不启动：`node scripts/check-env.mjs`
+> 只检查不自动开浏览器：设环境变量 `LABOPS_NO_BROWSER=1`
+
+### 方式 A · 开发模式（写代码时用）
 
 ```bash
 npm run dev
@@ -69,6 +83,8 @@ HOST=0.0.0.0 npm run build && HOST=0.0.0.0 npm start
 
 | 命令 | 作用 |
 |---|---|
+| `start.cmd`（双击） | 一键启动：自检 → 装依赖 → 构建 → 起服务 → 开浏览器 |
+| `node scripts/check-env.mjs` | 只做环境自检，不启动（退出码 1 = 有阻塞项） |
 | `npm run dev` | 服务端 + 前端一起起（零依赖自研并发脚本） |
 | `npm run dev:server` | 只起服务端（`node --watch`） |
 | `npm run dev:web` | 只起 Vite |
@@ -123,7 +139,11 @@ Agnes 适配层已完整实现（`server/llm/agnes.ts`，OpenAI 兼容 `POST /v1
 
 ```
 labops-agent/
+├── start.cmd                   ★ 双击启动（纯 ASCII + CRLF，避免 console 码页乱码）
 ├── index.html                  Vite 入口
+├── scripts/
+│   ├── check-env.mjs           环境自检（Node 版本/依赖/产物/数据源/引擎/端口）
+│   └── dev.mjs                 开发模式并发启动（零依赖自研）
 ├── shared/                     ★ 前后端共用的唯一事实来源
 │   ├── periods.ts              六节次定义 + weekday 语义（老系统曾硬编码 6 份，这里只有 1 份）
 │   └── types.ts                SSE 事件契约 / 工具契约 / 数据来源标识

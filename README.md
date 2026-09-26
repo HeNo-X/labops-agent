@@ -15,21 +15,55 @@
 node -v
 
 npm install
-cp .env.example .env          # 按需填写，留空即为演示模式
-npm run dev                   # 同时起服务端(8787) + 前端(5173)
-
-# 打开 http://127.0.0.1:5173
+cp .env.example .env          # 可选。留空 AGNES_API_KEY 即为演示引擎模式
 ```
 
-> 直接 `http://127.0.0.1:5173` 即可，Vite 已把 `/api` 代理到服务端 8787，**不需要单独访问服务端端口**。
+### 方式 A · 开发模式（推荐日常用）
 
-### 生产模式（单进程托管前端产物）
+```bash
+npm run dev
+```
+
+- **访问地址：<http://127.0.0.1:5173>**
+- 同时起两个进程：服务端（8787，`node --watch` 改代码自动重启）+ Vite（5173，热更新）
+- Vite 已把 `/api` 代理到 8787，**只开 5173 一个地址就够了**，不用去点 8787
+- 按 `Ctrl+C` 一次，两个进程一起收工（自研并发脚本会转发信号，不留孤儿进程）
+
+### 方式 B · 生产模式（单进程，最接近交付形态）
 
 ```bash
 npm run build     # vue-tsc 类型检查 + vite build → dist/
-npm start         # node server/index.ts，同时托管 dist/ 与 API
-# 打开 http://127.0.0.1:8787
+npm start         # node server/index.ts：同时托管 dist/ 与 API
 ```
+
+- **访问地址：<http://127.0.0.1:8787>**
+- 只有一个进程、一个端口，前端产物 gzip 后 38.5 kB
+- 首屏更快（无 Vite 的模块请求开销），适合录演示视频
+
+### 访问不到时的排查顺序
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 连接被拒绝 / `ERR_CONNECTION_REFUSED` | 服务端没起或已退出 | 看终端有没有报错；重跑 `npm run dev` |
+| 端口被占用（`EADDRINUSE`） | 8787 / 5173 已被别的进程占用 | 换端口：`PORT=8799 npm run dev`；或查占用 `netstat -ano \| grep :8787` |
+| 页面能开但没有结果、一直转圈 | 服务端没起，Vite 代理打不通 | 直接看 8787 能否打开 —— 打不开就是服务端的问题 |
+| Node 报 `Unknown file extension ".ts"` | Node 版本低于 22.18 | 升级 Node（本项目刻意不用 tsx/esbuild） |
+
+### 想在手机上打开？
+
+默认只监听 `127.0.0.1`（**有意为之**：这个 API 会把请求转发给 Agnes，配上 Key 后监听全网就等于把 Key 的消费能力开放给局域网）。要测移动端布局时临时开放：
+
+```bash
+# 1) 查本机内网 IP（Windows）
+ipconfig | findstr IPv4
+
+# 2) 临时开放监听，然后用手机访问 http://<内网IP>:8787
+HOST=0.0.0.0 npm run build && HOST=0.0.0.0 npm start
+
+# 3) 用完改回默认（或直接 Ctrl+C）
+```
+
+> 手机与电脑要在同一个 WiFi 下。Windows 防火墙可能会弹窗询问是否允许 Node 访问网络，需要点允许。
 
 ### 常用脚本
 
@@ -75,6 +109,7 @@ Agnes 适配层已完整实现（`server/llm/agnes.ts`，OpenAI 兼容 `POST /v1
 | `AGNES_MODEL` | `agnes-3.0-flash` | 产品运行时模型 |
 | `AGNES_BASE_URL` | `https://apihub.agnes-ai.com/v1` | OpenAI 兼容 |
 | `PORT` | `8787` | 服务端端口 |
+| `HOST` | `127.0.0.1` | 监听地址。**默认只允许本机访问**（见上文"想在手机上打开"） |
 | `AGENT_MAX_STEPS` | `6` | 单次任务工具调用步数上限（硬上限，见 §健壮性） |
 | `AGENT_WALL_CLOCK_MS` | `60000` | 单次任务墙钟上限 |
 | `AGNES_TIMEOUT_MS` | `45000` | 单次 Agnes 调用超时 |

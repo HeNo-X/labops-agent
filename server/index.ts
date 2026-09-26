@@ -219,7 +219,7 @@ function main(): void {
       });
   });
 
-  server.listen(cfg.port, () => {
+  server.listen(cfg.port, cfg.host, () => {
     console.log('────────────────────────────────────────────────────────────');
     console.log(' LabOps Agent · 实验室任务画布（第一阶段） 服务端已启动');
     console.log('────────────────────────────────────────────────────────────');
@@ -229,7 +229,7 @@ function main(): void {
     console.log(' 学期            : ' + ds!.term.term + '，起始日 ' + (ds!.term.termStart ?? '未配置'));
     console.log(' 快照完整性      : ' + verifySnapshotIntegrity());
     console.log(' Prompt 版本     : ' + PROMPT_VERSION);
-    console.log(' 监听            : http://127.0.0.1:' + cfg.port);
+    console.log(' 监听            : http://' + cfg.host + ':' + cfg.port);
     console.log(' API             : GET  /api/agent/health   GET /api/state   POST /api/agent/chat (SSE)');
     if (ds!.warnings.length) {
       console.log(' 载入告警:');

@@ -52,6 +52,13 @@ function bool(key: string, fallback: boolean): boolean {
 
 export interface AppConfig {
   port: number;
+  /**
+   * 监听地址。默认 127.0.0.1（只有本机能访问）。
+   * ⚠️ 不要默认监听 0.0.0.0：这个 API 会把请求转发给 Agnes，
+   *    一旦配上 API Key，监听全网就等于把 Key 的消费能力开放给整个局域网。
+   *    要在手机上调试时，显式设 HOST=0.0.0.0，并在用完后改回来。
+   */
+  host: string;
   /** Agnes 3.0 Flash —— 产品运行时模型 */
   agnes: {
     apiKey: string;
@@ -85,6 +92,7 @@ export function getConfig(): AppConfig {
   if (cached) return cached;
   cached = {
     port: int('PORT', 8787, 1, 65535),
+    host: str('HOST', '127.0.0.1'),
     agnes: {
       apiKey: str('AGNES_API_KEY'),
       model: str('AGNES_MODEL', 'agnes-3.0-flash'),
@@ -113,7 +121,7 @@ export function getConfig(): AppConfig {
 /** 给启动日志用：永远不打印 Key 本身，只说配置与否 */
 export function describeConfig(c: AppConfig): string[] {
   return [
-    `端口            : ${c.port}`,
+    `监听地址        : http://${c.host}:${c.port}${c.host === '0.0.0.0' ? '  ⚠️ 已开放到局域网' : ''}`,
     `Agnes 模型      : ${c.agnes.model} @ ${c.agnes.baseUrl}`,
     `Agnes API Key   : ${c.agnes.apiKey ? '已配置 ✓（仅服务端持有）' : '未配置 → 进入演示引擎模式'}`,
     `步数/墙钟上限   : ${c.agent.maxSteps} 步 / ${c.agent.wallClockMs} ms`,

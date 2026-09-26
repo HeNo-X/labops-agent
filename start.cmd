@@ -8,10 +8,16 @@ rem    3) build the frontend if missing
 rem    4) start the server and open the browser
 rem  Close this window to stop the server.
 rem
-rem  NOTE: keep this file ASCII-only and CRLF. Chinese text inside .cmd files
-rem        gets garbled by the console codepage (learned the hard way).
+rem  NOTE 1: keep this file ASCII-only. Chinese text inside .cmd files gets
+rem          garbled by the console codepage (learned the hard way).
+rem  NOTE 2: the chcp below is NOT optional. Node always writes UTF-8, but a
+rem          Chinese Windows console defaults to codepage 936 (GBK), so every
+rem          Chinese line printed by check-env.mjs / server/index.ts comes out
+rem          as mojibake (UTF-8 bytes rendered as GBK). Switching the console
+rem          to 65001 before invoking node is what makes those lines readable.
 rem ===========================================================================
 setlocal
+chcp 65001 >nul
 cd /d "%~dp0"
 title LabOps Agent
 

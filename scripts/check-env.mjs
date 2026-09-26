@@ -13,11 +13,15 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+/** 尊重 NO_COLOR（https://no-color.org）：终端不支持 ANSI 时用户可以关掉 */
+const useColor = !process.env.NO_COLOR && process.env.TERM !== 'dumb';
+const wrap = (code, s) => (useColor ? `\u001b[${code}m${s}\u001b[0m` : s);
+
 const C = {
-  ok: (s) => `\u001b[32m${s}\u001b[0m`,
-  warn: (s) => `\u001b[33m${s}\u001b[0m`,
-  err: (s) => `\u001b[31m${s}\u001b[0m`,
-  dim: (s) => `\u001b[2m${s}\u001b[0m`
+  ok: (s) => wrap(32, s),
+  warn: (s) => wrap(33, s),
+  err: (s) => wrap(31, s),
+  dim: (s) => wrap(2, s)
 };
 
 const REQUIRED_MAJOR = 22;

@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    // shared/ 被服务端与前端共用；服务端要求显式 .ts 扩展名，所以前端也要允许
+    "allowImportingTsExtensions": true,
+    "allowJs": false,
+    "jsx": "preserve",
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./web/*"],
+      "@shared/*": ["./shared/*"]
+    }
+  },
+  "include": ["web/**/*.ts", "web/**/*.vue", "shared/**/*.ts", "env.d.ts"]
+}

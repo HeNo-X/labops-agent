@@ -1,0 +1,164 @@
+/* ============================================================================
+   LabOps Agent 视觉令牌 —— 独立、克制
+   ============================================================================
+   来源说明（诚实交代）：
+     本项目**没有**整份搬运老系统的 Pages/lib/themes.css（那是 50 KB、15+ 套主题，
+     包含玻璃拟态与自定义背景渲染层，对"任务画布"是纯粹的负担）。
+     这里沿用了老系统的**命名习惯**（--primary / --card-bg / --accent-*）与
+     **语义色分组**（正常 / 待确认 / 异常），令牌值是为本产品重新制定的。
+     目的：视觉体系可延续，但不背上老系统的样式包袱。
+
+   无障碍硬要求（第一阶段提示词第 6 条）：
+     正常 / 待确认 / 异常 **不能只用颜色区分**。
+     每种状态都必须同时具备：① 文字标签 ② 形状符号 ③ 边框样式。
+     颜色只是第三重补充。
+   ============================================================================ */
+
+:root {
+  /* --- 排版 --- */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Source Han Sans SC', 'Noto Sans CJK SC', sans-serif;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  /* --- 间距 --- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+
+  /* --- 圆角与阴影 --- */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --shadow-1: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.08);
+  --shadow-2: 0 4px 12px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.06);
+
+  /* --- 语义色（浅色为默认；深色在下方覆盖）--- */
+  --ok: #15803d;
+  --ok-bg: #e7f4ea;
+  --ok-border: #86c69c;
+  --warn: #a16207;
+  --warn-bg: #fdf6e3;
+  --warn-border: #e3c467;
+  --danger: #b91c1c;
+  --danger-bg: #fdecec;
+  --danger-border: #e9a3a3;
+  --info: #0369a1;
+  --info-bg: #eaf4fb;
+  --info-border: #94c6e4;
+  --neutral: #475569;
+  --neutral-bg: #eef2f7;
+  --neutral-border: #cbd5e1;
+}
+
+/* ---------------- 浅色（默认） ---------------- */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f4f6f9;
+  --bg-grid: #e6ebf2;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #eef2f7;
+  --border: #dde3ec;
+  --border-strong: #c3cddb;
+  --text: #16202e;
+  --text-muted: #5a6a80;
+  --text-faint: #8b98ab;
+  --primary: #245e7d;
+  --primary-hover: #1c4b64;
+  --primary-weak: #e8f1f6;
+  --primary-border: #9fc0d1;
+  --focus: #245e7d;
+  --shadow-color: rgba(15, 23, 42, 0.08);
+}
+
+/* ---------------- 深色 ---------------- */
+[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #0e141c;
+  --bg-grid: #16202b;
+  --surface: #161f2a;
+  --surface-2: #1b2632;
+  --surface-3: #22303e;
+  --border: #2b3846;
+  --border-strong: #3d4d5e;
+  --text: #e8eef5;
+  --text-muted: #a3b1c2;
+  --text-faint: #77879a;
+  --primary: #7cc3e0;
+  --primary-hover: #9ad4ec;
+  --primary-weak: #172c38;
+  --primary-border: #35607a;
+  --focus: #7cc3e0;
+  --shadow-color: rgba(0, 0, 0, 0.45);
+
+  --ok: #6ee7a4;
+  --ok-bg: #10261a;
+  --ok-border: #2f6b48;
+  --warn: #f0c674;
+  --warn-bg: #2a230f;
+  --warn-border: #6d5a24;
+  --danger: #f79c9c;
+  --danger-bg: #2c1414;
+  --danger-border: #7a3a3a;
+  --info: #7cc0e8;
+  --info-bg: #10242f;
+  --info-border: #34607a;
+  --neutral: #a3b1c2;
+  --neutral-bg: #1f2a36;
+  --neutral-border: #3d4d5e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  min-height: 100%;
+}
+
+/* --- 键盘可用性：所有可聚焦元素都要有可见的焦点环 --- */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

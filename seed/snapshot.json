@@ -1,0 +1,3266 @@
+{
+  "meta": {
+    "format": "labops-agent/snapshot@1",
+    "sourceType": "snapshot",
+    "sourceLabel": "脱敏快照",
+    "generatedAt": "2026-09-26T07:56:51.383Z",
+    "generatedBy": "seed/make-snapshot.ts",
+    "sourceFileBasename": "state.json",
+    "sourceFileBytes": 82319,
+    "sourceSha256Prefix": "8e979656db515c55",
+    "includedTables": [
+      "sysConfig",
+      "labs",
+      "openLabs",
+      "timetable"
+    ],
+    "droppedTables": [
+      "users",
+      "classRoster",
+      "keys",
+      "courses",
+      "classes",
+      "checkinRecords",
+      "volunteerRecords",
+      "openLabRecords",
+      "notifications",
+      "scheduleAdjust",
+      "openLabStatus",
+      "gamification"
+    ],
+    "dropReason": "第一阶段唯一工具 query_schedule 不需要这些表；含真实姓名/学号/手机号/凭据，一律不入库",
+    "redaction": {
+      "teacher": "稳定伪名化（教师T01…，同次导出内一致，不可逆）",
+      "dropped": [
+        "真实姓名",
+        "手机号",
+        "学号(sno)",
+        "用户名",
+        "钥匙持有人",
+        "凭据/会话"
+      ],
+      "keptNote": "房间号、班级代号（计本2501 等）、课程名属于机构信息而非个人信息，原样保留"
+    },
+    "counts": {
+      "sourceUsers": 53,
+      "sourceTeachersRedacted": 73,
+      "labs": 10,
+      "openLabs": 6,
+      "timetable": 139
+    }
+  },
+  "term": {
+    "term": "2026-2027-1",
+    "termStart": "2026-09-07",
+    "holidays": [],
+    "labMismatchPolicy": "warn"
+  },
+  "labs": [
+    {
+      "id": "lab_1",
+      "sortOrder": 1,
+      "name": "E310",
+      "location": "文渊E区3层E310",
+      "capacity": 100,
+      "status": "active",
+      "description": ""
+    },
+    {
+      "id": "lab_2",
+      "sortOrder": 2,
+      "name": "E312",
+      "location": "文渊E区3层E312",
+      "capacity": 100,
+      "status": "active",
+      "description": ""
+    },
+    {
+      "id": "lab_3",
+      "sortOrder": 3,
+      "name": "E315",
+      "location": "文渊E区3层E315",
+      "capacity": 100,
+      "status": "active",
+      "description": ""
+    },
+    {
+      "id": "lab_4",
+      "sortOrder": 4,
+      "name": "D515",
+      "location": "文渊D区5层D515",
+      "capacity": 100,
+      "status": "closed",
+      "description": ""
+    },
+    {
+      "id": "lab_5",
+      "sortOrder": 5,
+      "name": "D517",
+      "location": "文渊D区5层D517",
+      "capacity": 100,
+      "status": "closed",
+      "description": ""
+    },
+    {
+      "id": "lab_6",
+      "sortOrder": 6,
+      "name": "D501",
+      "location": "文渊D区5层D501",
+      "capacity": 100,
+      "status": "closed",
+      "description": ""
+    },
+    {
+      "id": "lab_7",
+      "sortOrder": 7,
+      "name": "D503",
+      "location": "文渊D区5层D503",
+      "capacity": 100,
+      "status": "closed",
+      "description": ""
+    },
+    {
+      "id": "lab_8",
+      "sortOrder": 8,
+      "name": "D521",
+      "location": "文渊D区5层D521",
+      "capacity": 100,
+      "status": "closed",
+      "description": ""
+    },
+    {
+      "id": "lab_9",
+      "sortOrder": 9,
+      "name": "D532",
+      "location": "文渊D区5层D532",
+      "capacity": 100,
+      "status": "closed",
+      "description": ""
+    },
+    {
+      "id": "lab_10",
+      "sortOrder": 10,
+      "name": "D533",
+      "location": "文渊D区5层D533",
+      "capacity": 100,
+      "status": "closed",
+      "description": ""
+    }
+  ],
+  "openLabs": [
+    {
+      "id": "olab_D526",
+      "sortOrder": 1,
+      "name": "D526",
+      "location": "文渊D区5层D526",
+      "capacity": 30,
+      "status": "active",
+      "description": "开放实验室"
+    },
+    {
+      "id": "olab_D525",
+      "sortOrder": 2,
+      "name": "D525",
+      "location": "文渊D区5层D525",
+      "capacity": 30,
+      "status": "active",
+      "description": "开放实验室"
+    },
+    {
+      "id": "olab_D522",
+      "sortOrder": 3,
+      "name": "D522",
+      "location": "文渊D区5层D522",
+      "capacity": 30,
+      "status": "closed",
+      "description": "开放实验室"
+    },
+    {
+      "id": "olab_D538",
+      "sortOrder": 4,
+      "name": "D538",
+      "location": "文渊D区5层D538",
+      "capacity": 30,
+      "status": "closed",
+      "description": "开放实验室"
+    },
+    {
+      "id": "olab_D530",
+      "sortOrder": 5,
+      "name": "D530",
+      "location": "文渊D区5层D530",
+      "capacity": 30,
+      "status": "closed",
+      "description": "开放实验室"
+    },
+    {
+      "id": "olab_D518",
+      "sortOrder": 6,
+      "name": "D518",
+      "location": "文渊D区5层D518",
+      "capacity": 30,
+      "status": "closed",
+      "description": "开放实验室"
+    }
+  ],
+  "timetable": [
+    {
+      "id": "tt_imp1_0001",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2501"
+      ],
+      "className": "计本2501",
+      "courseId": "",
+      "courseName": "计算机组成原理",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 3,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "even"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T04"
+    },
+    {
+      "id": "tt_imp1_0002",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2401"
+      ],
+      "className": "智能本2401",
+      "courseId": "",
+      "courseName": "算法设计与分析",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 5,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T38"
+    },
+    {
+      "id": "tt_imp1_0003",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2503"
+      ],
+      "className": "计工本2503",
+      "courseId": "",
+      "courseName": "计算机组成原理",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 1,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "odd"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T68"
+    },
+    {
+      "id": "tt_imp1_0004",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2301"
+      ],
+      "className": "智能本2301",
+      "courseId": "",
+      "courseName": "多智能体系统",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 4,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T30"
+    },
+    {
+      "id": "tt_imp1_0005",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2603"
+      ],
+      "className": "计工本2603",
+      "courseId": "",
+      "courseName": "C语言程序设计",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 5,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T42"
+    },
+    {
+      "id": "tt_imp1_0006",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2301"
+      ],
+      "className": "计本2301",
+      "courseId": "",
+      "courseName": "并行分布计算",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 1,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T51"
+    },
+    {
+      "id": "tt_imp1_0007",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2301"
+      ],
+      "className": "智能本2301",
+      "courseId": "",
+      "courseName": "并行分布计算",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 1,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T51"
+    },
+    {
+      "id": "tt_imp1_0008",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2501"
+      ],
+      "className": "网安本2501",
+      "courseId": "",
+      "courseName": "计算机组成原理",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T22"
+    },
+    {
+      "id": "tt_imp1_0009",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2401"
+      ],
+      "className": "智能本2401",
+      "courseId": "",
+      "courseName": "控制理论与方法",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 4,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T42"
+    },
+    {
+      "id": "tt_imp1_0010",
+      "term": "2026-2027-1",
+      "classNames": [
+        "物联本2501"
+      ],
+      "className": "物联本2501",
+      "courseId": "",
+      "courseName": "计算机组成原理",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 2,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T19"
+    },
+    {
+      "id": "tt_imp1_0011",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2501"
+      ],
+      "className": "计本2501",
+      "courseId": "",
+      "courseName": "计算机辅助教育",
+      "labId": "lab_5",
+      "labName": "D517",
+      "weekday": 5,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T56"
+    },
+    {
+      "id": "tt_imp1_0012",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2501"
+      ],
+      "className": "智能本2501",
+      "courseId": "",
+      "courseName": "Java 程序设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 1,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 9,
+        "to": 16,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T54"
+    },
+    {
+      "id": "tt_imp1_0013",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2503"
+      ],
+      "className": "计工本2503",
+      "courseId": "",
+      "courseName": "Java 程序设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 3,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T36"
+    },
+    {
+      "id": "tt_imp1_0014",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2504"
+      ],
+      "className": "计工本2504",
+      "courseId": "",
+      "courseName": "Java 程序设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 3,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T36"
+    },
+    {
+      "id": "tt_imp1_0015",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2401"
+      ],
+      "className": "网安本2401",
+      "courseId": "",
+      "courseName": "数字图像处理",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T61"
+    },
+    {
+      "id": "tt_imp1_0016",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2501"
+      ],
+      "className": "网安本2501",
+      "courseId": "",
+      "courseName": "计算机网络原理",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 1,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "even"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T23"
+    },
+    {
+      "id": "tt_imp1_0017",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2501"
+      ],
+      "className": "网安本2501",
+      "courseId": "",
+      "courseName": "专业课程设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 2,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T06"
+    },
+    {
+      "id": "tt_imp1_0018",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2501"
+      ],
+      "className": "计工本2501",
+      "courseId": "",
+      "courseName": "计算机组成原理",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 3,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "odd"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T49"
+    },
+    {
+      "id": "tt_imp1_0019",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2502"
+      ],
+      "className": "计工本2502",
+      "courseId": "",
+      "courseName": "计算机组成原理",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 3,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "odd"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T49"
+    },
+    {
+      "id": "tt_imp1_0020",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2401"
+      ],
+      "className": "网安本2401",
+      "courseId": "",
+      "courseName": "数据库实用技术",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 4,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T05"
+    },
+    {
+      "id": "tt_imp1_0021",
+      "term": "2026-2027-1",
+      "classNames": [
+        "物联本2401"
+      ],
+      "className": "物联本2401",
+      "courseId": "",
+      "courseName": "数据库实用技术",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 4,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T05"
+    },
+    {
+      "id": "tt_imp1_0022",
+      "term": "2026-2027-1",
+      "classNames": [
+        "物联本2501"
+      ],
+      "className": "物联本2501",
+      "courseId": "",
+      "courseName": "Java 程序设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T18"
+    },
+    {
+      "id": "tt_imp1_0023",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2401"
+      ],
+      "className": "智能本2401",
+      "courseId": "",
+      "courseName": "计算机图形学",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T02"
+    },
+    {
+      "id": "tt_imp1_0024",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2403"
+      ],
+      "className": "计工本2403",
+      "courseId": "",
+      "courseName": "计算机网络原理",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 1,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T11"
+    },
+    {
+      "id": "tt_imp1_0025",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2402"
+      ],
+      "className": "计工本2402",
+      "courseId": "",
+      "courseName": "计算机网络原理",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 3,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T14"
+    },
+    {
+      "id": "tt_imp1_0026",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2501"
+      ],
+      "className": "智能本2501",
+      "courseId": "",
+      "courseName": "计算机网络原理",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "even"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T59"
+    },
+    {
+      "id": "tt_imp1_0027",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2501"
+      ],
+      "className": "智能本2501",
+      "courseId": "",
+      "courseName": "操作系统",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 1,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T16"
+    },
+    {
+      "id": "tt_imp1_0028",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2401"
+      ],
+      "className": "网安本2401",
+      "courseId": "",
+      "courseName": "数字取证技术",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 2,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T65"
+    },
+    {
+      "id": "tt_imp1_0029",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2503"
+      ],
+      "className": "计工本2503",
+      "courseId": "",
+      "courseName": "面向对象程序设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 3,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T46"
+    },
+    {
+      "id": "tt_imp1_0030",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2504"
+      ],
+      "className": "计工本2504",
+      "courseId": "",
+      "courseName": "面向对象程序设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 3,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T46"
+    },
+    {
+      "id": "tt_imp1_0031",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2401"
+      ],
+      "className": "计本2401",
+      "courseId": "",
+      "courseName": "计算机网络原理",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 4,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T67"
+    },
+    {
+      "id": "tt_imp1_0032",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2401"
+      ],
+      "className": "计工本2401",
+      "courseId": "",
+      "courseName": "现代优化理论与应用",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T20"
+    },
+    {
+      "id": "tt_imp1_0033",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2402"
+      ],
+      "className": "计工本2402",
+      "courseId": "",
+      "courseName": "现代优化理论与应用",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T20"
+    },
+    {
+      "id": "tt_imp1_0034",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2403"
+      ],
+      "className": "计工本2403",
+      "courseId": "",
+      "courseName": "现代优化理论与应用",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T20"
+    },
+    {
+      "id": "tt_imp1_0035",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2301"
+      ],
+      "className": "智能本2301",
+      "courseId": "",
+      "courseName": "现代优化理论与应用",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T20"
+    },
+    {
+      "id": "tt_imp1_0036",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2605"
+      ],
+      "className": "计工本2605",
+      "courseId": "",
+      "courseName": "C语言程序设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 1,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T63"
+    },
+    {
+      "id": "tt_imp1_0037",
+      "term": "2026-2027-1",
+      "classNames": [
+        "物联本2601"
+      ],
+      "className": "物联本2601",
+      "courseId": "",
+      "courseName": "C语言程序设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 1,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 4,
+        "to": 18,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T73"
+    },
+    {
+      "id": "tt_imp1_0038",
+      "term": "2026-2027-1",
+      "classNames": [
+        "物联本2401"
+      ],
+      "className": "物联本2401",
+      "courseId": "",
+      "courseName": "数字信号处理(双语)",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 2,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 9,
+        "to": 16,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T12"
+    },
+    {
+      "id": "tt_imp1_0039",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2401"
+      ],
+      "className": "计工本2401",
+      "courseId": "",
+      "courseName": "计算机网络原理",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 3,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T72"
+    },
+    {
+      "id": "tt_imp1_0040",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2601"
+      ],
+      "className": "网安本2601",
+      "courseId": "",
+      "courseName": "C语言程序设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 4,
+        "to": 18,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T62"
+    },
+    {
+      "id": "tt_imp1_0041",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2602"
+      ],
+      "className": "网安本2602",
+      "courseId": "",
+      "courseName": "C语言程序设计",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 4,
+        "to": 18,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T62"
+    },
+    {
+      "id": "tt_imp1_0042",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2401"
+      ],
+      "className": "计工本2401",
+      "courseId": "",
+      "courseName": "机器学习与模式识别",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 1,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T32"
+    },
+    {
+      "id": "tt_imp1_0043",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2402"
+      ],
+      "className": "计工本2402",
+      "courseId": "",
+      "courseName": "机器学习与模式识别",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 1,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T32"
+    },
+    {
+      "id": "tt_imp1_0044",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2401"
+      ],
+      "className": "智能本2401",
+      "courseId": "",
+      "courseName": "计算机网络原理",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 1,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T52"
+    },
+    {
+      "id": "tt_imp1_0045",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2301"
+      ],
+      "className": "计工本2301",
+      "courseId": "",
+      "courseName": "网络信息安全",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 2,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T55"
+    },
+    {
+      "id": "tt_imp1_0046",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2501"
+      ],
+      "className": "计本2501",
+      "courseId": "",
+      "courseName": "Web前端技术",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 3,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T34"
+    },
+    {
+      "id": "tt_imp1_0047",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2401"
+      ],
+      "className": "网安本2401",
+      "courseId": "",
+      "courseName": "算法设计与分析",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 4,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T06"
+    },
+    {
+      "id": "tt_imp1_0048",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2401"
+      ],
+      "className": "网安本2401",
+      "courseId": "",
+      "courseName": "网络攻击与防范技术",
+      "labId": "lab_1",
+      "labName": "E310",
+      "weekday": 5,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T15"
+    },
+    {
+      "id": "tt_imp1_0049",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2401"
+      ],
+      "className": "网安本2401",
+      "courseId": "",
+      "courseName": "机器学习与模式识别",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 1,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T64"
+    },
+    {
+      "id": "tt_imp1_0050",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2401"
+      ],
+      "className": "智能本2401",
+      "courseId": "",
+      "courseName": "机器学习",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 4,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T10"
+    },
+    {
+      "id": "tt_imp1_0051",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2301"
+      ],
+      "className": "计本2301",
+      "courseId": "",
+      "courseName": "信息检索技术",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 2,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 9,
+        "to": 16,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T17"
+    },
+    {
+      "id": "tt_imp1_0052",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2301"
+      ],
+      "className": "计本2301",
+      "courseId": "",
+      "courseName": "信息检索技术",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 4,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 8,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T17"
+    },
+    {
+      "id": "tt_imp1_0053",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2401"
+      ],
+      "className": "计本2401",
+      "courseId": "",
+      "courseName": "现代优化理论与应用",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 5,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T43"
+    },
+    {
+      "id": "tt_imp1_0054",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2501"
+      ],
+      "className": "计本2501",
+      "courseId": "",
+      "courseName": "Java 程序设计",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 6,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T66"
+    },
+    {
+      "id": "tt_imp1_0055",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2501"
+      ],
+      "className": "网安本2501",
+      "courseId": "",
+      "courseName": "Java 程序设计",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 6,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T66"
+    },
+    {
+      "id": "tt_imp1_0056",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2503"
+      ],
+      "className": "计工本2503",
+      "courseId": "",
+      "courseName": "操作系统",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 1,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T13"
+    },
+    {
+      "id": "tt_imp1_0057",
+      "term": "2026-2027-1",
+      "classNames": [
+        "物联本2401"
+      ],
+      "className": "物联本2401",
+      "courseId": "",
+      "courseName": "机器学习与模式识别",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 3,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T47"
+    },
+    {
+      "id": "tt_imp1_0058",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2504"
+      ],
+      "className": "计工本2504",
+      "courseId": "",
+      "courseName": "操作系统",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 1,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T58"
+    },
+    {
+      "id": "tt_imp1_0059",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2401"
+      ],
+      "className": "计本2401",
+      "courseId": "",
+      "courseName": "数字图像处理",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 2,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T48"
+    },
+    {
+      "id": "tt_imp1_0060",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2401"
+      ],
+      "className": "计本2401",
+      "courseId": "",
+      "courseName": "机器学习与模式识别",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 3,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T29"
+    },
+    {
+      "id": "tt_imp1_0061",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2403"
+      ],
+      "className": "计工本2403",
+      "courseId": "",
+      "courseName": "机器学习与模式识别",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 3,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T29"
+    },
+    {
+      "id": "tt_imp1_0062",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2501"
+      ],
+      "className": "计本2501",
+      "courseId": "",
+      "courseName": "操作系统",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 4,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T24"
+    },
+    {
+      "id": "tt_imp1_0063",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2401"
+      ],
+      "className": "智能本2401",
+      "courseId": "",
+      "courseName": "数值计算方法",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "even"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T39"
+    },
+    {
+      "id": "tt_imp1_0064",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2301"
+      ],
+      "className": "智能本2301",
+      "courseId": "",
+      "courseName": "网络信息安全",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 3,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "even"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T50"
+    },
+    {
+      "id": "tt_imp1_0065",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2301"
+      ],
+      "className": "智能本2301",
+      "courseId": "",
+      "courseName": "自然语言处理",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 4,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T50"
+    },
+    {
+      "id": "tt_imp1_0066",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2401"
+      ],
+      "className": "计本2401",
+      "courseId": "",
+      "courseName": "云计算与大数据",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 1,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T40"
+    },
+    {
+      "id": "tt_imp1_0067",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2401"
+      ],
+      "className": "网安本2401",
+      "courseId": "",
+      "courseName": "云计算与大数据",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 1,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T40"
+    },
+    {
+      "id": "tt_imp1_0068",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2401"
+      ],
+      "className": "智能本2401",
+      "courseId": "",
+      "courseName": "现代优化理论与应用",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 2,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T33"
+    },
+    {
+      "id": "tt_imp1_0069",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2501"
+      ],
+      "className": "计本2501",
+      "courseId": "",
+      "courseName": "Python数据分析",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 2,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T60"
+    },
+    {
+      "id": "tt_imp1_0070",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2401"
+      ],
+      "className": "智能本2401",
+      "courseId": "",
+      "courseName": "知识表示与处理",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 3,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T55"
+    },
+    {
+      "id": "tt_imp1_0071",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2601"
+      ],
+      "className": "计工本2601",
+      "courseId": "",
+      "courseName": "C语言程序设计",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 5,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T26"
+    },
+    {
+      "id": "tt_imp1_0072",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2602"
+      ],
+      "className": "计工本2602",
+      "courseId": "",
+      "courseName": "C语言程序设计",
+      "labId": "lab_2",
+      "labName": "E312",
+      "weekday": 5,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 4,
+        "to": 18,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T25"
+    },
+    {
+      "id": "tt_imp1_0073",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2401"
+      ],
+      "className": "智能本2401",
+      "courseId": "",
+      "courseName": "数字图像处理",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 1,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T71"
+    },
+    {
+      "id": "tt_imp1_0074",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2401"
+      ],
+      "className": "计本2401",
+      "courseId": "",
+      "courseName": "算法设计与分析",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T07"
+    },
+    {
+      "id": "tt_imp1_0075",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2401"
+      ],
+      "className": "计工本2401",
+      "courseId": "",
+      "courseName": "算法设计与分析",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T07"
+    },
+    {
+      "id": "tt_imp1_0076",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2402"
+      ],
+      "className": "计工本2402",
+      "courseId": "",
+      "courseName": "算法设计与分析",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T07"
+    },
+    {
+      "id": "tt_imp1_0077",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2403"
+      ],
+      "className": "计工本2403",
+      "courseId": "",
+      "courseName": "算法设计与分析",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T07"
+    },
+    {
+      "id": "tt_imp1_0078",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2504"
+      ],
+      "className": "计工本2504",
+      "courseId": "",
+      "courseName": "计算机组成原理",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "odd"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T01"
+    },
+    {
+      "id": "tt_imp1_0079",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2604"
+      ],
+      "className": "计工本2604",
+      "courseId": "",
+      "courseName": "C语言程序设计",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 6,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 4,
+        "to": 18,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T70"
+    },
+    {
+      "id": "tt_imp1_0080",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计本2501"
+      ],
+      "className": "计本2501",
+      "courseId": "",
+      "courseName": "面向对象程序设计",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 6,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T21"
+    },
+    {
+      "id": "tt_imp1_0081",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2501"
+      ],
+      "className": "计工本2501",
+      "courseId": "",
+      "courseName": "面向对象程序设计",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 6,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T21"
+    },
+    {
+      "id": "tt_imp1_0082",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2502"
+      ],
+      "className": "计工本2502",
+      "courseId": "",
+      "courseName": "面向对象程序设计",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 6,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T21"
+    },
+    {
+      "id": "tt_imp1_0083",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2401"
+      ],
+      "className": "计工本2401",
+      "courseId": "",
+      "courseName": "移动互联网开发技术",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 2,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T09"
+    },
+    {
+      "id": "tt_imp1_0084",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2402"
+      ],
+      "className": "计工本2402",
+      "courseId": "",
+      "courseName": "移动互联网开发技术",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 2,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T09"
+    },
+    {
+      "id": "tt_imp1_0085",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2403"
+      ],
+      "className": "计工本2403",
+      "courseId": "",
+      "courseName": "移动互联网开发技术",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 2,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T09"
+    },
+    {
+      "id": "tt_imp1_0086",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2501"
+      ],
+      "className": "计工本2501",
+      "courseId": "",
+      "courseName": "操作系统",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 3,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T02"
+    },
+    {
+      "id": "tt_imp1_0087",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2502"
+      ],
+      "className": "计工本2502",
+      "courseId": "",
+      "courseName": "操作系统",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 3,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T02"
+    },
+    {
+      "id": "tt_imp1_0088",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2501"
+      ],
+      "className": "计工本2501",
+      "courseId": "",
+      "courseName": "Web前端技术",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T56"
+    },
+    {
+      "id": "tt_imp1_0089",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2502"
+      ],
+      "className": "计工本2502",
+      "courseId": "",
+      "courseName": "Web前端技术",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T56"
+    },
+    {
+      "id": "tt_imp1_0090",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2503"
+      ],
+      "className": "计工本2503",
+      "courseId": "",
+      "courseName": "Web前端技术",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T56"
+    },
+    {
+      "id": "tt_imp1_0091",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2504"
+      ],
+      "className": "计工本2504",
+      "courseId": "",
+      "courseName": "Web前端技术",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T56"
+    },
+    {
+      "id": "tt_imp1_0092",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2501"
+      ],
+      "className": "智能本2501",
+      "courseId": "",
+      "courseName": "面向对象程序设计",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 6,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "even"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T21"
+    },
+    {
+      "id": "tt_imp1_0093",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2601"
+      ],
+      "className": "智能本2601",
+      "courseId": "",
+      "courseName": "C语言程序设计",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T44"
+    },
+    {
+      "id": "tt_imp1_0094",
+      "term": "2026-2027-1",
+      "classNames": [
+        "智能本2602"
+      ],
+      "className": "智能本2602",
+      "courseId": "",
+      "courseName": "C语言程序设计",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 4,
+        "to": 18,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T27"
+    },
+    {
+      "id": "tt_imp1_0095",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2301"
+      ],
+      "className": "计工本2301",
+      "courseId": "",
+      "courseName": "人机交互与虚拟现实",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 1,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T35"
+    },
+    {
+      "id": "tt_imp1_0096",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2302"
+      ],
+      "className": "计工本2302",
+      "courseId": "",
+      "courseName": "人机交互与虚拟现实",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 1,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T35"
+    },
+    {
+      "id": "tt_imp1_0097",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2303"
+      ],
+      "className": "计工本2303",
+      "courseId": "",
+      "courseName": "人机交互与虚拟现实",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 1,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T35"
+    },
+    {
+      "id": "tt_imp1_0098",
+      "term": "2026-2027-1",
+      "classNames": [
+        "物联本2301"
+      ],
+      "className": "物联本2301",
+      "courseId": "",
+      "courseName": "人机交互与虚拟现实",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 1,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T35"
+    },
+    {
+      "id": "tt_imp1_0099",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2501"
+      ],
+      "className": "计工本2501",
+      "courseId": "",
+      "courseName": "Java 程序设计",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 2,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T28"
+    },
+    {
+      "id": "tt_imp1_0100",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2502"
+      ],
+      "className": "计工本2502",
+      "courseId": "",
+      "courseName": "Java 程序设计",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 2,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T28"
+    },
+    {
+      "id": "tt_imp1_0101",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2401"
+      ],
+      "className": "计工本2401",
+      "courseId": "",
+      "courseName": "云计算与大数据",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 3,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T08"
+    },
+    {
+      "id": "tt_imp1_0102",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2402"
+      ],
+      "className": "计工本2402",
+      "courseId": "",
+      "courseName": "云计算与大数据",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 3,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T08"
+    },
+    {
+      "id": "tt_imp1_0103",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2403"
+      ],
+      "className": "计工本2403",
+      "courseId": "",
+      "courseName": "云计算与大数据",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 3,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T08"
+    },
+    {
+      "id": "tt_imp1_0104",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2401"
+      ],
+      "className": "计工本2401",
+      "courseId": "",
+      "courseName": "数据库实用技术",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T27"
+    },
+    {
+      "id": "tt_imp1_0105",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2402"
+      ],
+      "className": "计工本2402",
+      "courseId": "",
+      "courseName": "数据库实用技术",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T27"
+    },
+    {
+      "id": "tt_imp1_0106",
+      "term": "2026-2027-1",
+      "classNames": [
+        "计工本2403"
+      ],
+      "className": "计工本2403",
+      "courseId": "",
+      "courseName": "数据库实用技术",
+      "labId": "lab_3",
+      "labName": "E315",
+      "weekday": 5,
+      "periodKey": "eve_cd",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T27"
+    },
+    {
+      "id": "tt_imp1_0107",
+      "term": "2026-2027-1",
+      "classNames": [
+        "通信本2401"
+      ],
+      "className": "通信本2401",
+      "courseId": "",
+      "courseName": "微机原理",
+      "labId": "lab_6",
+      "labName": "D501",
+      "weekday": 1,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T03"
+    },
+    {
+      "id": "tt_imp1_0108",
+      "term": "2026-2027-1",
+      "classNames": [
+        "通信本2402"
+      ],
+      "className": "通信本2402",
+      "courseId": "",
+      "courseName": "微机原理",
+      "labId": "lab_6",
+      "labName": "D501",
+      "weekday": 1,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T03"
+    },
+    {
+      "id": "tt_imp1_0109",
+      "term": "2026-2027-1",
+      "classNames": [
+        "物联本2401"
+      ],
+      "className": "物联本2401",
+      "courseId": "",
+      "courseName": "嵌入式系统原理与应用",
+      "labId": "lab_6",
+      "labName": "D501",
+      "weekday": 1,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T31"
+    },
+    {
+      "id": "tt_imp1_0110",
+      "term": "2026-2027-1",
+      "classNames": [
+        "通信本2501"
+      ],
+      "className": "通信本2501",
+      "courseId": "",
+      "courseName": "数字电路",
+      "labId": "lab_4",
+      "labName": "D515",
+      "weekday": 3,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T69"
+    },
+    {
+      "id": "tt_imp1_0111",
+      "term": "2026-2027-1",
+      "classNames": [
+        "通信本2502"
+      ],
+      "className": "通信本2502",
+      "courseId": "",
+      "courseName": "数字电路",
+      "labId": "lab_4",
+      "labName": "D515",
+      "weekday": 3,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T69"
+    },
+    {
+      "id": "tt_imp1_0112",
+      "term": "2026-2027-1",
+      "classNames": [
+        "物联本2401"
+      ],
+      "className": "物联本2401",
+      "courseId": "",
+      "courseName": "通信原理",
+      "labId": "lab_8",
+      "labName": "D521",
+      "weekday": 3,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T53"
+    },
+    {
+      "id": "tt_imp1_0113",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 2,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0114",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 3,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0115",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 4,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0116",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 5,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0117",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 2,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0118",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 3,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0119",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 4,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0120",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 5,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0121",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 1,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0122",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 2,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0123",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 3,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0124",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 4,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0125",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 5,
+      "periodKey": "pm1",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0126",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 1,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0127",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 2,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0128",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 3,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0129",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 4,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0130",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 5,
+      "periodKey": "pm2",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0131",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 1,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0132",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 2,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0133",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 3,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0134",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 4,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0135",
+      "term": "2026-2027-1",
+      "classNames": [
+        "全校公选"
+      ],
+      "className": "全校公选",
+      "courseId": "",
+      "courseName": "心理健康的理论与AI实践",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 4,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T41"
+    },
+    {
+      "id": "tt_imp1_0136",
+      "term": "2026-2027-1",
+      "classNames": [
+        "网安本2301"
+      ],
+      "className": "网安本2301",
+      "courseId": "",
+      "courseName": "网络空间安全工程综合实训",
+      "labId": "olab_D522",
+      "labName": "D522",
+      "weekday": 5,
+      "periodKey": "eve_ab",
+      "weeks": {
+        "from": 2,
+        "to": 3,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T57"
+    },
+    {
+      "id": "tt_imp1_0137",
+      "term": "2026-2027-1",
+      "classNames": [
+        "通信本2501"
+      ],
+      "className": "通信本2501",
+      "courseId": "",
+      "courseName": "高频电路",
+      "labId": "olab_D525",
+      "labName": "D525",
+      "weekday": 3,
+      "periodKey": "am1",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T45"
+    },
+    {
+      "id": "tt_imp1_0138",
+      "term": "2026-2027-1",
+      "classNames": [
+        "通信本2502"
+      ],
+      "className": "通信本2502",
+      "courseId": "",
+      "courseName": "高频电路",
+      "labId": "olab_D525",
+      "labName": "D525",
+      "weekday": 3,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T45"
+    },
+    {
+      "id": "tt_imp1_0139",
+      "term": "2026-2027-1",
+      "classNames": [
+        "物联本2501"
+      ],
+      "className": "物联本2501",
+      "courseId": "",
+      "courseName": "电路分析基础",
+      "labId": "olab_D526",
+      "labName": "D526",
+      "weekday": 3,
+      "periodKey": "am2",
+      "weeks": {
+        "from": 1,
+        "to": 20,
+        "parity": "all"
+      },
+      "status": "normal",
+      "updatedAt": "2026-09-16T00:00:00+08:00",
+      "teacher": "教师T37"
+    }
+  ]
+}

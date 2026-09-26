@@ -1,0 +1,193 @@
+{
+  "meta": {
+    "format": "labops-agent/snapshot@1",
+    "sourceType": "demo",
+    "sourceLabel": "模拟演示",
+    "generatedAt": "2026-09-26T00:00:00+08:00",
+    "generatedBy": "手工构造的示例数据（非真实、非脱敏）",
+    "note": "当 seed/snapshot.json 不存在时加载本文件，保证空仓库也能跑通链路。房间号刻意使用 DEMO- 前缀，与真实房间号不冲突，避免被误认为真实数据。",
+    "sourceSha256Prefix": null,
+    "includedTables": ["term", "labs", "openLabs", "timetable"],
+    "droppedTables": [],
+    "dropReason": "本文件本就不含任何真实数据",
+    "redaction": {
+      "teacher": "全部为构造值（示例教师甲/乙/丙）",
+      "dropped": ["不存在真实数据"],
+      "keptNote": "全部字段均为构造"
+    },
+    "counts": {
+      "sourceUsers": 0,
+      "sourceTeachersRedacted": 0,
+      "labs": 2,
+      "openLabs": 1,
+      "timetable": 8
+    }
+  },
+  "term": {
+    "term": "演示学期-2026秋",
+    "termStart": "2026-09-07",
+    "holidays": [],
+    "labMismatchPolicy": "warn"
+  },
+  "labs": [
+    {
+      "id": "demo_lab_1",
+      "sortOrder": 1,
+      "name": "DEMO-A101",
+      "location": "演示数据·非真实房间·A区1层",
+      "capacity": 60,
+      "status": "active",
+      "description": "示例实验室（模拟演示数据）"
+    },
+    {
+      "id": "demo_lab_2",
+      "sortOrder": 2,
+      "name": "DEMO-B202",
+      "location": "演示数据·非真实房间·B区2层",
+      "capacity": 40,
+      "status": "active",
+      "description": "示例实验室（模拟演示数据）"
+    }
+  ],
+  "openLabs": [
+    {
+      "id": "demo_olab_1",
+      "sortOrder": 1,
+      "name": "DEMO-OPEN1",
+      "location": "演示数据·非真实房间·C区",
+      "capacity": 30,
+      "status": "closed",
+      "description": "示例开放实验室（模拟演示数据）"
+    }
+  ],
+  "timetable": [
+    {
+      "id": "demo_tt_0001",
+      "term": "演示学期-2026秋",
+      "classNames": ["演示班甲"],
+      "className": "演示班甲",
+      "courseId": "",
+      "courseName": "示例课程·程序设计",
+      "labId": "demo_lab_1",
+      "labName": "DEMO-A101",
+      "weekday": 3,
+      "periodKey": "am1",
+      "weeks": { "from": 1, "to": 20, "parity": "all" },
+      "status": "normal",
+      "updatedAt": "2026-09-07T00:00:00+08:00",
+      "teacher": "示例教师甲"
+    },
+    {
+      "id": "demo_tt_0002",
+      "term": "演示学期-2026秋",
+      "classNames": ["演示班乙"],
+      "className": "演示班乙",
+      "courseId": "",
+      "courseName": "示例课程·数据结构",
+      "labId": "demo_lab_1",
+      "labName": "DEMO-A101",
+      "weekday": 3,
+      "periodKey": "am1",
+      "weeks": { "from": 1, "to": 20, "parity": "all" },
+      "status": "normal",
+      "updatedAt": "2026-09-07T00:00:00+08:00",
+      "teacher": "示例教师乙"
+    },
+    {
+      "id": "demo_tt_0003",
+      "term": "演示学期-2026秋",
+      "classNames": ["演示班甲"],
+      "className": "演示班甲",
+      "courseId": "",
+      "courseName": "示例课程·操作系统",
+      "labId": "demo_lab_1",
+      "labName": "DEMO-A101",
+      "weekday": 3,
+      "periodKey": "pm1",
+      "weeks": { "from": 1, "to": 20, "parity": "all" },
+      "status": "normal",
+      "updatedAt": "2026-09-07T00:00:00+08:00",
+      "teacher": "示例教师丙"
+    },
+    {
+      "id": "demo_tt_0004",
+      "term": "演示学期-2026秋",
+      "classNames": ["演示班丙"],
+      "className": "演示班丙",
+      "courseId": "",
+      "courseName": "示例课程·计算机网络",
+      "labId": "demo_lab_1",
+      "labName": "DEMO-A101",
+      "weekday": 3,
+      "periodKey": "pm2",
+      "weeks": { "from": 1, "to": 20, "parity": "odd" },
+      "status": "normal",
+      "updatedAt": "2026-09-07T00:00:00+08:00",
+      "teacher": "示例教师甲"
+    },
+    {
+      "id": "demo_tt_0005",
+      "term": "演示学期-2026秋",
+      "classNames": ["演示班丁"],
+      "className": "演示班丁",
+      "courseId": "",
+      "courseName": "示例课程·数据库原理",
+      "labId": "demo_lab_1",
+      "labName": "DEMO-A101",
+      "weekday": 1,
+      "periodKey": "am2",
+      "weeks": { "from": 1, "to": 20, "parity": "all" },
+      "status": "normal",
+      "updatedAt": "2026-09-07T00:00:00+08:00",
+      "teacher": "示例教师乙"
+    },
+    {
+      "id": "demo_tt_0006",
+      "term": "演示学期-2026秋",
+      "classNames": ["演示班甲"],
+      "className": "演示班甲",
+      "courseId": "",
+      "courseName": "示例课程·软件工程",
+      "labId": "demo_lab_2",
+      "labName": "DEMO-B202",
+      "weekday": 3,
+      "periodKey": "am2",
+      "weeks": { "from": 1, "to": 20, "parity": "even" },
+      "status": "normal",
+      "updatedAt": "2026-09-07T00:00:00+08:00",
+      "teacher": "示例教师丙"
+    },
+    {
+      "id": "demo_tt_0007",
+      "term": "演示学期-2026秋",
+      "classNames": ["演示班乙", "演示班丙"],
+      "className": "演示班乙",
+      "courseId": "",
+      "courseName": "示例课程·合班实践",
+      "labId": "demo_lab_2",
+      "labName": "DEMO-B202",
+      "weekday": 5,
+      "periodKey": "eve_ab",
+      "weeks": { "from": 4, "to": 18, "parity": "all" },
+      "status": "normal",
+      "updatedAt": "2026-09-07T00:00:00+08:00",
+      "teacher": "示例教师甲"
+    },
+    {
+      "id": "demo_tt_0008",
+      "term": "演示学期-2026秋",
+      "classNames": ["演示班丁"],
+      "className": "演示班丁",
+      "courseId": "",
+      "courseName": "示例课程·人工智能导论",
+      "labId": "demo_lab_2",
+      "labName": "DEMO-B202",
+      "weekday": 5,
+      "periodKey": "eve_cd",
+      "weeks": { "from": 1, "to": 20, "parity": "all" },
+      "status": "normal",
+      "updatedAt": "2026-09-07T00:00:00+08:00",
+      "teacher": "示例教师乙"
+    }
+  ]
+}

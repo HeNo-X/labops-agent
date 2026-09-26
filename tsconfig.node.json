@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023"],
+    "types": ["node"],
+
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "noEmit": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    // Node 22 的原生 TypeScript（type stripping）要求相对导入带显式 .ts 扩展名。
+    // 代价：不能再用 enum / namespace / 参数属性（可擦除语法限制），本项目也没用。
+    // 收益：不需要 tsx/esbuild —— 少两个依赖，也少一类 postinstall 装不上的故障。
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["./shared/*"]
+    }
+  },
+  "include": ["server/**/*.ts", "seed/**/*.ts", "tests/**/*.ts", "shared/**/*.ts"]
+}

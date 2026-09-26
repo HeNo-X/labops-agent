@@ -68,6 +68,8 @@ export interface RunEvent<T extends RunEventType = RunEventType, P = unknown> {
 
 export interface RunStartedPayload {
   runId: string;
+  /** 会话 id（前端生成并持久化）。服务端据此承接上一问的房间/日期指代 */
+  sessionId?: string;
   /** 用户原始问题（原样回显，便于前端渲染用户气泡） */
   question: string;
   engine: EngineType;
@@ -102,21 +104,30 @@ export interface RunStartedPayload {
 
 export interface ToolStartedPayload {
   step: number;
+  /** 本次工具调用的唯一 id。前端按它配对 started/result；step 只是展示序号 */
+  toolCallId: string;
   tool: string;
   args: Record<string, unknown>;
   sourceType: DataSourceType;
 }
 
+/** 结构化结果的类别。前端据此选择渲染器，不再假设所有工具都返回课表 */
+export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms';
+
 export interface ToolResultPayload {
   step: number;
+  /** 与 tool_started 的 toolCallId 一一对应 */
+  toolCallId: string;
   tool: string;
   ok: boolean;
   ms: number;
   sourceType: DataSourceType;
-  /** 给界面看的一句话摘要（人话，不是 JSON） */
+  /** 给界面看的一句话摘要（人话，不是 JSON）。保持一行以内，明细放结构化结果 */
   summary: string;
+  /** 结果类别，决定前端用哪个渲染器 */
+  resultKind?: ToolResultKind;
   /** 结构化结果，前端只接受这一份（绝不插入模型返回的任意 HTML） */
-  result?: ScheduleQueryResult;
+  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult;
   error?: { code: string; message: string };
 }
 
@@ -140,6 +151,93 @@ export interface RunFailedPayload {
   message: string;
   /** 用户可执行的下一步建议 */
   hint?: string;
+}
+
+/**
+ * run_cancelled：用户主动取消。第一阶段仍由**前端合成**（abort 后本地追加），
+ * 服务端预留此类型；接此 payload 时任务必须有确定的取消终态，不得呈现为故障。
+ */
+export interface RunCancelledPayload {
+  /** 取消发生时已运行的时间 */
+  ms: number;
+  message: string;
+}
+
+// ===========================================================================
+//  阶段 2A 新增只读工具的输入与输出
+// ===========================================================================
+
+// ---------- query_lab_status ----------
+
+export interface LabStatusArgs {
+  /** 房间号，如 E310。必填 */
+  labName?: string;
+  /** YYYY-MM-DD，缺省 = 服务端当天（用于附带该日排课统计） */
+  date?: string;
+}
+
+export interface LabStatusResult {
+  labId: string | null;
+  labName: string | null;
+  labLocation: string | null;
+  capacity: number | null;
+  /** active=开放 closed=关闭 inactive=停用/修整 */
+  status: 'active' | 'closed' | 'inactive' | null;
+  statusLabel: string;
+  description: string;
+  /** 所查日期（统计口径） */
+  date: string;
+  weekdayLabel: string;
+  /** 该日排课统计 */
+  schedule: {
+    /** 该日排课条数（已按周次过滤） */
+    lessonCount: number;
+    /** 占用的节次（按时间序） */
+    occupiedPeriods: Array<{ periodKey: PeriodKey; periodLabel: string; startTime: string; endTime: string; courseNames: string[] }>;
+    /** 下一节课（含今天剩余时间内的下一次；无则 null） */
+    nextLesson: { periodLabel: string; startTime: string; courseName: string } | null;
+  };
+  /** 在室人数：永远 null —— 没有数据来源，绝不允许编造 */
+  occupancy: null;
+  term: string;
+  weekNo: number | null;
+  weekDeterminable: boolean;
+  suggestions: string[];
+  notes: string[];
+  provenance: ScheduleQueryResult['provenance'];
+}
+
+// ---------- query_free_rooms ----------
+
+export interface FreeRoomsArgs {
+  /** YYYY-MM-DD，缺省 = 服务端当天 */
+  date?: string;
+  /** 缺省 = 查全天（返回每个节次的空闲名单）；指定则只看该节次 */
+  periodKey?: PeriodKey;
+}
+
+export interface FreeRoomsResult {
+  date: string;
+  weekdayLabel: string;
+  /** null = 未按节次过滤（全天口径） */
+  periodFilter: PeriodKey | null;
+  term: string;
+  weekNo: number | null;
+  weekDeterminable: boolean;
+  /**
+   * 每节次的空闲房间。指定 periodKey 时只有一个元素；
+   * 全天时按节次时间序给出全部六个节次。
+   */
+  freeByPeriod: Array<{
+    periodKey: PeriodKey;
+    periodLabel: string;
+    startTime: string;
+    endTime: string;
+    /** 该节次无排课的房间（含开放状态），按房号排序 */
+    rooms: Array<{ labName: string; location: string | null; status: 'active' | 'closed' | 'inactive' | null; capacity: number | null }>;
+  }>;
+  notes: string[];
+  provenance: ScheduleQueryResult['provenance'];
 }
 
 // ===========================================================================

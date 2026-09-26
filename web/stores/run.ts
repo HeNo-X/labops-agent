@@ -1,15 +1,18 @@
 /**
- * 任务画布状态机 —— 显式状态，不用散落的布尔值（难点 6 对策 2）
+ * 任务状态机 —— 「运行生命周期」与「结果类型」正交拆分（工作台改造 P0 修复）
  * ============================================================================
- *  六个状态覆盖验收表要求：
- *    idle                 初始
- *    running              查询中
- *    success              查询成功
- *    empty                无匹配（房间不存在 / 当天无课 / 该节次无课）
- *    config_insufficient  配置不足（缺学期起始日 / 课表为空 → 结果是有条件的）
- *    error                网络或服务端错误
+ *  runStatus 回答「这次任务还开着吗」：
+ *    idle       初始
+ *    running    已发起、事件流尚未给出终态（输入框锁定与否**只看它**）
+ *    completed  收到 run_completed 且流收尾
+ *    failed     收到 run_failed / 流提前断掉（合成 stream_ended_early）
+ *    cancelled  用户主动取消（中性状态，不是故障）
  *
- *  状态优先级：error > config_insufficient > empty > success
+ *  resultKind 回答「结果长什么样」，只驱动结果区渲染：
+ *    none / schedule_hit / schedule_empty / config_insufficient / lab_status / free_rooms
+ *
+ *  隔离规则：每次 beginRun 生成新的 runId 随请求发送；ingest 丢弃一切
+ *  runId 不等于当前任务的事件 —— 旧流迟到的事件绝不可能污染新任务。
  */
 
 import { defineStore } from 'pinia';
@@ -17,14 +20,18 @@ import { computed, ref } from 'vue';
 import type {
   DataSourceType,
   EngineType,
+  FreeRoomsResult,
+  LabStatusResult,
   RunEvent,
+  ScheduleLesson,
   ScheduleQueryResult,
-  ScheduleLesson
+  ToolResultKind
 } from '@shared/types';
 import { DATA_SOURCE_LABELS, RUN_EVENT_TYPES } from '@shared/types';
 import { PERIODS } from '@shared/periods';
 
-export type RunPhase = 'idle' | 'running' | 'success' | 'empty' | 'config_insufficient' | 'error';
+export type RunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type ResultKind = 'none' | 'schedule_hit' | 'schedule_empty' | 'config_insufficient' | 'lab_status' | 'free_rooms';
 
 export interface Lab {
   id: string;
@@ -38,12 +45,16 @@ export interface Lab {
 
 export interface TraceStep {
   id: string;
-  kind: 'start' | 'tool' | 'answer' | 'done' | 'error';
+  kind: 'start' | 'tool' | 'answer' | 'done' | 'error' | 'cancelled';
   title: string;
   detail: string;
-  status: 'running' | 'done' | 'failed';
+  status: 'running' | 'done' | 'failed' | 'cancelled';
   /** 工具步骤的耗时 */
   ms?: number;
+  /** 工具步骤：调用参数（可展开明细） */
+  argsText?: string;
+  /** 工具步骤：完整摘要（可展开明细；时间线上只显示 detail 一行短结论） */
+  summaryFull?: string;
 }
 
 export interface ServerNowInfo {
@@ -75,26 +86,37 @@ function addDays(dateStr: string, n: number): string {
   return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
 }
 
+function newRunId(): string {
+  const c = globalThis.crypto;
+  if (c && 'randomUUID' in c) return `run-${c.randomUUID()}`;
+  return `run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 /**
- * 由一次查询结果推出界面状态。**唯一判定入口** ——
- * tool_result 与 run_completed 都走这里，避免两处逻辑漂移出不一致的界面。
- * 优先级：config_insufficient（有条件的结论） > empty（无匹配） > success
+ * 由课表查询结果推出 resultKind。**唯一判定入口**，
+ * 优先级：config_insufficient（有条件的结论） > empty（无匹配） > success（命中）。
  */
-function phaseFromResult(r: ScheduleQueryResult): RunPhase {
+function resultKindFromSchedule(r: ScheduleQueryResult): ResultKind {
   if (!r.weekDeterminable || r.reason === 'timetable_empty') return 'config_insufficient';
-  if (r.reason === 'ok') return 'success';
-  return 'empty';
+  if (r.reason === 'ok') return 'schedule_hit';
+  return 'schedule_empty';
 }
 
 export const useRunStore = defineStore('run', () => {
-  // ------------------------------ 运行状态 ------------------------------
-  const phase = ref<RunPhase>('idle');
+  // ------------------------------ 运行生命周期 ------------------------------
+  const runStatus = ref<RunStatus>('idle');
+  /** 输入锁定 = 任务还在跑。只有终态事件 + 流收尾才解锁（P0 修复） */
+  const inputLocked = computed(() => runStatus.value === 'running');
   const question = ref('');
+  /** 当前任务的 runId。前端生成、随请求发送；服务端全部事件回带它 */
   const runId = ref<string | null>(null);
+  const sessionId = ref<string | null>(null);
   const events = ref<RunEvent[]>([]);
   const stream = ref('');
   const error = ref<StreamErrorInfo | null>(null);
   const elapsedMs = ref(0);
+  /** 预留：真实待确认写操作（阶段 2B）。第一阶段恒为 null → ConfirmDock 不渲染 */
+  const pendingConfirm = ref<null>(null);
 
   // ------------------------------ 上下文 ------------------------------
   const engine = ref<EngineType | null>(null);
@@ -105,6 +127,14 @@ export const useRunStore = defineStore('run', () => {
 
   // ------------------------------ 结果 ------------------------------
   const lastResult = ref<ScheduleQueryResult | null>(null);
+  /** 非课表类工具结果（房间状态 / 空闲名单），按 resultKind 分流渲染 */
+  const extraResult = ref<{ kind: ToolResultKind; payload: LabStatusResult | FreeRoomsResult } | null>(null);
+
+  const resultKind = computed<ResultKind>(() => {
+    if (lastResult.value) return resultKindFromSchedule(lastResult.value);
+    if (extraResult.value) return extraResult.value.kind === 'lab_status' ? 'lab_status' : 'free_rooms';
+    return 'none';
+  });
 
   // ------------------------------ 静态概览（/api/state）------------------------------
   const labs = ref<Lab[]>([]);
@@ -123,32 +153,15 @@ export const useRunStore = defineStore('run', () => {
   const overviewSourceLabel = computed(() =>
     overviewSourceType.value ? DATA_SOURCE_LABELS[overviewSourceType.value] : '未知来源'
   );
-  const engineLabel = computed(() =>
-    engine.value === 'agnes' ? 'Agnes 3.0 Flash' : engine.value === 'demo' ? '演示引擎（服务端规则）' : '—'
-  );
 
   /** 一次任务都没跑过时，用服务端上报的引擎；跑过之后以本题实际用的引擎为准 */
   const activeEngine = computed<EngineType | null>(() => engine.value ?? overviewEngine.value);
-
-  /** 数据来源的说明文案。绝不把脱敏快照/模拟演示说成实时数据。 */
-  const sourceCaveat = computed(() => {
-    switch (sourceType.value) {
-      case 'live':
-        return '实时数据：直接读取当前真实 state.json';
-      case 'snapshot':
-        return '脱敏快照：从真实数据导出后已脱敏，非实时';
-      case 'demo':
-        return '模拟演示：内置示例数据，与真实实验室无关';
-      default:
-        return '—';
-    }
-  });
 
   const lessons = computed<ScheduleLesson[]>(() => lastResult.value?.lessons ?? []);
 
   const allRooms = computed<Lab[]>(() => [...labs.value, ...openLabs.value]);
 
-  /** 按「楼宇 → 楼层」分组，用于编号矩阵。location 形如「文渊E区3层E310」。 */
+  /** 按「楼宇 → 楼层」分组，用于房间清单。location 形如「文渊E区3层E310」。 */
   const labGroups = computed(() => {
     const groups = new Map<string, { key: string; building: string; floor: string; rooms: Lab[] }>();
     for (const lab of allRooms.value) {
@@ -177,16 +190,23 @@ export const useRunStore = defineStore('run', () => {
     const d = demoDate.value;
     const list: string[] = [];
     if (d) list.push(`${room} ${d} 有哪些课？`);
-    list.push(`${room} 今天有哪些课？`);
-    list.push(`下周三 ${other} 有哪些课？`);
-    list.push(`${room} 下午第二大节有哪些课？`);
+    list.push(`${other} 现在开放吗？`);
+    list.push(`明天下午第二大节哪些实验室空着？`);
+    list.push(`那 ${other} 呢？`);
     return list;
   });
 
-  /** 任务轨迹：把事件流折叠成可读步骤（不展示任何内部推理） */
+  /**
+   * 任务轨迹：把事件流折叠成可读步骤（不展示任何内部推理）。
+   * 工具卡按 toolCallId 配对（step 只是展示序号）；时间线只放**一行短摘要**，
+   * 参数与完整摘要进可展开明细。终态事件会关闭"正在生成回答"步骤 ——
+   * 时间线任何时刻只允许一个确定的终态。
+   */
   const trace = computed<TraceStep[]>(() => {
     const steps: TraceStep[] = [];
     const toolIndex = new Map<string, number>();
+    let answerIdx: number | null = null;
+    let terminalSeen = false;
 
     for (const ev of events.value) {
       switch (ev.type) {
@@ -195,7 +215,6 @@ export const useRunStore = defineStore('run', () => {
             engine: EngineType;
             sourceType: DataSourceType;
             serverNow: ServerNowInfo;
-            resolvedTimeHint: { raw: string | null; date: string | null; source: string };
             term: TermInfo;
           };
           steps.push({
@@ -210,17 +229,18 @@ export const useRunStore = defineStore('run', () => {
           break;
         }
         case 'tool_started': {
-          const p = ev.payload as { tool: string; args: Record<string, unknown>; step: number };
-          const args = Object.entries(p.args)
+          const p = ev.payload as { tool: string; toolCallId: string; args: Record<string, unknown>; step: number };
+          const args = Object.entries(p.args ?? {})
             .filter(([, v]) => v !== undefined && v !== null && v !== '')
             .map(([k, v]) => `${k}=${String(v)}`)
-            .join(', ');
-          toolIndex.set(`${p.step}`, steps.length);
+            .join('，');
+          toolIndex.set(p.toolCallId ?? String(p.step), steps.length);
           steps.push({
             id: `s${ev.seq}`,
             kind: 'tool',
-            title: '正在查询课表',
-            detail: `调用只读工具 ${p.tool}(${args || '无参数'})`,
+            title: toolTitle(p.tool),
+            detail: `调用只读工具 ${p.tool}${args ? `（${args}）` : ''}`,
+            argsText: args || '（无参数）',
             status: 'running'
           });
           break;
@@ -228,35 +248,42 @@ export const useRunStore = defineStore('run', () => {
         case 'tool_result': {
           const p = ev.payload as {
             tool: string;
+            toolCallId: string;
             ok: boolean;
             ms: number;
             summary: string;
             step: number;
             error?: { code: string; message: string };
           };
-          const at = toolIndex.get(`${p.step}`);
           const step: TraceStep = {
             id: `s${ev.seq}`,
             kind: 'tool',
-            title: p.ok ? '已获得结果' : '查询未成功',
+            title: p.ok ? toolTitle(p.tool) : '查询未成功',
             detail: p.ok ? p.summary : `${p.error?.code ?? 'error'}：${p.error?.message ?? ''}`,
+            summaryFull: p.ok ? p.summary : undefined,
             status: p.ok ? 'done' : 'failed',
             ms: p.ms
           };
+          const at = toolIndex.get(p.toolCallId ?? String(p.step));
           if (at !== undefined && steps[at]) steps[at] = step;
           else steps.push(step);
           break;
         }
         case 'answer_delta': {
-          const last = steps[steps.length - 1];
-          if (last && last.kind === 'answer') {
-            last.detail = `已生成 ${stream.value.length} 字`;
+          if (answerIdx !== null && steps[answerIdx]) {
+            steps[answerIdx]!.detail = `已生成 ${stream.value.length} 字`;
           } else {
             steps.push({ id: `s${ev.seq}`, kind: 'answer', title: '正在生成回答', detail: '', status: 'running' });
+            answerIdx = steps.length - 1;
           }
           break;
         }
         case 'run_completed': {
+          terminalSeen = true;
+          if (answerIdx !== null && steps[answerIdx]?.status === 'running') {
+            steps[answerIdx] = { ...steps[answerIdx]!, status: 'done', detail: `回答完成（${stream.value.length} 字）` };
+            answerIdx = null;
+          }
           const p = ev.payload as { steps: number; toolCalls: number; ms: number };
           steps.push({
             id: `s${ev.seq}`,
@@ -268,6 +295,11 @@ export const useRunStore = defineStore('run', () => {
           break;
         }
         case 'run_failed': {
+          terminalSeen = true;
+          if (answerIdx !== null && steps[answerIdx]?.status === 'running') {
+            steps[answerIdx] = { ...steps[answerIdx]!, status: 'failed' };
+            answerIdx = null;
+          }
           const p = ev.payload as { code: string; message: string; hint?: string };
           steps.push({
             id: `s${ev.seq}`,
@@ -278,12 +310,45 @@ export const useRunStore = defineStore('run', () => {
           });
           break;
         }
+        case 'run_cancelled': {
+          terminalSeen = true;
+          if (answerIdx !== null && steps[answerIdx]?.status === 'running') {
+            steps[answerIdx] = { ...steps[answerIdx]!, status: 'cancelled' };
+            answerIdx = null;
+          }
+          const p = ev.payload as { ms: number; message: string };
+          steps.push({
+            id: `s${ev.seq}`,
+            kind: 'cancelled',
+            title: '任务已取消',
+            detail: `${p.message}（已运行 ${(p.ms / 1000).toFixed(1)} 秒）`,
+            status: 'cancelled'
+          });
+          break;
+        }
         default:
           break;
       }
     }
+    // 流收尾仍未见终态事件：答案步骤不可能再推进，置为失败避免"永远进行中"
+    if (!terminalSeen) {
+      for (const s of steps) if (s.kind === 'answer' && s.status === 'running') s.status = 'failed';
+    }
     return steps;
   });
+
+  function toolTitle(tool: string): string {
+    switch (tool) {
+      case 'query_schedule':
+        return '查询课表';
+      case 'query_lab_status':
+        return '查询房间状态';
+      case 'query_free_rooms':
+        return '查找空闲房间';
+      default:
+        return `执行 ${tool}`;
+    }
+  }
 
   const periodSummary = computed(() =>
     PERIODS.map((p) => {
@@ -296,8 +361,41 @@ export const useRunStore = defineStore('run', () => {
 
   let timer: number | null = null;
 
+  function stopTimer(): void {
+    if (timer !== null) {
+      window.clearInterval(timer);
+      timer = null;
+    }
+  }
+
+  function ensureSessionId(): string {
+    if (!sessionId.value) {
+      const c = globalThis.crypto;
+      sessionId.value = c && 'randomUUID' in c ? c.randomUUID() : `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+      try {
+        const saved = localStorage.getItem('labops.sessionId');
+        if (saved) sessionId.value = saved;
+        else localStorage.setItem('labops.sessionId', sessionId.value);
+      } catch {
+        /* 隐私模式拿不到 localStorage 就用内存会话 */
+      }
+    }
+    return sessionId.value;
+  }
+
+  function newSession(): void {
+    sessionId.value = null;
+    try {
+      localStorage.removeItem('labops.sessionId');
+    } catch {
+      /* 忽略 */
+    }
+    resetRun();
+    ensureSessionId();
+  }
+
   function resetRun(): void {
-    phase.value = 'idle';
+    runStatus.value = 'idle';
     question.value = '';
     runId.value = null;
     events.value = [];
@@ -310,21 +408,30 @@ export const useRunStore = defineStore('run', () => {
     term.value = null;
     allowedTools.value = [];
     lastResult.value = null;
+    extraResult.value = null;
   }
 
   function beginRun(q: string): void {
     resetRun();
     question.value = q;
-    phase.value = 'running';
+    runId.value = newRunId();
+    runStatus.value = 'running';
+    ensureSessionId();
     const t0 = Date.now();
-    if (timer !== null) window.clearInterval(timer);
+    stopTimer();
     timer = window.setInterval(() => {
       elapsedMs.value = Date.now() - t0;
     }, 100);
   }
 
-  function ingest(ev: RunEvent): void {
+  function appendEvent(ev: RunEvent): void {
     events.value = [...events.value, ev];
+  }
+
+  /** 事件入口：runId 不匹配的一律丢弃（旧任务迟到事件不得污染新任务） */
+  function ingest(ev: RunEvent): void {
+    if (runId.value && ev.runId !== runId.value) return;
+    appendEvent(ev);
     switch (ev.type) {
       case 'run_started': {
         const p = ev.payload as {
@@ -335,7 +442,6 @@ export const useRunStore = defineStore('run', () => {
           term: TermInfo;
           allowedTools: string[];
         };
-        runId.value = p.runId;
         engine.value = p.engine;
         sourceType.value = p.sourceType;
         serverNow.value = p.serverNow;
@@ -344,21 +450,25 @@ export const useRunStore = defineStore('run', () => {
         break;
       }
       case 'tool_result': {
-        const p = ev.payload as { ok: boolean; result?: ScheduleQueryResult };
-        if (p.result) {
-          lastResult.value = p.result;
-          phase.value = phaseFromResult(p.result);
+        const p = ev.payload as {
+          ok: boolean;
+          resultKind?: ToolResultKind;
+          result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult;
+        };
+        if (!p.result) break;
+        if (p.resultKind === 'lab_status') {
+          extraResult.value = { kind: 'lab_status', payload: p.result as LabStatusResult };
+        } else if (p.resultKind === 'free_rooms') {
+          extraResult.value = { kind: 'free_rooms', payload: p.result as FreeRoomsResult };
+        } else {
+          lastResult.value = p.result as ScheduleQueryResult;
         }
+        // ★ 注意：这里**不改 runStatus** —— 工具结果只是中间产物，
+        //   输入框要等 run_completed / run_failed / run_cancelled + 流收尾才解锁。
         break;
       }
       case 'run_completed': {
-        // ★ 真 bug 修复：不调工具的路径（越界问题、能力外问题、演示引擎直接作答）
-        //   永远不会产生 tool_result，如果只靠 tool_result 推进状态机，
-        //   phase 会永远停在 'running'，界面一直转圈、轨迹一直显示"查询中"。
-        //   所以 run_completed 必须兜底推进状态。
-        if (phase.value === 'running') {
-          phase.value = lastResult.value ? phaseFromResult(lastResult.value) : 'success';
-        }
+        if (runStatus.value === 'running') runStatus.value = 'completed';
         break;
       }
       case 'answer_delta': {
@@ -369,7 +479,7 @@ export const useRunStore = defineStore('run', () => {
       case 'run_failed': {
         const p = ev.payload as StreamErrorInfo;
         error.value = p;
-        phase.value = 'error';
+        runStatus.value = 'failed';
         break;
       }
       default:
@@ -377,31 +487,49 @@ export const useRunStore = defineStore('run', () => {
     }
   }
 
+  /** 服务端/网络层报错（非业务终态事件） */
   function failRun(err: StreamErrorInfo): void {
+    // 用户主动取消由 cancelRun 呈现，不走失败
+    if (err.code === 'run_cancelled') {
+      cancelRun(err.message);
+      return;
+    }
     error.value = err;
-    phase.value = 'error';
-    const synthetic: RunEvent = {
+    runStatus.value = 'failed';
+    appendEvent({
       seq: 100000 + events.value.length,
       v: 1,
       runId: runId.value ?? 'local',
       type: 'run_failed',
       ts: new Date().toISOString(),
       payload: err
-    };
-    events.value = [...events.value, synthetic];
+    });
   }
 
+  /** 用户主动取消：中性终态，不是故障 */
+  function cancelRun(message = '你取消了本次任务。'): void {
+    if (runStatus.value !== 'running') return;
+    stopTimer();
+    runStatus.value = 'cancelled';
+    appendEvent({
+      seq: 100000 + events.value.length,
+      v: 1,
+      runId: runId.value ?? 'local',
+      type: 'run_cancelled',
+      ts: new Date().toISOString(),
+      payload: { ms: elapsedMs.value, message }
+    });
+  }
+
+  /** 事件流收尾。若没有收到任何终态事件 → 合成失败，绝不留下"永远在跑"的任务 */
   function finishRun(): void {
-    if (timer !== null) {
-      window.clearInterval(timer);
-      timer = null;
-    }
-    if (phase.value === 'running') {
-      // 流正常结束但没拿到 run_completed（例如服务端异常中断）
-      if (!events.value.some((e) => e.type === 'run_completed')) {
+    stopTimer();
+    if (runStatus.value === 'running') {
+      const hasTerminal = events.value.some(
+        (e) => e.type === 'run_completed' || e.type === 'run_failed' || e.type === 'run_cancelled'
+      );
+      if (!hasTerminal) {
         failRun({ code: 'stream_ended_early', message: '事件流提前结束，未收到完成事件。请重试。' });
-      } else {
-        phase.value = lastResult.value ? phaseFromResult(lastResult.value) : 'success';
       }
     }
   }
@@ -435,9 +563,11 @@ export const useRunStore = defineStore('run', () => {
 
   return {
     // state
-    phase,
+    runStatus,
+    inputLocked,
     question,
     runId,
+    sessionId,
     events,
     stream,
     error,
@@ -448,6 +578,9 @@ export const useRunStore = defineStore('run', () => {
     term,
     allowedTools,
     lastResult,
+    extraResult,
+    resultKind,
+    pendingConfirm,
     labs,
     openLabs,
     overviewSourceType,
@@ -460,9 +593,7 @@ export const useRunStore = defineStore('run', () => {
     // derived
     sourceLabel,
     overviewSourceLabel,
-    engineLabel,
     activeEngine,
-    sourceCaveat,
     lessons,
     allRooms,
     labGroups,
@@ -475,7 +606,9 @@ export const useRunStore = defineStore('run', () => {
     beginRun,
     ingest,
     failRun,
+    cancelRun,
     finishRun,
+    newSession,
     loadOverview,
     RUN_EVENT_TYPES
   };

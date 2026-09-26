@@ -21,11 +21,11 @@ interface RunEvent {
   payload: Record<string, unknown>;
 }
 
-async function chat(message: string): Promise<RunEvent[]> {
+async function chat(message: string, opts: { runId?: string; sessionId?: string } = {}): Promise<RunEvent[]> {
   const res = await fetch(`${BASE}/api/agent/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message })
+    body: JSON.stringify({ message, ...(opts.runId ? { runId: opts.runId } : {}), ...(opts.sessionId ? { sessionId: opts.sessionId } : {}) })
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
   if (!res.body) throw new Error('空响应体');
@@ -256,6 +256,48 @@ async function main(): Promise<void> {
     assert(`第 4 周（双周）am2 无课`, countOf(r4, 'am2') === 0, `am2=${countOf(r4, 'am2')}`);
     assert(`第 5 周（单周）am2 有课（计工本2501/2502 计算机组成原理）`, countOf(r5, 'am2') === 2, `am2=${countOf(r5, 'am2')}`);
     assert('两周的课表条数不同（证明单双周真的在起作用）', ((r4?.['lessons'] as unknown[]) ?? []).length !== ((r5?.['lessons'] as unknown[]) ?? []).length, `第4周 ${((r4?.['lessons'] as unknown[]) ?? []).length} 条 vs 第5周 ${((r5?.['lessons'] as unknown[]) ?? []).length} 条`);
+  }
+
+  // ================================================================= 用例 8
+  console.log('\n[用例 8] 阶段 2A —— toolCallId 契约 / 新只读工具 / 会话承接');
+  {
+    // ① toolCallId：started 与 result 一一对应
+    const evA = await chat(`E310 ${DEMO_DATE} 有哪些课？`);
+    const ts = ev1(evA, 'tool_started');
+    const trs = ev1(evA, 'tool_result');
+    assert(
+      'tool_started / tool_result 带相同 toolCallId',
+      typeof ts?.payload['toolCallId'] === 'string' && ts?.payload['toolCallId'] === trs?.payload['toolCallId'],
+      `${String(ts?.payload['toolCallId'])} vs ${String(trs?.payload['toolCallId'])}`
+    );
+
+    // ② 找空闲房间（明天下午第二大节）
+    const tomorrow = addDays(today, 1);
+    const evB = await chat('明天下午第二大节哪些实验室空着？');
+    const rb = resultOf(evB) as Record<string, unknown> | undefined;
+    assert('query_free_rooms 被调用且返回结构化结果', rb?.['freeByPeriod'] !== undefined, `tool=${String(ev1(evB, 'tool_result')?.payload['tool'])}`);
+    assert('query_free_rooms 解析出明天 + pm2', rb?.['date'] === tomorrow && rb?.['periodFilter'] === 'pm2', `date=${String(rb?.['date'])} period=${String(rb?.['periodFilter'])}`);
+    const answerB = answerOf(evB);
+    assert('空闲口径如实声明（不代表室内无人）', answerB.includes('不代表室内无人'), answerB.split('\n')[0] ?? '');
+
+    // ③ 房间状态（在室人数必须明说未知）
+    const evC = await chat('E310 现在开放吗？');
+    const rc = resultOf(evC) as Record<string, unknown> | undefined;
+    assert('query_lab_status 被调用且 occupancy=null', rc?.['labName'] === 'E310' && rc?.['occupancy'] === null, `status=${String(rc?.['status'])}`);
+    assert('在室人数回答"未知"且不编数', /未知|无法提供/.test(answerOf(evC)), answerOf(evC).split('\n').slice(-2).join(' / '));
+
+    // ④ 会话承接：「那 E312 呢？」沿用上一问的日期；换 sessionId 不承接
+    const sidA = `acc-${today}-a`;
+    await chat(`E310 ${DEMO_DATE} 有哪些课？`, { sessionId: sidA });
+    const evD = await chat('那 E312 呢？', { sessionId: sidA });
+    const argsD = ev1(evD, 'tool_started')?.payload as Record<string, unknown> | undefined;
+    const rd = resultOf(evD);
+    assert('追问「那 E312 呢？」命中 E312', argsD?.['tool'] === 'query_schedule' && argsD?.['args'] !== undefined && String((argsD['args'] as Record<string, unknown>)['labName']) === 'E312', JSON.stringify(argsD?.['args'] ?? {}));
+    assert('追问日期沿用上一问 2026-09-30', rd?.['date'] === DEMO_DATE, `date=${String(rd?.['date'])}`);
+
+    const evE = await chat('那 D501 呢？', { sessionId: `acc-${today}-b` });
+    const re = resultOf(evE);
+    assert('换 sessionId 不承接（日期回落到服务端当天）', re?.['date'] === today, `date=${String(re?.['date'])}`);
   }
 
   // ================================================================= 汇总

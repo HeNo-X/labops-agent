@@ -36,13 +36,19 @@ import { executeTool, toolSpecs } from '../tools/registry.ts';
 import { availableRoomNames } from '../tools/query-schedule.ts';
 import { buildTimeContext, parseIntent } from './intent.ts';
 import type { Intent } from './intent.ts';
+import { getSession, rememberSession } from './session.ts';
 import { planDemo, renderDemoAnswer, runDemoTool } from './demo-engine.ts';
 import { PROMPT_VERSION, buildSystemPrompt, detectInjection, sanitizeInput } from './prompts.ts';
+import type { ScheduleQueryResult } from '../../shared/types.ts';
 
 export interface RunInput {
   question: string;
   /** 不传则自动生成 */
   runId?: string;
+  /** 会话 id：服务端据此承接该会话上一问的房间/日期指代 */
+  sessionId?: string;
+  /** 客户端断开时置位：模型请求与流式输出随即停止，不再产生新事件 */
+  signal?: AbortSignal;
 }
 
 function nowIso(): string {
@@ -83,6 +89,31 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
   const sourceType: DataSourceType = ds.sourceType;
   const engine: EngineType = isAgnesConfigured() ? 'agnes' : 'demo';
   const intent: Intent = parseIntent(question, now);
+
+  // ---- 会话承接（阶段 2A）：缺房间/日期时显式沿用上一问，且必须留痕 ----
+  const sess = getSession(input.sessionId);
+  if (sess) {
+    if (!intent.labName && sess.labName) {
+      intent.labName = sess.labName;
+      intent.notes.push(`未识别到房间号，沿用上一问的 ${sess.labName}`);
+    }
+    if (!intent.date && sess.date) {
+      intent.date = {
+        date: sess.date,
+        raw: '（沿用上一问）',
+        source: `本轮未识别到日期指代，沿用上一问的 ${sess.date}`
+      };
+      intent.notes.push(`未识别到日期指代，沿用上一问的 ${sess.date}`);
+    }
+    // 注意：节次（periodKey）不沿用 —— 节次过滤过强容易把"换个房间再问"变成"查不到"，宁缺勿错
+  }
+  rememberSession(input.sessionId, {
+    labName: intent.labName ?? sess?.labName ?? null,
+    date: intent.date?.date ?? sess?.date ?? null,
+    periodKey: intent.periodKey ?? sess?.periodKey ?? null,
+    question
+  });
+
   const week = describeWeek(intent.date?.date ?? now.date, ds.term);
   const toolListText =
     '【可用工具】\n' +
@@ -95,6 +126,7 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
 
   yield emit('run_started', {
     runId,
+    ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     question,
     engine,
     sourceType,
@@ -122,8 +154,9 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
   } satisfies RunStartedPayload);
 
   try {
+    if (input.signal?.aborted) return;
     if (engine === 'demo') {
-      yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType });
+      yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal });
     } else {
       yield* runAgnesEngine({
         question,
@@ -135,12 +168,15 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
         runId,
         watch,
         sourceType,
+        signal: input.signal,
         week,
         toolListText,
         injectionSuspected
       });
     }
   } catch (err) {
+    // 客户端主动断开不算故障：流被上层 abort 收尾即可，不必再补 run_failed
+    if (input.signal?.aborted) return;
     const failed = toRunFailed(err, cfg.agent.wallClockMs);
     log.error('run_failed', { code: failed.code, message: failed.message, ms: watch.ms });
     yield emit('run_failed', failed);
@@ -166,6 +202,7 @@ interface DemoArgs {
   runId: string;
   watch: Stopwatch;
   sourceType: DataSourceType;
+  signal?: AbortSignal;
 }
 
 async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
@@ -174,7 +211,7 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
 
   if (!plan.callTool) {
     const text = (plan.directReply ?? '我无法处理这个问题。') + renderDisclosure(plan.needsDisclosure, true);
-    yield* streamText(text, a.emit);
+    yield* streamText(text, a.emit, a.signal);
     yield a.emit('run_completed', {
       answer: text,
       steps: 0,
@@ -186,22 +223,25 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
     return;
   }
 
-  // ---- 调工具（与 Agnes 引擎共用同一实现）----
+  // ---- 调工具（与 Agnes 引擎共用同一注册表实现）----
+  const toolCallId = 'tc1_1';
   yield a.emit('tool_started', {
     step: 1,
-    tool: 'query_schedule',
-    args: plan.args as unknown as Record<string, unknown>,
+    toolCallId,
+    tool: plan.tool,
+    args: plan.args,
     sourceType: a.sourceType
   } satisfies ToolStartedPayload);
 
   const t0 = Date.now();
-  const exec = runDemoTool(plan.args, a.ds, a.now);
+  const exec = runDemoTool(plan.tool, plan.args, a.ds, a.now);
   const ms = Date.now() - t0;
 
   if (!exec.ok) {
     yield a.emit('tool_result', {
       step: 1,
-      tool: 'query_schedule',
+      toolCallId,
+      tool: plan.tool,
       ok: false,
       ms,
       sourceType: a.sourceType,
@@ -211,24 +251,31 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
   } else {
     yield a.emit('tool_result', {
       step: 1,
-      tool: 'query_schedule',
+      toolCallId,
+      tool: plan.tool,
       ok: true,
       ms,
       sourceType: a.sourceType,
+      resultKind: exec.resultKind,
       summary: exec.summary,
       result: exec.result
     } satisfies ToolResultPayload);
   }
 
   const answer = exec.ok
-    ? renderDemoAnswer(exec.result, {
-        dateWasDefaulted: !a.intent.date,
-        periodFiltered: Boolean(a.intent.periodKey)
-      })
+    ? exec.resultKind === 'schedule'
+      ? renderDemoAnswer(exec.result as ScheduleQueryResult, {
+          dateWasDefaulted: !a.intent.date,
+          periodFiltered: Boolean(a.intent.periodKey)
+        })
+      : renderDemoAnswer({ kind: exec.resultKind, payload: exec.result }, {
+          dateWasDefaulted: false,
+          periodFiltered: Boolean(a.intent.periodKey)
+        })
     : `${exec.message}${exec.suggestions.length ? `\n可选房间号：${exec.suggestions.join('、')}` : ''}`;
 
   const full = answer + renderDisclosure(plan.needsDisclosure, false);
-  yield* streamText(full, a.emit);
+  yield* streamText(full, a.emit, a.signal);
 
   yield a.emit('run_completed', {
     answer: full,
@@ -249,14 +296,16 @@ function renderDisclosure(extra: string[], short: boolean): string {
   return base + tail;
 }
 
-/** 把文本切块成 answer_delta —— 顺带真实检验前端的 UTF-8 分块拼接 */
+/** 把文本切块成 answer_delta —— 顺带真实检验前端的 UTF-8 分块拼接；abort 后立即停止 */
 async function* streamText(
   text: string,
-  emit: <T extends RunEventType, P>(type: T, payload: P) => RunEvent<T, P>
+  emit: <T extends RunEventType, P>(type: T, payload: P) => RunEvent<T, P>,
+  signal?: AbortSignal
 ): AsyncGenerator<RunEvent> {
   const CHUNK = 24;
   const chars = [...text];
   for (let i = 0; i < chars.length; i += CHUNK) {
+    if (signal?.aborted) return;
     const piece = chars.slice(i, i + CHUNK).join('');
     yield emit('answer_delta', { text: piece } satisfies AnswerDeltaPayload);
     await new Promise((r) => setTimeout(r, 10));
@@ -293,9 +342,11 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   let answer = '';
   let usage: TokenUsage | null = null;
   let lastToolSummary: string | null = null;
+  /** 指纹 = 工具名 + 排序后的规范化参数；在**执行前**检查（写工具接入后防重复执行） */
   const seenCalls = new Map<string, number>();
 
   while (steps < cfg.agent.maxSteps) {
+    if (a.signal?.aborted) return;
     if (a.watch.ms > cfg.agent.wallClockMs) {
       a.log.warn('wall_clock_exceeded', { steps, ms: a.watch.ms });
       answer += (answer ? '\n\n' : '') + `（已达单次任务时间上限 ${cfg.agent.wallClockMs} ms，以下为已获得的结果。）`;
@@ -306,7 +357,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     let roundText = '';
     let calls: ChatMessage['tool_calls'] = undefined;
 
-    for await (const ev of streamChat({ messages, tools: toolSpecs() }, a.log)) {
+    for await (const ev of streamChat({ messages, tools: toolSpecs(), signal: a.signal }, a.log)) {
       if (ev.type === 'text') {
         roundText += ev.text;
         answer += ev.text;
@@ -326,7 +377,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
       tool_calls: calls
     });
 
-    for (const call of calls) {
+    for (let ci = 0; ci < calls.length; ci++) {
+      const call = calls[ci]!;
       const name = call.function.name;
       let rawArgs: Record<string, unknown> = {};
       try {
@@ -345,12 +397,47 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
         continue;
       }
 
-      const fp = `${name}::${JSON.stringify(rawArgs)}`;
-      const seen = (seenCalls.get(fnKey(rawArgs)) ?? 0) + 1;
-      seenCalls.set(fnKey(rawArgs), seen);
+      // 停止条件④：重复检测在**执行之前**（指纹含工具名）。
+      // 命中即拦截：不执行、不发 tool_started，只回 tool 消息与一条可观察的拦截记录。
+      const dupKey = `${name}::${fnKey(rawArgs)}`;
+      const seen = (seenCalls.get(dupKey) ?? 0) + 1;
+      seenCalls.set(dupKey, seen);
+      if (seen >= 2) {
+        a.log.warn('duplicate_tool_call', { tool: name, args: rawArgs, seen });
+        const toolCallId = call.id || `tc${steps}_${ci + 1}`;
+        messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          content: JSON.stringify({
+            ok: false,
+            code: 'duplicate_call_blocked',
+            message: '重复调用已拦截：同样的工具与参数已经执行过。请直接依据已有结果回答用户，不要再调用工具。'
+          })
+        });
+        yield a.emit('tool_result', {
+          step: steps,
+          toolCallId,
+          tool: name,
+          ok: false,
+          ms: 0,
+          sourceType: a.sourceType,
+          summary: '重复调用已拦截（同工具+同参数已执行过），依据已有结果作答',
+          error: { code: 'duplicate_call_blocked', message: '同样的工具与参数已经执行过，未重复执行' }
+        } satisfies ToolResultPayload);
+        messages.push({
+          role: 'system',
+          content: '检测到你重复调用了同一个工具且参数相同。请立即停止调用工具，直接依据已有结果回答用户。'
+        });
+        steps = cfg.agent.maxSteps; // 逼出循环
+        break;
+      }
 
+      if (a.signal?.aborted) return;
+
+      const toolCallId = call.id || `tc${steps}_${ci + 1}`;
       yield a.emit('tool_started', {
         step: steps,
+        toolCallId,
         tool: name,
         args: rawArgs,
         sourceType: a.sourceType
@@ -365,10 +452,12 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
         lastToolSummary = exec.summary;
         yield a.emit('tool_result', {
           step: steps,
+          toolCallId,
           tool: name,
           ok: true,
           ms,
           sourceType: a.sourceType,
+          resultKind: exec.resultKind,
           summary: exec.summary,
           result: exec.result
         } satisfies ToolResultPayload);
@@ -386,6 +475,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
       } else {
         yield a.emit('tool_result', {
           step: steps,
+          toolCallId,
           tool: name,
           ok: false,
           ms,
@@ -410,18 +500,6 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
           })
         });
       }
-
-      // 停止条件④：重复调用检测
-      if (seen >= 2) {
-        a.log.warn('duplicate_tool_call', { tool: name, args: rawArgs, seen });
-        messages.push({
-          role: 'system',
-          content: '检测到你重复调用了同一个工具且参数相同。请立即停止调用工具，直接依据已有结果回答用户。'
-        });
-        steps = cfg.agent.maxSteps; // 逼出循环
-        break;
-      }
-      void fp;
     }
   }
 
@@ -431,7 +509,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
       role: 'system',
       content: '已达到本次任务的工具调用上限。请不要再调用工具，直接依据已有结果给用户一个结论；信息不足就明确说信息不足。'
     });
-    for await (const ev of streamChat({ messages, tools: undefined }, a.log)) {
+    for await (const ev of streamChat({ messages, tools: undefined, signal: a.signal }, a.log)) {
       if (ev.type === 'text') {
         answer += ev.text;
         yield a.emit('answer_delta', { text: ev.text } satisfies AnswerDeltaPayload);
@@ -446,7 +524,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     answer = lastToolSummary
       ? `（模型未返回文本，以下为工具查询到的原始摘要）\n${lastToolSummary}`
       : '本次没有得到有效结果。请换一种问法，例如「E310 2026-09-30 有哪些课？」。';
-    yield* streamText(answer, a.emit);
+    yield* streamText(answer, a.emit, a.signal);
   }
 
   // 数据来源一致性检查（便宜但有效的反幻觉护栏）
@@ -477,7 +555,9 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   } satisfies RunCompletedPayload);
 }
 
-/** 忽略参数顺序的指纹（用排序后的键构造，避免 {a,b} 与 {b,a} 被判成两次不同调用） */
+/** 忽略参数顺序的指纹（用排序后的键构造，避免 {a,b} 与 {b,a} 被判成两次不同调用）。
+ *  注意：指纹**必须**包含工具名（由调用方拼接 `${name}::${fnKey(args)}`）——
+ *  不同工具给相同参数不是重复调用。 */
 function fnKey(args: Record<string, unknown>): string {
   return JSON.stringify(Object.keys(args).sort().map((k) => [k, args[k]]));
 }

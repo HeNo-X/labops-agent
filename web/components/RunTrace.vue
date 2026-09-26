@@ -17,12 +17,14 @@ const store = useRunStore();
 function toneOf(s: TraceStep): Tone {
   if (s.status === 'failed') return 'danger';
   if (s.status === 'running') return 'info';
+  if (s.status === 'cancelled') return 'neutral';
   return 'ok';
 }
 
 function glyphOf(s: TraceStep): string {
   if (s.status === 'failed') return '✕';
   if (s.status === 'running') return '◌';
+  if (s.status === 'cancelled') return '⏹';
   if (s.kind === 'done') return '✓';
   if (s.kind === 'tool') return '▣';
   return '✓';
@@ -31,6 +33,7 @@ function glyphOf(s: TraceStep): string {
 function labelOf(s: TraceStep): string {
   if (s.status === 'failed') return '失败';
   if (s.status === 'running') return '进行中';
+  if (s.status === 'cancelled') return '已取消';
   return '完成';
 }
 </script>
@@ -52,6 +55,11 @@ function labelOf(s: TraceStep): string {
             <span v-if="s.ms !== undefined" class="step__ms">{{ s.ms }} ms</span>
           </div>
           <p v-if="s.detail" class="step__detail">{{ s.detail }}</p>
+          <details v-if="s.argsText || s.summaryFull" class="step__more">
+            <summary>调用参数与完整摘要</summary>
+            <p v-if="s.argsText" class="step__mono">参数：{{ s.argsText }}</p>
+            <p v-if="s.summaryFull" class="step__mono">摘要：{{ s.summaryFull }}</p>
+          </details>
         </div>
       </li>
     </ol>
@@ -60,7 +68,7 @@ function labelOf(s: TraceStep): string {
       还没有任务。在下方命令栏输入一句话开始，例如「{{ store.exampleQuestions[0] }}」。
     </p>
 
-    <p v-if="store.phase === 'running'" class="trace__timer" aria-live="polite">
+    <p v-if="store.runStatus === 'running'" class="trace__timer" aria-live="polite">
       已用时 {{ (store.elapsedMs / 1000).toFixed(1) }} 秒…
     </p>
   </section>
@@ -178,6 +186,28 @@ function labelOf(s: TraceStep): string {
   font-size: 12px;
   color: var(--text-muted);
   word-break: break-word;
+}
+.step__more {
+  margin-top: 4px;
+  font-size: 11px;
+}
+.step__more summary {
+  cursor: pointer;
+  color: var(--text-faint);
+  user-select: none;
+}
+.step__more[open] summary {
+  margin-bottom: 2px;
+}
+.step__mono {
+  margin: 2px 0 0;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  word-break: break-word;
+}
+.step--cancelled .step__rail::after {
+  border-color: var(--border-strong);
+  background: var(--border-strong);
 }
 .trace__timer {
   margin: var(--sp-3) 0 0;

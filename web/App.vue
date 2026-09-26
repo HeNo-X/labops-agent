@@ -1,10 +1,15 @@
 <script setup lang="ts">
 /**
- * 任务画布 —— 应用外壳
+ * Agent 工作台 —— 应用外壳
  * ============================================================================
- *  布局：桌面双列（左：实验室矩阵；右：任务轨迹 + 结果与依据）
- *        手机单列（矩阵 → 轨迹 → 结果），命令栏常驻底部
- *  主题：跟随系统 prefers-color-scheme，并提供手动切换（深/浅）
+ *  布局原则：**任务流是唯一主角**。
+ *    · 空态  ：居中 hero ——「交代一件实验室任务」大输入框 + 示例（点击即发起）
+ *              + 一行能力边界；房间清单收进侧栏。
+ *    · 运行中：任务卡 = 指令气泡 → 步骤时间线 → 结论回答 → 结构化结果卡
+ *              → 折叠的数据依据；输入退到吸底命令栏。
+ *    · 侧栏  ：可搜索房间清单（紧凑行）+ 数据与引擎说明（折叠），桌面 sticky。
+ *    · 手机  ：首屏只有 hero；侧栏折叠区放在任务内容之后，绝不挡任务。
+ *  主题：跟随系统 prefers-color-scheme，并提供手动切换（深/浅）。
  */
 import { onMounted, ref } from 'vue';
 import { useRunStore } from './stores/run';
@@ -12,7 +17,7 @@ import { useAgentStream } from './composables/useAgentStream';
 import LabMatrix from './components/LabMatrix.vue';
 import CommandBar from './components/CommandBar.vue';
 import RunTrace from './components/RunTrace.vue';
-import ScheduleResult from './components/ScheduleResult.vue';
+import TaskResult from './components/TaskResult.vue';
 import ConfirmDock from './components/ConfirmDock.vue';
 import SourceBadge from './components/SourceBadge.vue';
 import StatusTag from './components/StatusTag.vue';
@@ -51,6 +56,8 @@ function onSubmit(q: string): void {
   store.beginRun(q);
   void start({
     message: q,
+    runId: store.runId ?? undefined,
+    sessionId: store.sessionId ?? undefined,
     onEvent: (ev) => store.ingest(ev),
     onError: (err) => store.failRun(err),
     onClose: () => store.finishRun()
@@ -68,15 +75,24 @@ function onCancel(): void {
       <div class="top__brand">
         <span class="top__mark" aria-hidden="true">▤</span>
         <div>
-          <h1 class="top__title">LabOps Agent · 实验室任务画布</h1>
-          <p class="top__sub">
-            第一阶段：一句话查课表（纵向链路打通）。服务对象：管理员 / 志愿者 / 学生。
-          </p>
+          <h1 class="top__title">LabOps Agent · 实验室任务助手</h1>
+          <p class="top__sub">用一句话交办实验室查询，Agent 查证后给结论。</p>
         </div>
       </div>
 
       <div class="top__right">
-        <SourceBadge :source-type="store.sourceType ?? store.overviewSourceType" :engine="store.activeEngine" compact />
+        <div class="top__badges">
+          <SourceBadge :source-type="store.sourceType ?? store.overviewSourceType" :engine="store.activeEngine" compact />
+          <button
+            v-if="store.sessionId && store.runStatus !== 'running'"
+            type="button"
+            class="top__newbtn"
+            title="清空会话承接与当前任务，开始全新会话"
+            @click="store.newSession()"
+          >
+            新会话
+          </button>
+        </div>
         <div class="theme" role="group" aria-label="主题切换">
           <button
             v-for="m in (['auto', 'light', 'dark'] as ThemeMode[])"
@@ -98,33 +114,93 @@ function onCancel(): void {
     </p>
 
     <main class="grid">
-      <div class="col col--left">
+      <!-- 主区：任务流 -->
+      <div class="col col--main">
+        <!-- 空态 hero：任务入口即主角 -->
+        <section v-if="store.runStatus === 'idle'" class="hero" aria-labelledby="hero-h">
+          <h2 id="hero-h" class="hero__h">交代一件实验室任务</h2>
+          <p class="hero__p">
+            查课表、看房间开放状态、找空闲实验室。说清房间号与日期即可，例如「E310 2026-09-30 有哪些课？」。
+          </p>
+          <CommandBar variant="hero" @submit="onSubmit" @cancel="onCancel" />
+          <p class="hero__scope">
+            当前可查：课表 · 房间开放状态与容量 · 某天（某节次）的空闲房间。
+            在室人数、值班、签到、钥匙与发布通知等能力尚未接入。
+          </p>
+        </section>
+
+        <!-- 任务卡：指令 → 行动 → 结论 → 依据 -->
+        <section v-else class="task" aria-label="当前任务">
+          <div class="task__q">
+            <span class="task__qlabel" aria-hidden="true">任务</span>
+            <p class="task__qtext">{{ store.question }}</p>
+            <StatusTag
+              :tone="
+                store.runStatus === 'running'
+                  ? 'info'
+                  : store.runStatus === 'failed'
+                    ? 'danger'
+                    : store.runStatus === 'cancelled'
+                      ? 'neutral'
+                      : 'ok'
+              "
+              :glyph="store.runStatus === 'running' ? '◌' : store.runStatus === 'failed' ? '✕' : store.runStatus === 'cancelled' ? '⏹' : '✓'"
+              :label="
+                store.runStatus === 'running'
+                  ? '执行中'
+                  : store.runStatus === 'completed'
+                    ? '已完成'
+                    : store.runStatus === 'failed'
+                      ? '失败'
+                      : '已取消'
+              "
+            />
+          </div>
+
+          <RunTrace />
+
+          <div v-if="store.stream" class="task__answer">
+            <h3 class="task__ah">Agent 结论</h3>
+            <pre class="task__atext">{{ store.stream }}</pre>
+          </div>
+
+          <TaskResult />
+
+          <ConfirmDock v-if="store.pendingConfirm" />
+        </section>
+      </div>
+
+      <!-- 侧区：房间上下文 + 说明 -->
+      <aside class="col col--side" aria-label="辅助信息">
         <LabMatrix @ask="onSubmit" />
-      </div>
-      <div class="col col--right">
-        <RunTrace />
-        <ScheduleResult />
-        <ConfirmDock />
-      </div>
+        <details class="about">
+          <summary class="about__sum">数据与引擎说明</summary>
+          <div class="about__body">
+            <p>
+              当前引擎：{{ store.activeEngine === 'agnes' ? 'Agnes 3.0 Flash（真实模型选择工具并生成回答）' : '演示引擎（服务端规则解析，未调用大模型）' }}。
+            </p>
+            <p>
+              数据来源：{{ store.overviewSourceLabel }}。脱敏快照与模拟演示**不是实时数据**；
+              教师姓名已伪名化，不含用户名册与凭据。
+            </p>
+            <p>
+              写操作（发布通知、创建整改工单）尚未接入；将来接入时必须经人工确认卡二次确认后才会执行。
+            </p>
+          </div>
+        </details>
+      </aside>
     </main>
 
-    <footer class="foot">
-      <CommandBar @submit="onSubmit" @cancel="onCancel" />
-      <p class="foot__note">
-        {{
-          store.activeEngine === 'demo'
-            ? '当前服务端未配置 AGNES_API_KEY：回答由演示引擎（服务端规则解析）生成，界面与回答均已标注，未调用大模型。'
-            : '当前由 Agnes 3.0 Flash 负责工具选择与回答生成；工具参数经服务端白名单与类型校验后才执行。'
-        }}
-        数据来源标识见页面顶部，三种来源（实时数据 / 脱敏快照 / 模拟演示）在视觉上可区分。
-      </p>
+    <!-- 运行/完成后：吸底命令栏接管输入（空态时 hero 里的输入是同一组件的另一种形态） -->
+    <footer v-if="store.runStatus !== 'idle'" class="foot">
+      <CommandBar variant="dock" @submit="onSubmit" @cancel="onCancel" />
     </footer>
   </div>
 </template>
 
 <style scoped>
 .shell {
-  max-width: 1440px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: var(--sp-4) var(--sp-4) 0;
   display: flex;
@@ -167,6 +243,24 @@ function onCancel(): void {
   align-items: flex-end;
   gap: var(--sp-2);
 }
+.top__badges {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.top__newbtn {
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12px;
+  border-radius: 999px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+.top__newbtn:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
 .theme {
   display: inline-flex;
   border: 1px solid var(--border);
@@ -195,8 +289,7 @@ function onCancel(): void {
 }
 .grid {
   display: grid;
-  /* 左栏给到 560px：房间卡片能排成 3 列，矩阵不会长成一条 1500px 的窄柱子 */
-  grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 300px;
   gap: var(--sp-4);
   align-items: start;
   flex: 1;
@@ -207,30 +300,136 @@ function onCancel(): void {
   gap: var(--sp-4);
   min-width: 0;
 }
+.col--side {
+  position: sticky;
+  top: var(--sp-4);
+}
+
+/* ---- 空态 hero ---- */
+.hero {
+  text-align: center;
+  padding: clamp(24px, 12vh, 96px) var(--sp-2) 0;
+}
+.hero__h {
+  margin: 0 0 var(--sp-2);
+  font-size: clamp(22px, 3.4vw, 30px);
+  letter-spacing: 0.01em;
+}
+.hero__p {
+  margin: 0 auto var(--sp-5);
+  max-width: 560px;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.hero__scope {
+  margin: var(--sp-4) auto 0;
+  max-width: 620px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+/* ---- 任务卡 ---- */
+.task {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-4);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.task__q {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px dashed var(--border);
+}
+.task__qlabel {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  border: 1px solid var(--primary-border);
+  background: var(--primary-weak);
+  border-radius: var(--radius-sm);
+  padding: 1px 7px;
+  margin-top: 2px;
+}
+.task__qtext {
+  flex: 1;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  word-break: break-word;
+}
+.task__answer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.task__ah {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.task__atext {
+  margin: 0;
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+/* ---- 侧栏说明 ---- */
+.about {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-3) var(--sp-4);
+  box-shadow: var(--shadow-1);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.about__sum {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+  user-select: none;
+}
+.about__body {
+  margin-top: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.about__body p {
+  margin: 0;
+}
+
+/* ---- 吸底命令栏 ---- */
 .foot {
   position: sticky;
   bottom: 0;
   padding: var(--sp-3) 0 var(--sp-4);
   background: linear-gradient(to top, var(--bg) 72%, transparent);
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-.foot__note {
-  margin: 0;
-  font-size: 11px;
-  color: var(--text-faint);
-  text-align: center;
 }
 
 @media (max-width: 1024px) {
   .grid {
     grid-template-columns: 1fr;
   }
-  .col--left {
+  .col--side {
+    position: static;
     order: 2;
   }
-  .col--right {
+  .col--main {
     order: 1;
   }
 }
@@ -246,9 +445,11 @@ function onCancel(): void {
   .top__title {
     font-size: 16px;
   }
-  /* 手机上吸底栏必须瘦：说明文字藏起来，否则会吃掉四成屏高（实测过 343px） */
-  .foot__note {
-    display: none;
+  .hero {
+    padding-top: 8vh;
+  }
+  .task {
+    padding: var(--sp-3);
   }
 }
 </style>

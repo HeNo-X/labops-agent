@@ -95,11 +95,13 @@ export async function handleAgentChat(req: IncomingMessage, res: ServerResponse)
   }
 
   const runId = typeof payload['runId'] === 'string' && payload['runId'] ? payload['runId'] : newTraceId('run');
+  const sessionId = typeof payload['sessionId'] === 'string' && payload['sessionId'] ? payload['sessionId'] : undefined;
 
   sseHeaders(res);
 
   const ac = new AbortController();
-  // 客户端断开 → 取消任务，服务端不继续烧 token
+  // 客户端断开 → 取消任务：中止 SSE 循环，并把这个 signal 传进 Agent 循环，
+  // 让进行中的模型请求也立即停止（不烧 token、不产生新事件）
   req.on('close', () => {
     if (!res.writableEnded) ac.abort();
   });
@@ -114,7 +116,7 @@ export async function handleAgentChat(req: IncomingMessage, res: ServerResponse)
   let lastSeq = -1;
 
   try {
-    for await (const ev of runAgent({ question: rawMessage, runId })) {
+    for await (const ev of runAgent({ question: rawMessage, runId, sessionId, signal: ac.signal })) {
       if (ac.signal.aborted) break;
       lastSeq = ev.seq;
       send(ev.type, ev);

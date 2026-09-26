@@ -22,6 +22,10 @@ export interface StreamError {
 
 export interface StartOptions {
   message: string;
+  /** 本次任务的 runId（前端生成）。服务端全部事件回带它，store 据此做任务隔离 */
+  runId?: string;
+  /** 会话 id：服务端据此承接上一问的房间/日期 */
+  sessionId?: string;
   onEvent: (ev: RunEvent) => void;
   onError: (err: StreamError) => void;
   onClose: () => void;
@@ -44,7 +48,11 @@ export function useAgentStream() {
       const res = await fetch('/api/agent/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-        body: JSON.stringify({ message: opts.message }),
+        body: JSON.stringify({
+          message: opts.message,
+          ...(opts.runId ? { runId: opts.runId } : {}),
+          ...(opts.sessionId ? { sessionId: opts.sessionId } : {})
+        }),
         signal: controller.signal
       });
 

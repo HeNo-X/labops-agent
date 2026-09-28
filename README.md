@@ -124,7 +124,7 @@ Agnes 适配层已完整实现（`server/llm/agnes.ts`，OpenAI 兼容 `POST /v1
 |---|---|---|
 | `AGNES_API_KEY` | 空 | **仅服务端读取，浏览器永远拿不到**。留空 = 演示引擎 |
 | `AGNES_MODEL` | `agnes-3.0-flash` | 产品运行时模型 |
-| `AGNES_BASE_URL` | `https://apihub.agnes-ai.com/v1` | OpenAI 兼容 |
+| `AGNES_BASE_URL` | `https://api.agnes-ai.cn/v1` | OpenAI 兼容（旧写的 apihub.agnes-ai.com 实测 401，勿用） |
 | `PORT` | `8787` | 服务端端口 |
 | `HOST` | `127.0.0.1` | 监听地址。**默认只允许本机访问**（见上文"想在手机上打开"） |
 | `AGENT_MAX_STEPS` | `6` | 单次任务工具调用步数上限（硬上限，见 §健壮性） |

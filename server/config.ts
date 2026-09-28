@@ -105,7 +105,7 @@ export function getConfig(): AppConfig {
     agnes: {
       apiKey: str('AGNES_API_KEY'),
       model: str('AGNES_MODEL', 'agnes-3.0-flash'),
-      baseUrl: str('AGNES_BASE_URL', 'https://apihub.agnes-ai.com/v1').replace(/\/+$/, ''),
+      baseUrl: str('AGNES_BASE_URL', 'https://api.agnes-ai.cn/v1').replace(/\/+$/, ''),
       timeoutMs: int('AGNES_TIMEOUT_MS', 45000, 1000, 300000),
       maxRetries: int('AGNES_MAX_RETRIES', 2, 0, 5),
       maxTokens: int('AGNES_MAX_TOKENS', 800, 64, 32768),

@@ -2,7 +2,9 @@
  * Agnes 3.0 Flash 适配器 —— 独立一层，可整体替换
  * ============================================================================
  *  接口事实（已核对官方文档 agnes-ai.com/zh-Hans/docs/agnes-30-flash，非凭记忆）：
- *    Base URL          https://apihub.agnes-ai.com/v1
+ *    Base URL          https://api.agnes-ai.cn/v1
+ *                      （⚠️ 2026-09-28 实测：旧写的 apihub.agnes-ai.com 对本项目 Key 返回 401，
+ *                        正确的端点是 api.agnes-ai.cn；改前先用 /v1/models 验一次）
  *    Chat Completions  POST /v1/chat/completions   （OpenAI 兼容结构）
  *    模型名称          agnes-3.0-flash
  *    请求字段          model / messages / temperature / top_p / max_tokens

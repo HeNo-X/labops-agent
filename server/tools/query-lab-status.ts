@@ -77,8 +77,9 @@ export function runQueryLabStatus(
       description: '',
       weekNo: null,
       weekDeterminable: false,
-      schedule: { lessonCount: 0, occupiedPeriods: [], nextLesson: null },
+      schedule: { lessonCount: 0, occupiedPeriods: [], nextLesson: null, nextLessonReason: 'unknown' },
       occupancy: null,
+      registryStatusNote: '',
       suggestions: names,
       notes: [
         `系统里没有收录房间号「${rawLabName}」`,
@@ -94,6 +95,8 @@ export function runQueryLabStatus(
   const notes: string[] = [week.note];
   if (!week.determinable) notes.push('⚠️ 教学周不可确定，以下排课统计未做周次过滤');
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
+  // F19：档案状态 ≠ 实时门禁。措辞必须避免把静态档案解释成"此刻能否进入"
+  notes.push('开放状态来自房间档案（随数据快照更新），不是实时门禁——实际此刻能否进入以现场为准');
   notes.push('在室人数没有数据来源（无签到/门禁数据），本工具无法提供，请勿据此回答人数问题');
 
   const labKey = normalizeLabName(lab.name);
@@ -120,9 +123,14 @@ export function runQueryLabStatus(
     });
   }
 
-  // 下一节课：今天且未结束的最近一节；非当天或已全部结束则 null
+  // 下一节课：仅对"今天"计算（F18）；非当天显式标注不适用，绝不冒充"当天无更多排课"
   let nextLesson: LabStatusResult['schedule']['nextLesson'] = null;
-  if (date === now.date) {
+  let nextLessonReason: LabStatusResult['schedule']['nextLessonReason'];
+  if (!week.determinable) {
+    nextLessonReason = 'unknown';
+  } else if (date !== now.date) {
+    nextLessonReason = 'not_applicable';
+  } else {
     const upcoming = occupiedPeriods
       .filter((p) => toMinutes(p.startTime) >= toMinutes(now.time))
       .sort((a, b) => toMinutes(a.startTime) - toMinutes(b.startTime))[0];
@@ -133,6 +141,7 @@ export function runQueryLabStatus(
         courseName: upcoming.courseNames[0] ?? ''
       };
     }
+    nextLessonReason = 'no_more_today';
   }
 
   return {
@@ -149,9 +158,11 @@ export function runQueryLabStatus(
     schedule: {
       lessonCount: matched.length,
       occupiedPeriods,
-      nextLesson
+      nextLesson,
+      nextLessonReason
     },
     occupancy: null,
+    registryStatusNote: `档案状态「${STATUS_LABELS[lab.status] ?? lab.status}」随数据快照更新，非实时门禁`,
     suggestions: [],
     notes
   };

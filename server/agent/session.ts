@@ -15,6 +15,8 @@ export interface SessionIntent {
   labName: string | null;
   date: string | null;
   periodKey: string | null;
+  /** 上一问的任务类型（schedule / lab_status / free_rooms）—— N08 追问继承 */
+  lastTask: string | null;
   /** 最近一次问题原文（截断，仅用于排查，不进界面） */
   question: string;
   updatedAt: number;
@@ -50,7 +52,7 @@ export function getSession(sessionId: string | null | undefined): SessionIntent 
 
 export function rememberSession(
   sessionId: string | null | undefined,
-  intent: { labName: string | null; date: string | null; periodKey: string | null; question: string }
+  intent: { labName: string | null; date: string | null; periodKey: string | null; task?: string | null; question: string }
 ): void {
   if (!sessionId) return;
   sweep(Date.now());
@@ -58,6 +60,8 @@ export function rememberSession(
     labName: intent.labName,
     date: intent.date,
     periodKey: intent.periodKey,
+    // R05：字段名全链路统一为 task（内存 SessionIntent.lastTask 是历史遗留名，赋值在此一处收敛）
+    lastTask: intent.task ?? null,
     question: intent.question.slice(0, 200),
     updatedAt: Date.now()
   });

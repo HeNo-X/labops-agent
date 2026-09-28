@@ -16,7 +16,7 @@
     "start": "node server/index.ts",
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "seed": "node seed/make-snapshot.ts",
-    "test": "node --test tests/unit.test.ts",
+    "test": "node --test tests/unit.test.ts tests/operations.test.ts",
     "test:acceptance": "node tests/acceptance.ts",
     "test:browser": "node tests/browser.ts",
     "test:all": "npm run test && npm run test:acceptance && npm run test:browser"

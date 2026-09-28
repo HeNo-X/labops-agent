@@ -7,7 +7,31 @@
     <!-- 显式声明图标，避免浏览器自动请求 /favicon.ico 产生 404（会被浏览器控制台记为错误） -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <!-- 不引入任何第三方统计/外链资源：本项目的数据来源标识必须是可核查的 -->
-    <title>LabOps Agent · 实验室任务画布</title>
+    <title>LabOps Agent · 实验室任务助手</title>
+    <script>
+      /* 首帧前定主题，避免深色系统用户看到白屏闪烁：
+         手动选择（localStorage）优先；「跟随系统」读 prefers-color-scheme。 */
+      (function () {
+        try {
+          var mode = localStorage.getItem('labops.theme');
+          var dark =
+            mode === 'dark' ||
+            ((mode === null || mode === 'auto' || mode === '') &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        } catch (e) {
+          /* localStorage 不可用就按系统偏好 */
+          try {
+            document.documentElement.setAttribute(
+              'data-theme',
+              window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+            );
+          } catch (e2) {
+            /* 极老浏览器：保持默认浅色 */
+          }
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>

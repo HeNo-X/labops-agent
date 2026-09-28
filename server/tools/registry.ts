@@ -17,12 +17,13 @@
 import type {
   FreeRoomsResult,
   LabStatusResult,
+  OperationsReportResult,
   QueryScheduleArgs,
   ScheduleQueryResult,
-  ToolResultKind,
   ToolSpec
 } from '../../shared/types.ts';
 import { DATA_SOURCE_LABELS } from '../../shared/types.ts';
+import type { Proposal, SandboxActor } from '../../shared/operations-contract.ts';
 import type { Dataset } from '../data/store.ts';
 import type { ServerNow } from '../time/term.ts';
 import {
@@ -33,20 +34,45 @@ import {
 import { coerceLabStatusArgs, runQueryLabStatus } from './query-lab-status.ts';
 import { coerceFreeRoomsArgs, runQueryFreeRooms } from './query-free-rooms.ts';
 import { PERIOD_KEYS, isPeriodKey } from '../../shared/periods.ts';
+import {
+  runCreateOperationsReport,
+  runPrepareDutySession,
+  runPrepareIssueTicket,
+  runPrepareNotification,
+  runPrepareRoomClosure
+} from './prepare-tools.ts';
 
 /** 注册表 —— 每个条目必须同时有 spec（给模型）与 execute（给服务端） */
 export interface RegisteredTool {
   spec: ToolSpec;
-  execute: (args: Record<string, unknown>, ctx: ToolContext) => ToolExecution;
+  execute: (args: Record<string, unknown>, ctx: ToolContext) => ToolExecution | Promise<ToolExecution>;
+  /**
+   * 展示用效果标注（不发给模型）：read=只读查询；draft=生成办理单草稿（不执行业务）。
+   * 真正的权限边界在服务端 policy/executor，不由这个标记决定（任务书 §11.2）。
+   */
+  effect: 'read' | 'draft';
 }
 
+/**
+ * 工具上下文。actor / conversationId 由服务端注入（ops.v1 起生效）：
+ * 身份绝不出现在模型可写的参数里；只读工具不使用这两个字段。
+ */
 export interface ToolContext {
   dataset: Dataset;
   now: ServerNow;
+  /** 服务端解析的沙盒演示身份（ops.v1 写操作必需） */
+  actor?: SandboxActor;
+  /** 发起本轮的会话 id（任务与提案挂靠用；直连 /api/agent/chat 时为空） */
+  conversationId?: string | null;
 }
 
+/** 可判别联合：resultKind 与 result 的类型一一对应，调用方按 kind 收窄 */
 export type ToolExecution =
-  | { ok: true; resultKind: ToolResultKind; result: ScheduleQueryResult | LabStatusResult | FreeRoomsResult; summary: string }
+  | { ok: true; resultKind: 'schedule'; result: ScheduleQueryResult; summary: string }
+  | { ok: true; resultKind: 'lab_status'; result: LabStatusResult; summary: string }
+  | { ok: true; resultKind: 'free_rooms'; result: FreeRoomsResult; summary: string }
+  | { ok: true; resultKind: 'operation_proposal'; result: Proposal; summary: string }
+  | { ok: true; resultKind: 'operations_report'; result: OperationsReportResult; summary: string }
   | { ok: false; code: string; message: string; suggestions: string[]; summary: string };
 
 // ===========================================================================
@@ -131,7 +157,13 @@ const QUERY_FREE_ROOMS_SPEC: ToolSpec = {
         type: 'string',
         enum: [...PERIOD_KEYS],
         description:
-          '可选。只看某一个节次；不传则返回全部六个节次的空闲名单。'
+          '可选。只看某一个节次；不传可用 periodKeys 传范围。'
+      },
+      periodKeys: {
+        type: 'array',
+        items: { type: 'string', enum: [...PERIOD_KEYS] },
+        description:
+          '可选。节次范围，如"下午"= ["pm1","pm2"]。与 periodKey 二选一；都不传则返回全部六个节次。'
       }
     },
     required: [],
@@ -145,22 +177,192 @@ const QUERY_FREE_ROOMS_SPEC: ToolSpec = {
 // ===========================================================================
 
 /**
- * 把模型给的任意对象收敛成严格类型。多余字段静默丢弃，
- * 类型不对的字段**剥离**（而不是转成 "undefined" 字符串）。
+ * 把模型给的任意对象收敛成严格类型（F17）：
+ *   · 缺省字段保持缺省（由工具用安全默认值）；
+ *   · **显式提供但非法的字段必须报错**，绝不静默丢弃后扩大查询范围
+ *     （例如 periodKey='bad' 被丢弃会变成"查全天"，把受限查询悄悄放大）。
  */
 export function coerceQueryScheduleArgs(raw: Record<string, unknown>): QueryScheduleArgs {
   const out: QueryScheduleArgs = {};
   const date = raw['date'];
   if (typeof date === 'string' && date.trim()) out.date = date.trim();
+  else if (date !== undefined && date !== null && date !== '') {
+    throw new ToolArgumentError('bad_date', `date 参数必须是字符串（YYYY-MM-DD），收到：${typeof date}`);
+  }
   const labName = raw['labName'];
   if (typeof labName === 'string' && labName.trim()) out.labName = labName.trim();
+  else if (labName !== undefined && labName !== null && labName !== '') {
+    throw new ToolArgumentError('bad_lab', `labName 参数必须是字符串，收到：${typeof labName}`);
+  }
   const periodKey = raw['periodKey'];
   if (typeof periodKey === 'string') {
     const trimmed = periodKey.trim();
-    if (isPeriodKey(trimmed)) out.periodKey = trimmed;
+    if (!trimmed) {
+      /* 空串视为未提供 */
+    } else if (isPeriodKey(trimmed)) {
+      out.periodKey = trimmed;
+    } else {
+      throw new ToolArgumentError(
+        'bad_period',
+        `periodKey 非法：${trimmed}（合法值：${PERIOD_KEYS.join(' / ')}）`
+      );
+    }
+  } else if (periodKey !== undefined && periodKey !== null && periodKey !== '') {
+    // R10：显式给了错误类型（如数字 999）也是参数错误，不能静默丢弃后放宽为全天
+    throw new ToolArgumentError('bad_period', `periodKey 必须是字符串节次键，收到：${typeof periodKey}(${String(periodKey)})`);
   }
   return out;
 }
+
+// ===========================================================================
+//  ops.v1 准备类工具的 JSON Schema（effect=draft：只生成办理单，不执行业务）
+// ===========================================================================
+
+const PREPARE_ISSUE_SPEC: ToolSpec = {
+  name: 'prepare_issue_ticket',
+  description:
+    '【准备报修/问题工单】当用户报告实验室的设备故障、环境卫生、网络、门窗照明等问题并希望"报修/建单/登记问题"时使用。' +
+    '只生成可编辑的报修办理单（提案），用户在提案卡中确认后才会在沙盒中创建工单；本工具不执行任何写操作。' +
+    'roomId 必须是系统已收录的房间号；description 请保留用户的原始事实描述，不要编造设备编号或资产 ID；' +
+    'attachmentIds 仅在用户明确给出附件引用时传入（上传服务未接入，只登记 ID）。',
+  parameters: {
+    type: 'object',
+    properties: {
+      roomId: { type: 'string', description: '房间号，例如 E310。必须来自系统已收录的房间号列表。' },
+      category: {
+        type: 'string',
+        enum: ['equipment', 'environment', 'network', 'door_window_lighting', 'other'],
+        description: '问题分类：equipment=设备故障，environment=环境卫生，network=网络问题，door_window_lighting=门窗照明，other=其他。'
+      },
+      description: { type: 'string', description: '问题事实描述（来自用户原话整理，1–2000 字），不编造细节。' },
+      attachmentIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '可选。附件引用 ID（最多 8 个）。上传服务未接入，仅登记引用。'
+      }
+    },
+    required: ['roomId', 'category', 'description'],
+    additionalProperties: false
+  },
+  danger: false
+};
+
+const PREPARE_CLOSURE_SPEC: ToolSpec = {
+  name: 'prepare_room_closure',
+  description:
+    '【准备临时停用】当管理员要求"某房间某时段停用/检修/封闭，登记并处理受影响课程"时使用。' +
+    '只生成停用办理单（含受影响排课统计，可联动维修工单与通知草稿），用户确认后才在沙盒执行；本工具不执行任何写操作。' +
+    'periodKeys 必须给出具体节次；范围一次最长 14 天。生成前不要向用户索要全部细节——缺什么由提案卡的 missingDependencies 展示。',
+  parameters: {
+    type: 'object',
+    properties: {
+      roomId: { type: 'string', description: '房间号，例如 E310。必须来自系统已收录的房间号列表。' },
+      startDate: { type: 'string', description: '停用开始日期 YYYY-MM-DD（先把"9月30日"换算好再传）。' },
+      endDate: { type: 'string', description: '停用结束日期 YYYY-MM-DD（单日与 startDate 相同）。' },
+      periodKeys: {
+        type: 'array',
+        items: { type: 'string', enum: [...PERIOD_KEYS] },
+        description: '停用的节次列表，如下午两大节 = ["pm1","pm2"]。'
+      },
+      reason: { type: 'string', description: '停用原因（如"投影检修"），将写入停用记录与通知。' },
+      createIssue: { type: 'boolean', description: '是否同时创建维修工单，缺省 true。' },
+      prepareNotice: { type: 'boolean', description: '是否同时生成受影响通知草稿（站内），缺省 false。' }
+    },
+    required: ['roomId', 'startDate', 'endDate', 'periodKeys', 'reason'],
+    additionalProperties: false
+  },
+  danger: false
+};
+
+const PREPARE_NOTICE_SPEC: ToolSpec = {
+  name: 'prepare_notification',
+  description:
+    '【准备站内通知】当用户要"发布通知/公告，告知某些班级或人群某件事"时使用。' +
+    '只生成通知办理单（标题/正文/受众预览），用户确认后才在沙盒发布；本工具不执行任何写操作。' +
+    'title 与 content 必须来自用户的明确表述或其确认的草稿，不得自行虚构内容；' +
+    '受众用 audience.kind 指定：class_ids=按班级（班级名必须来自课表数据）、role_scope=全部学生或志愿者、all=全体。' +
+    '沙盒没有人员名册：接收人数未知，绝不编造"已通知 N 人"。',
+  parameters: {
+    type: 'object',
+    properties: {
+      title: { type: 'string', description: '通知标题（1–120 字），来自用户或其确认的草稿。' },
+      content: { type: 'string', description: '通知正文（1–2000 字），来自用户或其确认的草稿。' },
+      audience: {
+        type: 'object',
+        description: '接收范围。三选一：{"kind":"class_ids","classIds":[...]}；{"kind":"role_scope","role":"student"|"volunteer"}；{"kind":"all"}。',
+        properties: {
+          kind: { type: 'string', enum: ['class_ids', 'role_scope', 'all'], description: '受众类型。' },
+          classIds: { type: 'array', items: { type: 'string' }, description: 'kind=class_ids 时必填：班级名称列表（须来自课表数据）。' },
+          role: { type: 'string', enum: ['student', 'volunteer'], description: 'kind=role_scope 时必填。' }
+        },
+        required: ['kind'],
+        additionalProperties: false
+      },
+      level: { type: 'string', enum: ['info', 'warning', 'urgent'], description: '通知级别。' }
+    },
+    required: ['title', 'content', 'audience', 'level'],
+    additionalProperties: false
+  },
+  danger: false
+};
+
+const PREPARE_DUTY_SPEC: ToolSpec = {
+  name: 'prepare_duty_session',
+  description:
+    '【准备值班开始/收尾交接】mode=start：志愿者开始某房间值班时使用；mode=handover：结束值班、整理检查清单并生成交接记录时使用。' +
+    '只生成办理单，用户确认后才在沙盒执行；本工具不执行任何写操作，也不产生考勤记录。' +
+    'mode=handover 时必须携带 checklist（用户逐项确认的检查清单，state=done/abnormal/unchecked）——' +
+    '清单状态只能来自用户的明确陈述（如"灯已关""钥匙还没交"），用户没有提到的项一律 unchecked，绝不代用户勾选。',
+  parameters: {
+    type: 'object',
+    properties: {
+      mode: { type: 'string', enum: ['start', 'handover'], description: 'start=开始值班；handover=结束值班并交接。' },
+      roomId: { type: 'string', description: 'mode=start 时必填：值班房间号。' },
+      sessionId: { type: 'string', description: 'mode=handover 时可选：值班会话 ID；缺省取最近一个进行中的会话。' },
+      checklist: {
+        type: 'array',
+        description: 'mode=handover 时必填。每项 {key,label,state}；key 建议用系统模板键（power/lights/doors/keys/todo）。',
+        items: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', description: '清单项键，如 power（电源设备）、lights（关灯）、doors（门窗）、keys（钥匙）、todo（未完事项）。' },
+            label: { type: 'string', description: '清单项名称。' },
+            state: { type: 'string', enum: ['done', 'abnormal', 'unchecked'], description: '用户确认的状态：done=已完成，abnormal=有异常，unchecked=未确认/未检查。' }
+          },
+          required: ['key', 'label', 'state'],
+          additionalProperties: false
+        }
+      },
+      note: { type: 'string', description: 'mode=handover 时可选：交接备注（未完事项、异常说明）。' }
+    },
+    required: ['mode'],
+    additionalProperties: false
+  },
+  danger: false
+};
+
+const REPORT_SPEC: ToolSpec = {
+  name: 'create_operations_report',
+  description:
+    '【生成运营日报草稿】当用户要"整理某天的值班/报修/通知/停用情况，生成日报/报告"时使用。' +
+    '直接生成一份当前用户可见的报告草稿（不发布给他人、不需要确认）。' +
+    '统计只覆盖沙盒业务数据与课表快照；签到类数据未接入时对应指标如实标"未知"，绝不显示为 0。',
+  parameters: {
+    type: 'object',
+    properties: {
+      startDate: { type: 'string', description: '可选。起始日期 YYYY-MM-DD，缺省为服务端当天。' },
+      endDate: { type: 'string', description: '可选。结束日期 YYYY-MM-DD，缺省同 startDate；范围最长 31 天。' },
+      sections: {
+        type: 'array',
+        items: { type: 'string', enum: ['schedule', 'issues', 'notifications', 'closures', 'duty'] },
+        description: '可选。要统计的段落，缺省全部：schedule=排课，issues=报修，notifications=通知，closures=停用，duty=值班。'
+      }
+    },
+    required: [],
+    additionalProperties: false
+  },
+  danger: false
+};
 
 // ===========================================================================
 //  执行
@@ -190,8 +392,9 @@ function internalError(toolName: string, err: unknown): ToolExecution {
 }
 
 function executeQuerySchedule(args: Record<string, unknown>, ctx: ToolContext): ToolExecution {
-  const normalized = coerceQueryScheduleArgs(args);
+  // N11：参数收敛也在工具受控边界内 —— 非法参数返回 ok=false 的结构化错误，不抛出包装层
   try {
+    const normalized = coerceQueryScheduleArgs(args);
     const result = runQuerySchedule(normalized, ctx.dataset, ctx.now);
     return { ok: true, resultKind: 'schedule', result, summary: summarizeSchedule(result) };
   } catch (err) {
@@ -201,8 +404,8 @@ function executeQuerySchedule(args: Record<string, unknown>, ctx: ToolContext): 
 }
 
 function executeQueryLabStatus(args: Record<string, unknown>, ctx: ToolContext): ToolExecution {
-  const normalized = coerceLabStatusArgs(args);
   try {
+    const normalized = coerceLabStatusArgs(args);
     const result = runQueryLabStatus(normalized, ctx.dataset, ctx.now);
     return { ok: true, resultKind: 'lab_status', result, summary: summarizeLabStatus(result) };
   } catch (err) {
@@ -212,8 +415,8 @@ function executeQueryLabStatus(args: Record<string, unknown>, ctx: ToolContext):
 }
 
 function executeQueryFreeRooms(args: Record<string, unknown>, ctx: ToolContext): ToolExecution {
-  const normalized = coerceFreeRoomsArgs(args);
   try {
+    const normalized = coerceFreeRoomsArgs(args);
     const result = runQueryFreeRooms(normalized, ctx.dataset, ctx.now);
     return { ok: true, resultKind: 'free_rooms', result, summary: summarizeFreeRooms(result) };
   } catch (err) {
@@ -223,9 +426,14 @@ function executeQueryFreeRooms(args: Record<string, unknown>, ctx: ToolContext):
 }
 
 export const REGISTRY: RegisteredTool[] = [
-  { spec: QUERY_SCHEDULE_SPEC, execute: executeQuerySchedule },
-  { spec: QUERY_LAB_STATUS_SPEC, execute: executeQueryLabStatus },
-  { spec: QUERY_FREE_ROOMS_SPEC, execute: executeQueryFreeRooms }
+  { spec: QUERY_SCHEDULE_SPEC, execute: executeQuerySchedule, effect: 'read' },
+  { spec: QUERY_LAB_STATUS_SPEC, execute: executeQueryLabStatus, effect: 'read' },
+  { spec: QUERY_FREE_ROOMS_SPEC, execute: executeQueryFreeRooms, effect: 'read' },
+  { spec: PREPARE_ISSUE_SPEC, execute: runPrepareIssueTicket, effect: 'draft' },
+  { spec: PREPARE_CLOSURE_SPEC, execute: runPrepareRoomClosure, effect: 'draft' },
+  { spec: PREPARE_NOTICE_SPEC, execute: runPrepareNotification, effect: 'draft' },
+  { spec: PREPARE_DUTY_SPEC, execute: runPrepareDutySession, effect: 'draft' },
+  { spec: REPORT_SPEC, execute: runCreateOperationsReport, effect: 'draft' }
 ];
 
 const BY_NAME = new Map(REGISTRY.map((t) => [t.spec.name, t]));
@@ -257,8 +465,9 @@ export function isRegisteredTool(name: unknown): boolean {
 /**
  * 统一的工具入口。工具名不在白名单时**不抛异常**，而是返回可恢复错误，
  * 附带可用工具清单 —— 让模型有一次自我纠正的机会（难点 1 对策 2）。
+ * ops.v1 起支持异步工具（准备类工具要落库），统一 await。
  */
-export function executeTool(name: unknown, args: Record<string, unknown>, ctx: ToolContext): ToolExecution {
+export async function executeTool(name: unknown, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolExecution> {
   const tool = typeof name === 'string' ? BY_NAME.get(name) : undefined;
   if (!tool) {
     return {
@@ -269,7 +478,7 @@ export function executeTool(name: unknown, args: Record<string, unknown>, ctx: T
       summary: `工具 ${String(name)} 不存在，可用工具：${toolNames().join('、')}`
     };
   }
-  return tool.execute(args ?? {}, ctx);
+  return await tool.execute(args ?? {}, ctx);
 }
 
 // ===========================================================================
@@ -299,12 +508,18 @@ export function summarizeLabStatus(r: LabStatusResult): string {
 
 export function summarizeFreeRooms(r: FreeRoomsResult): string {
   const src = `【${DATA_SOURCE_LABELS[r.provenance.sourceType]}】`;
-  if (r.periodFilter) {
-    const p = r.freeByPeriod[0];
-    return `${src}${r.date}（${r.weekdayLabel}）${p.periodLabel}空闲房间 ${p.rooms.length} 间：${p.rooms.map((x) => x.labName).join('、') || '（无）'}`;
+  if (r.coverage !== 'complete') {
+    const why = r.coverage === 'missing' ? '课表数据为空' : r.coverage === 'out_of_range' ? '日期超出可信学期范围' : '教学周不可确定';
+    return `${src}${why}，无法判断 ${r.date}（${r.weekdayLabel}）哪些房间空闲`;
   }
+  const scope = r.periodFilter
+    ? r.freeByPeriod[0].periodLabel
+    : r.periodKeys.length && r.periodKeys.length < 6
+      ? r.freeByPeriod.map((p) => p.periodLabel).join('/')
+      : '全天各节次';
+  const first = r.freeByPeriod[0];
   const total = r.freeByPeriod.reduce((n, p) => n + p.rooms.length, 0);
-  return `${src}${r.date}（${r.weekdayLabel}）全天分节次空闲名单，共 ${r.freeByPeriod.length} 个节次 ${total} 房·次`;
+  return `${src}${r.date}（${r.weekdayLabel}）${scope}：仅列档案开放的房间，${first ? `首节次 ${first.rooms.length} 间空闲，合计 ${total} 房·次` : '无统计'}，另有 ${r.excluded.length} 间因档案关闭/停用排除`;
 }
 
 // ---- 兼容旧导出名（tests / 其他模块可能引用）----

@@ -13,6 +13,7 @@
 
 import { ref } from 'vue';
 import type { RunEvent } from '@shared/types';
+import { actorHeaders } from '../actor';
 
 export interface StreamError {
   code: string;
@@ -26,6 +27,10 @@ export interface StartOptions {
   runId?: string;
   /** 会话 id：服务端据此承接上一问的房间/日期 */
   sessionId?: string;
+  /** 持久会话：消息落库到该会话（M1） */
+  conversationId?: string;
+  /** 幂等键：重复提交同一 clientRequestId 服务端返回 409，不重复执行（A15） */
+  clientRequestId?: string;
   onEvent: (ev: RunEvent) => void;
   onError: (err: StreamError) => void;
   onClose: () => void;
@@ -45,16 +50,27 @@ export function useAgentStream() {
     let lastSeq = -1;
 
     try {
-      const res = await fetch('/api/agent/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-        body: JSON.stringify({
-          message: opts.message,
-          ...(opts.runId ? { runId: opts.runId } : {}),
-          ...(opts.sessionId ? { sessionId: opts.sessionId } : {})
-        }),
-        signal: controller.signal
-      });
+      const res = await fetch(
+        opts.conversationId
+          ? `/api/conversations/${encodeURIComponent(opts.conversationId)}/messages`
+          : '/api/agent/chat',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'text/event-stream',
+            // 沙盒演示身份随请求头传递（服务端校验并解析；模型参数不采信）
+            ...actorHeaders()
+          },
+          body: JSON.stringify({
+            message: opts.message,
+            ...(opts.runId ? { runId: opts.runId } : {}),
+            ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
+            ...(opts.clientRequestId ? { clientRequestId: opts.clientRequestId } : {})
+          }),
+          signal: controller.signal
+        }
+      );
 
       if (!res.ok) {
         // 服务端在建立事件流之前失败 → 返回的是 JSON 错误体
@@ -102,8 +118,9 @@ export function useAgentStream() {
             } catch {
               continue; // 单个坏块不该毁掉整个回答
             }
-            // seq 去重：网络重传或代理重放时不会出现重复气泡
-            if (typeof ev.seq === 'number') {
+            // seq 去重：网络重传或代理重放时不会出现重复气泡。
+            // seq=-1 是 run_accepted 接受凭证（会话端点专用，先于业务事件），放行给调用方对齐 ID。
+            if (typeof ev.seq === 'number' && ev.seq !== -1) {
               if (ev.seq <= lastSeq) continue;
               lastSeq = ev.seq;
             }

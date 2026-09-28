@@ -20,6 +20,7 @@ import type { IncomingMessage } from 'node:http';
 import { runAgent } from '../agent/run.ts';
 import { newTraceId } from '../obs/trace.ts';
 import { MAX_QUESTION_CHARS } from '../agent/prompts.ts';
+import { resolveActor } from '../operations/identity.ts';
 
 const MAX_BODY_BYTES = 16 * 1024;
 
@@ -73,6 +74,8 @@ function sseHeaders(res: ServerResponse): void {
   res.write(`: labops-agent sse stream open\n${':'.padEnd(2040, ' ')}\n\n`);
 }
 
+export { sseHeaders };
+
 export async function handleAgentChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const body = await readJsonBody(req);
   if (!body.ok) {
@@ -100,11 +103,17 @@ export async function handleAgentChat(req: IncomingMessage, res: ServerResponse)
   sseHeaders(res);
 
   const ac = new AbortController();
-  // 客户端断开 → 取消任务：中止 SSE 循环，并把这个 signal 传进 Agent 循环，
-  // 让进行中的模型请求也立即停止（不烧 token、不产生新事件）
-  req.on('close', () => {
+  // F03：客户端断开要在**两个对象**上监听 —— 请求体早已读完，
+  // req 的 close 不一定代表响应连接断开；res 的 close 才是 SSE 断开的可靠信号。
+  // 任一触发都中止 Agent 循环与进行中的模型请求（不烧 token、不产生新事件）。
+  let aborted = false;
+  const onDisconnect = (): void => {
+    if (aborted) return;
+    aborted = true;
     if (!res.writableEnded) ac.abort();
-  });
+  };
+  req.on('close', onDisconnect);
+  res.on('close', onDisconnect);
 
   const send = (type: string, data: unknown): void => {
     if (res.writableEnded || res.destroyed) return;
@@ -116,7 +125,13 @@ export async function handleAgentChat(req: IncomingMessage, res: ServerResponse)
   let lastSeq = -1;
 
   try {
-    for await (const ev of runAgent({ question: rawMessage, runId, sessionId, signal: ac.signal })) {
+    for await (const ev of runAgent({
+      question: rawMessage,
+      runId,
+      sessionId,
+      actor: resolveActor(req.headers['x-labops-sandbox-role']),
+      signal: ac.signal
+    })) {
       if (ac.signal.aborted) break;
       lastSeq = ev.seq;
       send(ev.type, ev);

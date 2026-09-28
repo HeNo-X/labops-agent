@@ -14,18 +14,51 @@
 import { computed } from 'vue';
 import { useRunStore } from '../stores/run';
 import { PERIODS } from '@shared/periods';
-import type { FreeRoomsResult, LabStatusResult } from '@shared/types';
+import type { EngineType, FreeRoomsResult, LabStatusResult, ScheduleQueryResult } from '@shared/types';
 import StatusTag from './StatusTag.vue';
 import SourceBadge from './SourceBadge.vue';
 import type { Tone } from './ui-types';
 
+/**
+ * N03：结果卡改为**纯 props 输入** —— 一条助手消息拥有自己的结果卡；
+ * 不传 artifact 时回退到全局 run store（仅活跃轮渲染使用），历史与实时共用同一渲染器。
+ * 注意：本组件只渲染查询类结果（schedule / lab_status / free_rooms）；
+ * 提案卡与日报卡分别由 OperationCard / ReportCard 渲染。
+ */
+const props = defineProps<{
+  artifact?: { kind: 'schedule' | 'lab_status' | 'free_rooms'; result: ScheduleQueryResult | LabStatusResult | FreeRoomsResult };
+  engine?: EngineType | null;
+}>();
+
 const store = useRunStore();
 
-const r = computed(() => store.lastResult);
-const extra = computed(() => store.extraResult);
+type UiKind = 'none' | 'schedule_hit' | 'schedule_empty' | 'config_insufficient' | 'lab_status' | 'free_rooms';
+const kind = computed<UiKind>(() => {
+  if (props.artifact) {
+    if (props.artifact.kind !== 'schedule') return props.artifact.kind;
+    const sr = props.artifact.result as ScheduleQueryResult;
+    if (!sr.weekDeterminable || sr.reason === 'timetable_empty') return 'config_insufficient';
+    return sr.reason === 'ok' ? 'schedule_hit' : 'schedule_empty';
+  }
+  return store.resultKind;
+});
+
+const r = computed<ScheduleQueryResult | null>(() => {
+  if (props.artifact) return props.artifact.kind === 'schedule' ? (props.artifact.result as ScheduleQueryResult) : null;
+  return store.lastResult;
+});
+const extra = computed(() => {
+  if (props.artifact) {
+    return props.artifact.kind === 'schedule'
+      ? null
+      : { kind: props.artifact.kind, payload: props.artifact.result as LabStatusResult | FreeRoomsResult };
+  }
+  return store.extraResult;
+});
+const engineOf = computed<EngineType | null>(() => props.engine ?? store.activeEngine);
 
 const kindTag = computed<{ tone: Tone; glyph: string; label: string }>(() => {
-  switch (store.resultKind) {
+  switch (kind.value) {
     case 'none':
       return { tone: 'neutral', glyph: '○', label: '无结果' };
     case 'schedule_hit':
@@ -108,16 +141,16 @@ const freeList = computed(() => {
 
 <template>
   <!-- 无结果：不渲染 -->
-  <template v-if="store.resultKind !== 'none'" />
+  <template v-if="kind !== 'none'" />
 
-  <section v-if="r && (store.resultKind === 'schedule_hit' || store.resultKind === 'schedule_empty' || store.resultKind === 'config_insufficient')" class="res" aria-labelledby="res-h">
+  <section v-if="r && (kind === 'schedule_hit' || kind === 'schedule_empty' || kind === 'config_insufficient')" class="res" aria-labelledby="res-h">
     <header class="res__head">
       <h2 id="res-h" class="sr-only">查询结果与依据</h2>
       <StatusTag :tone="kindTag.tone" :glyph="kindTag.glyph" :label="kindTag.label" />
     </header>
 
     <!-- 配置不足：必须显眼，且说明"这是有条件的结论" -->
-    <div v-if="store.resultKind === 'config_insufficient'" class="alert alert--warn" role="status">
+    <div v-if="kind === 'config_insufficient'" class="alert alert--warn" role="status">
       <StatusTag tone="warn" label="配置不足" />
       <p class="alert__msg">
         {{ r && !r.weekDeterminable ? '无法确定该日期属于第几教学周。' : '课表数据为空。' }}
@@ -127,7 +160,7 @@ const freeList = computed(() => {
     </div>
 
     <!-- 无匹配 -->
-    <div v-else-if="store.resultKind === 'schedule_empty'" class="alert alert--warn" role="status">
+    <div v-else-if="kind === 'schedule_empty'" class="alert alert--warn" role="status">
       <StatusTag tone="warn" label="无匹配结果" />
       <p class="alert__msg">{{ reasonText }}。系统没有编造任何课程。</p>
       <div v-if="r?.suggestions?.length" class="suggest">
@@ -190,7 +223,7 @@ const freeList = computed(() => {
       <summary class="prov__sum">数据依据与条件说明</summary>
       <div class="prov__body">
         <div class="prov__badges">
-          <SourceBadge :source-type="r.provenance.sourceType" :engine="store.activeEngine" />
+          <SourceBadge :source-type="r.provenance.sourceType" :engine="engineOf" />
         </div>
         <dl class="prov__list">
           <div class="prov__row">
@@ -282,7 +315,13 @@ const freeList = computed(() => {
                 {{ (extra.payload as LabStatusResult).schedule.nextLesson!.startTime }}
                 《{{ (extra.payload as LabStatusResult).schedule.nextLesson!.courseName }}》（{{ (extra.payload as LabStatusResult).schedule.nextLesson!.periodLabel }}）
               </template>
-              <template v-else>当天无更多排课</template>
+              <template v-else-if="(extra.payload as LabStatusResult).schedule.nextLessonReason === 'not_applicable'">
+                所查日期非今天，此处不提供"下一节课"——请看当天排课明细
+              </template>
+              <template v-else-if="(extra.payload as LabStatusResult).schedule.nextLessonReason === 'unknown'">
+                无法确定（教学周不可判定）
+              </template>
+              <template v-else>当天剩余时间没有更多排课</template>
             </dd>
           </div>
           <div class="prov__row">
@@ -295,7 +334,7 @@ const freeList = computed(() => {
         <summary class="prov__sum">数据依据与条件说明</summary>
         <div class="prov__body">
           <div class="prov__badges">
-            <SourceBadge :source-type="(extra.payload as LabStatusResult).provenance.sourceType" :engine="store.activeEngine" />
+            <SourceBadge :source-type="(extra.payload as LabStatusResult).provenance.sourceType" :engine="engineOf" />
           </div>
           <ul class="notes">
             <li v-for="(n, i) in (extra.payload as LabStatusResult).notes" :key="i">{{ n }}</li>
@@ -316,7 +355,24 @@ const freeList = computed(() => {
         </template>
       </span>
     </header>
-    <ul class="freelist">
+    <!-- R08：覆盖不足 → 无法判断，候选是"未知"而不是"无空闲" -->
+    <div v-if="(extra.payload as FreeRoomsResult).coverage !== 'complete'" class="alert alert--warn" role="status">
+      <p class="alert__msg">
+        {{
+          (extra.payload as FreeRoomsResult).coverage === 'missing'
+            ? '课表数据为空，无法判断哪些房间空闲。'
+            : (extra.payload as FreeRoomsResult).coverage === 'out_of_range'
+              ? '日期超出学期覆盖范围，无法判断空闲。'
+              : '学期结束日未配置（或教学周不可确定），无法证明该日期的课表完整覆盖。'
+        }}
+        下列候选的空闲状态**未知**，不能作为可用推荐。
+      </p>
+      <div v-if="(extra.payload as FreeRoomsResult).unknownCandidates.length" class="suggest">
+        <span class="suggest__label">未知候选（非确认空闲）：</span>
+        <span v-for="u in (extra.payload as FreeRoomsResult).unknownCandidates" :key="u" class="suggest__item">{{ u }}</span>
+      </div>
+    </div>
+    <ul v-if="(extra.payload as FreeRoomsResult).coverage === 'complete'" class="freelist">
       <li v-for="p in freeList" :key="p.periodKey" class="freetier">
         <span class="freetier__period">{{ p.periodLabel }}（{{ p.startTime }}–{{ p.endTime }}）</span>
         <span v-if="p.rooms.length" class="freetier__rooms">

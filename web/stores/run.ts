@@ -28,6 +28,7 @@ import type {
   ToolResultKind
 } from '@shared/types';
 import { DATA_SOURCE_LABELS, RUN_EVENT_TYPES } from '@shared/types';
+import type { NeedConfirmPayload } from '@shared/operations-contract';
 import { PERIODS } from '@shared/periods';
 
 export type RunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -115,8 +116,8 @@ export const useRunStore = defineStore('run', () => {
   const stream = ref('');
   const error = ref<StreamErrorInfo | null>(null);
   const elapsedMs = ref(0);
-  /** 预留：真实待确认写操作（阶段 2B）。第一阶段恒为 null → ConfirmDock 不渲染 */
-  const pendingConfirm = ref<null>(null);
+  /** ops.v1：活跃轮的待确认提案（need_confirm 事件载荷）。历史轮由消息内的提案卡自持 */
+  const pendingConfirm = ref<NeedConfirmPayload | null>(null);
 
   // ------------------------------ 上下文 ------------------------------
   const engine = ref<EngineType | null>(null);
@@ -206,7 +207,6 @@ export const useRunStore = defineStore('run', () => {
     const steps: TraceStep[] = [];
     const toolIndex = new Map<string, number>();
     let answerIdx: number | null = null;
-    let terminalSeen = false;
 
     for (const ev of events.value) {
       switch (ev.type) {
@@ -239,7 +239,7 @@ export const useRunStore = defineStore('run', () => {
             id: `s${ev.seq}`,
             kind: 'tool',
             title: toolTitle(p.tool),
-            detail: `调用只读工具 ${p.tool}${args ? `（${args}）` : ''}`,
+            detail: `调用工具 ${p.tool}${args ? `（${args}）` : ''}`,
             argsText: args || '（无参数）',
             status: 'running'
           });
@@ -279,9 +279,9 @@ export const useRunStore = defineStore('run', () => {
           break;
         }
         case 'run_completed': {
-          terminalSeen = true;
           if (answerIdx !== null && steps[answerIdx]?.status === 'running') {
-            steps[answerIdx] = { ...steps[answerIdx]!, status: 'done', detail: `回答完成（${stream.value.length} 字）` };
+            // F04：完成后关闭回答步骤并把标题改掉，不再叫"正在生成回答"
+            steps[answerIdx] = { ...steps[answerIdx]!, status: 'done', title: '回答完成', detail: `回答完成（${stream.value.length} 字）` };
             answerIdx = null;
           }
           const p = ev.payload as { steps: number; toolCalls: number; ms: number };
@@ -295,7 +295,6 @@ export const useRunStore = defineStore('run', () => {
           break;
         }
         case 'run_failed': {
-          terminalSeen = true;
           if (answerIdx !== null && steps[answerIdx]?.status === 'running') {
             steps[answerIdx] = { ...steps[answerIdx]!, status: 'failed' };
             answerIdx = null;
@@ -311,7 +310,6 @@ export const useRunStore = defineStore('run', () => {
           break;
         }
         case 'run_cancelled': {
-          terminalSeen = true;
           if (answerIdx !== null && steps[answerIdx]?.status === 'running') {
             steps[answerIdx] = { ...steps[answerIdx]!, status: 'cancelled' };
             answerIdx = null;
@@ -330,11 +328,28 @@ export const useRunStore = defineStore('run', () => {
           break;
       }
     }
-    // 流收尾仍未见终态事件：答案步骤不可能再推进，置为失败避免"永远进行中"
-    if (!terminalSeen) {
-      for (const s of steps) if (s.kind === 'answer' && s.status === 'running') s.status = 'failed';
-    }
+    // F04 修复：**没有**终态事件时不再擅自把回答步骤标成失败 ——
+    // 流式进行中本来就没有终态；真正的断流由 finishRun() 合成 run_failed 事件，
+    // cancelRun() 合成 run_cancelled，终态在这里统一关闭，不在计算属性里猜。
     return steps;
+  });
+
+  /** 按 toolCallId 配对的工具调用（含参数与结果），供消息渲染与历史提交使用 */
+  const toolCalls = computed<
+    Array<{ toolCallId: string; tool: string; args: Record<string, unknown>; ok: boolean | null; ms?: number; summary?: string; resultKind?: string; result?: unknown; error?: { code: string; message: string } }>
+  >(() => {
+    const map = new Map<string, { toolCallId: string; tool: string; args: Record<string, unknown>; ok: boolean | null; ms?: number; summary?: string; resultKind?: string; result?: unknown; error?: { code: string; message: string } }>();
+    for (const ev of events.value) {
+      if (ev.type === 'tool_started') {
+        const p = ev.payload as { toolCallId: string; tool: string; args: Record<string, unknown> };
+        map.set(p.toolCallId, { toolCallId: p.toolCallId, tool: p.tool, args: p.args ?? {}, ok: null });
+      } else if (ev.type === 'tool_result') {
+        const p = ev.payload as { toolCallId: string; tool: string; ok: boolean; ms: number; summary: string; resultKind?: string; result?: unknown; error?: { code: string; message: string } };
+        const cur = map.get(p.toolCallId) ?? { toolCallId: p.toolCallId, tool: p.tool, args: {}, ok: null };
+        map.set(p.toolCallId, { ...cur, ok: p.ok, ms: p.ms, summary: p.summary, resultKind: p.resultKind, result: p.result ?? null, error: p.error });
+      }
+    }
+    return [...map.values()];
   });
 
   function toolTitle(tool: string): string {
@@ -345,6 +360,16 @@ export const useRunStore = defineStore('run', () => {
         return '查询房间状态';
       case 'query_free_rooms':
         return '查找空闲房间';
+      case 'prepare_issue_ticket':
+        return '准备报修单';
+      case 'prepare_room_closure':
+        return '准备停用计划';
+      case 'prepare_notification':
+        return '准备站内通知';
+      case 'prepare_duty_session':
+        return '准备值班操作';
+      case 'create_operations_report':
+        return '生成运营日报';
       default:
         return `执行 ${tool}`;
     }
@@ -409,9 +434,10 @@ export const useRunStore = defineStore('run', () => {
     allowedTools.value = [];
     lastResult.value = null;
     extraResult.value = null;
+    pendingConfirm.value = null;
   }
 
-  function beginRun(q: string): void {
+  function beginRun(q: string): string {
     resetRun();
     question.value = q;
     runId.value = newRunId();
@@ -422,6 +448,12 @@ export const useRunStore = defineStore('run', () => {
     timer = window.setInterval(() => {
       elapsedMs.value = Date.now() - t0;
     }, 100);
+    return runId.value;
+  }
+
+  /** N01：会话端点的 runId 由服务端生成 —— 通过 run_accepted 事件采纳，事件过滤随之切换 */
+  function adoptRunId(serverRunId: string): void {
+    if (serverRunId && serverRunId !== runId.value) runId.value = serverRunId;
   }
 
   function appendEvent(ev: RunEvent): void {
@@ -460,15 +492,38 @@ export const useRunStore = defineStore('run', () => {
           extraResult.value = { kind: 'lab_status', payload: p.result as LabStatusResult };
         } else if (p.resultKind === 'free_rooms') {
           extraResult.value = { kind: 'free_rooms', payload: p.result as FreeRoomsResult };
-        } else {
+        } else if (p.resultKind === 'schedule') {
           lastResult.value = p.result as ScheduleQueryResult;
         }
+        // operation_proposal / operations_report 不进全局结果区：
+        // 它们由消息内的提案卡 / 日报卡渲染（活跃与历史同一组件）
         // ★ 注意：这里**不改 runStatus** —— 工具结果只是中间产物，
         //   输入框要等 run_completed / run_failed / run_cancelled + 流收尾才解锁。
         break;
       }
       case 'run_completed': {
         if (runStatus.value === 'running') runStatus.value = 'completed';
+        // R03/C04：以服务端权威全文对齐（delta 可能漏块；durable 确认在保存成功后发出）
+        const p2 = ev.payload as { answer?: string };
+        if (typeof p2.answer === 'string' && p2.answer) stream.value = p2.answer;
+        break;
+      }
+      case 'save_failed': {
+        // R03：保存失败必须可见 —— 保留已生成内容，但明确"刷新后可能丢失"
+        const p3 = ev.payload as { message?: string };
+        error.value = { code: 'save_failed', message: p3.message ?? '本轮结果写入会话历史失败' };
+        break;
+      }
+      case 'end': {
+        // R03：end 是传输收尾 + 保存确认。saved=false 时状态转为 failed（可见错误），输入解锁
+        const p4 = ev.payload as { saved?: boolean; saveError?: string; status?: string };
+        if (p4.saved === false) {
+          error.value = {
+            code: 'save_failed',
+            message: `本轮结果已生成，但写入会话历史失败（${p4.saveError ?? '未知原因'}）。请复制保留重要内容。`
+          };
+          if (runStatus.value === 'running') runStatus.value = 'failed';
+        }
         break;
       }
       case 'answer_delta': {
@@ -476,10 +531,26 @@ export const useRunStore = defineStore('run', () => {
         stream.value += p.text;
         break;
       }
+      case 'need_confirm': {
+        // ops.v1：活跃轮待确认提案。卡片本体渲染在消息流内（OperationCard），
+        // 这里保存载荷供"有未确认办理单"类提示使用
+        pendingConfirm.value = ev.payload as NeedConfirmPayload;
+        break;
+      }
+      case 'task_updated':
+      case 'operation_result':
+        // ops.v1：本轮决策经 REST 返回；SSE 侧登记备用。事件本身保留在 events 轨迹里
+        break;
       case 'run_failed': {
         const p = ev.payload as StreamErrorInfo;
         error.value = p;
         runStatus.value = 'failed';
+        break;
+      }
+      case 'run_cancelled': {
+        // F05：服务端发出的取消同样是终态。此前缺这个分支会让输入永久锁住。
+        // 终态幂等：只在运行中才收敛到 cancelled。
+        if (runStatus.value === 'running') runStatus.value = 'cancelled';
         break;
       }
       default:
@@ -600,10 +671,12 @@ export const useRunStore = defineStore('run', () => {
     demoDate,
     exampleQuestions,
     trace,
+    toolCalls,
     periodSummary,
     // actions
     resetRun,
     beginRun,
+    adoptRunId,
     ingest,
     failRun,
     cancelRun,

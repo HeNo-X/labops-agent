@@ -5,6 +5,7 @@
  */
 
 import type { PeriodKey } from './periods.ts';
+import type { Proposal } from './operations-contract.ts';
 
 // ===========================================================================
 //  数据来源标识（界面与事件都必须带，且不得把后两者说成"实时数据"）
@@ -30,24 +31,38 @@ export type EngineType = 'agnes' | 'demo';
 //  SSE 事件契约
 // ===========================================================================
 
-/** 第一阶段实现的事件类型 */
+/** 当前实现的事件类型 */
 export const RUN_EVENT_TYPES = [
+  /** 消息接受确认（会话端点专用）：payload 携带全部正式 ID（N01/N17） */
+  'run_accepted',
   'run_started',
   'tool_started',
   'tool_result',
   'answer_delta',
   'run_completed',
-  'run_failed'
+  'run_failed',
+  /** R03：终态已执行但持久化失败 —— 前端必须展示"保存失败"，不得静默 */
+  'save_failed',
+  /**
+   * ops.v1（阶段 2B）：服务端产出一个待确认业务提案后发出。
+   * payload 携带完整提案预览；实际执行只经受权 UI 的决策端点，模型无权提交。
+   */
+  'need_confirm',
+  /** ops.v1：任务状态变化（本轮由决策 REST 端点驱动；SSE 侧登记备用） */
+  'task_updated',
+  /** ops.v1：一次业务副作用的结果（SSE 侧登记备用；本轮经 REST 返回） */
+  'operation_result',
+  /** 协议层收尾（传输结束 + 保存确认 payload.saved）；不是业务终态 */
+  'end'
 ] as const;
 
 /**
- * 预留但**第一阶段不发出**的事件（类型固定，便于后续阶段增量实现时前后端不用改契约）：
- *   need_confirm  —— 危险操作二次确认（第一阶段不执行任何写操作）
- *   run_cancelled —— 用户中途取消
+ * 预留但**本轮仍未发出**的事件（类型固定，便于后续阶段增量实现时前后端不用改契约）：
+ *   run_cancelled —— 用户中途取消（本轮仍由前端合成）
  *   thinking      —— 内部推理步骤。注意：绝不把模型内部思维链展示给用户，
  *                    该事件若启用也只承载\"正在查询课表\"这类可观察的步骤摘要。
  */
-export const RESERVED_RUN_EVENT_TYPES = ['need_confirm', 'run_cancelled', 'thinking'] as const;
+export const RESERVED_RUN_EVENT_TYPES = ['run_cancelled', 'thinking'] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number] | (typeof RESERVED_RUN_EVENT_TYPES)[number];
 
@@ -112,7 +127,7 @@ export interface ToolStartedPayload {
 }
 
 /** 结构化结果的类别。前端据此选择渲染器，不再假设所有工具都返回课表 */
-export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms';
+export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report';
 
 export interface ToolResultPayload {
   step: number;
@@ -127,7 +142,7 @@ export interface ToolResultPayload {
   /** 结果类别，决定前端用哪个渲染器 */
   resultKind?: ToolResultKind;
   /** 结构化结果，前端只接受这一份（绝不插入模型返回的任意 HTML） */
-  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult;
+  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult;
   error?: { code: string; message: string };
 }
 
@@ -142,8 +157,33 @@ export interface RunCompletedPayload {
   ms: number;
   sourceType: DataSourceType;
   engine: EngineType;
+  /**
+   * ops.v1：本次运行结束时关联任务的业务状态。
+   * awaiting_confirmation 必须如实呈现——它**不是**"业务已办完"（任务书 §11.3）。
+   */
+  taskStatus?: string;
   /** 模型用量（仅 agnes 引擎有） */
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+}
+
+/** create_operations_report 的结构化产物（只创建给当前用户看的报告，不自动发布） */
+export interface OperationsReportResult {
+  reportId: string;
+  artifactVersion: number;
+  createdAt: string;
+  range: { startDate: string; endDate: string };
+  sections: string[];
+  metrics: Array<{
+    key: string;
+    label: string;
+    value: number | null;
+    unit: string;
+    status: 'known' | 'unknown' | 'partial';
+    note: string;
+  }>;
+  /** 数据依据：每一段统计用了什么来源 */
+  evidence: Array<{ section: string; sourceType: DataSourceType; sourceLabel: string; note: string }>;
+  notes: string[];
 }
 
 export interface RunFailedPayload {
@@ -196,9 +236,17 @@ export interface LabStatusResult {
     occupiedPeriods: Array<{ periodKey: PeriodKey; periodLabel: string; startTime: string; endTime: string; courseNames: string[] }>;
     /** 下一节课（含今天剩余时间内的下一次；无则 null） */
     nextLesson: { periodLabel: string; startTime: string; courseName: string } | null;
+    /**
+     * nextLesson 为 null 的原因（F18）：
+     *   no_more_today = 今天且当天剩余无课；not_applicable = 非当天，不提供该字段；
+     *   unknown = 教学周不可确定等无法统计的情况
+     */
+    nextLessonReason: 'no_more_today' | 'not_applicable' | 'unknown';
   };
   /** 在室人数：永远 null —— 没有数据来源，绝不允许编造 */
   occupancy: null;
+  /** 档案状态口径说明（F19）：active/closed 来自房间档案快照，不是实时门禁 */
+  registryStatusNote: string;
   term: string;
   weekNo: number | null;
   weekDeterminable: boolean;
@@ -214,28 +262,42 @@ export interface FreeRoomsArgs {
   date?: string;
   /** 缺省 = 查全天（返回每个节次的空闲名单）；指定则只看该节次 */
   periodKey?: PeriodKey;
+  /** 节次范围（F12）：如"下午"= ['pm1','pm2'] */
+  periodKeys?: PeriodKey[];
 }
 
 export interface FreeRoomsResult {
   date: string;
   weekdayLabel: string;
-  /** null = 未按节次过滤（全天口径） */
+  /** null = 未按单一节次过滤（多节次或全天口径） */
   periodFilter: PeriodKey | null;
+  /** 实际参与统计的节次集合 */
+  periodKeys: PeriodKey[];
+  /**
+   * 数据覆盖（F09/N10）：'complete' = 课表非空且日期在合理学期范围内，可做无排课推断；
+   * 'missing' = 课表为空；'out_of_range' = 日期超出可信学期范围；
+   * 'unknown' = 教学周不可确定。非 complete 时 freeByPeriod.rooms 一律为空，
+   * 候选只进 unknownCandidates，**不得展示成确认空闲**
+   */
+  coverage: 'complete' | 'missing' | 'out_of_range' | 'unknown';
+  /** 非 complete 时的未确认候选（仅档案开放），UI 必须标注"未知"，不当空闲推荐 */
+  unknownCandidates: string[];
   term: string;
   weekNo: number | null;
   weekDeterminable: boolean;
   /**
-   * 每节次的空闲房间。指定 periodKey 时只有一个元素；
-   * 全天时按节次时间序给出全部六个节次。
+   * 每节次的空闲房间。**只含档案状态为开放（active）的房间**（F11）；
+   * 关闭/停用进 excluded。指定单节次时只有一个元素。
    */
   freeByPeriod: Array<{
     periodKey: PeriodKey;
     periodLabel: string;
     startTime: string;
     endTime: string;
-    /** 该节次无排课的房间（含开放状态），按房号排序 */
-    rooms: Array<{ labName: string; location: string | null; status: 'active' | 'closed' | 'inactive' | null; capacity: number | null }>;
+    rooms: Array<{ labName: string; location: string | null; status: 'active'; capacity: number | null }>;
   }>;
+  /** 因档案状态非"开放"而被排除的房间（课表可能同样空闲，但不宜推荐借用） */
+  excluded: Array<{ labName: string; location: string | null; status: 'closed' | 'inactive'; reason: string }>;
   notes: string[];
   provenance: ScheduleQueryResult['provenance'];
 }

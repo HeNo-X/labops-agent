@@ -105,6 +105,8 @@ export function daysBetween(fromDate: string, toDate: string): number {
 export interface TermConfig {
   term: string;
   termStart: string | null;
+  /** 学期结束日（R09）：缺省时无法证明远期日期的课表完整覆盖 */
+  termEnd?: string | null;
   holidays: string[];
   labMismatchPolicy?: string;
 }

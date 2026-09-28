@@ -16,6 +16,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describeConfig, getConfig, PROJECT_ROOT } from './config.ts';
 import { handleAgentChat, readJsonBody } from './api/agent-chat.ts';
+import { handleConversations } from './api/conversations.ts';
+import { handleTasksApi } from './api/tasks.ts';
 import { loadDataset, verifySnapshotIntegrity } from './data/store.ts';
 import { runtimeCapabilities } from './agent/run.ts';
 import { isAgnesConfigured } from './llm/agnes.ts';
@@ -131,7 +133,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     json(res, 200, {
       ok: true,
       service: 'labops-agent',
-      stage: 1,
+      stage: '2b-ops-sandbox',
       capability: runtimeCapabilities(),
       data: {
         sourceType: ds.sourceType,
@@ -178,6 +180,27 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return;
     }
     await handleAgentChat(req, res);
+    return;
+  }
+
+  // ops.v1（阶段 2B）：任务 / 提案决策 / 回执 / 能力协商
+  if (
+    p === '/api/capabilities' ||
+    p.startsWith('/api/tasks') ||
+    p.startsWith('/api/proposals') ||
+    p.startsWith('/api/operations')
+  ) {
+    if (await handleTasksApi(req, res, p)) return;
+    await readJsonBody(req).catch(() => undefined);
+    json(res, 405, { error: 'method_not_allowed', message: `不支持的操作：${req.method} ${p}` });
+    return;
+  }
+
+  // 会话 API（M1 持久化）：列表/创建/详情/改名/软删除 + 带落库的消息 SSE
+  if (p.startsWith('/api/conversations') || /^\/api\/runs\/[^/]+(\/cancel)?$/.test(p)) {
+    if (await handleConversations(req, res, p)) return;
+    await readJsonBody(req).catch(() => undefined);
+    json(res, 405, { error: 'method_not_allowed', message: `不支持的操作：${req.method} ${p}` });
     return;
   }
 
@@ -231,6 +254,7 @@ function main(): void {
     console.log(' Prompt 版本     : ' + PROMPT_VERSION);
     console.log(' 监听            : http://' + cfg.host + ':' + cfg.port);
     console.log(' API             : GET  /api/agent/health   GET /api/state   POST /api/agent/chat (SSE)');
+    console.log('                   GET /api/capabilities  GET /api/tasks  POST /api/tasks/:id/decisions');
     if (ds!.warnings.length) {
       console.log(' 载入告警:');
       for (const w of ds!.warnings) console.log('   - ' + w);

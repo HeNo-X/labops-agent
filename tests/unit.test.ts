@@ -295,39 +295,41 @@ test('availableRoomNames 数字序排序（D501 < D503 < D515 …）', () => {
 //  工具注册表：白名单与参数收敛
 // ---------------------------------------------------------------------------
 
-test('coerceQueryScheduleArgs：剥离错误类型的参数，不把 undefined 塞进 schema', () => {
+test('F17：coerce 显式非法参数必须报错，绝不静默丢弃后扩大查询范围', () => {
   assert.deepEqual(coerceQueryScheduleArgs({}), {});
-  assert.deepEqual(coerceQueryScheduleArgs({ date: 20260930 }), {}, '数字型 date 直接丢弃');
   assert.deepEqual(coerceQueryScheduleArgs({ labName: '  E310  ' }), { labName: 'E310' });
-  assert.deepEqual(coerceQueryScheduleArgs({ periodKey: 'noon' }), {}, '非法节次丢弃');
   assert.deepEqual(coerceQueryScheduleArgs({ date: '2026-09-30', extra: 'ignored' }), { date: '2026-09-30' });
+  // 显式给了但非法 → 抛参数错误（此前静默丢弃会变成"查全天/查今天"）
+  assert.throws(() => coerceQueryScheduleArgs({ periodKey: 'noon' }), (e: unknown) => e instanceof ToolArgumentError);
+  assert.throws(() => coerceQueryScheduleArgs({ date: 20260930 }), (e: unknown) => e instanceof ToolArgumentError);
 });
 
-test('executeTool：未知工具返回可恢复错误 + 可用工具清单，不抛异常', () => {
-  const r = executeTool('send_message', {}, { dataset: dataset(), now: NOW });
+test('executeTool：未知工具返回可恢复错误 + 可用工具清单，不抛异常', async () => {
+  const r = await executeTool('send_message', {}, { dataset: dataset(), now: NOW });
   assert.equal(r.ok, false);
   if (!r.ok) {
     assert.equal(r.code, 'unknown_tool');
-    assert.deepEqual(r.suggestions, ['query_schedule', 'query_lab_status', 'query_free_rooms']);
+    assert.ok(r.suggestions.includes('query_schedule'));
+    assert.ok(r.suggestions.includes('prepare_issue_ticket'));
     assert.match(r.summary, /可用工具/);
   }
 });
 
-test('executeTool：合法调用返回 ok=true 与结构化结果', () => {
-  const r = executeTool('query_schedule', { date: '2026-09-30', labName: 'E310' }, { dataset: dataset(), now: NOW });
+test('executeTool：合法调用返回 ok=true 与结构化结果', async () => {
+  const r = await executeTool('query_schedule', { date: '2026-09-30', labName: 'E310' }, { dataset: dataset(), now: NOW });
   assert.equal(r.ok, true);
-  if (r.ok) {
+  if (r.ok && r.resultKind === 'schedule') {
     assert.equal(r.result.labName, 'E310');
     assert.match(r.summary, /脱敏快照/);
   }
 });
 
-test('executeTool：参数非法时返回 ok=false 而不是抛异常（让模型有一次纠正机会）', () => {
-  const r = executeTool('query_schedule', { date: '2026-09-30', labName: 'E999' }, { dataset: dataset(), now: NOW });
+test('executeTool：参数非法时返回 ok=false 而不是抛异常（让模型有一次纠正机会）', async () => {
+  const r = await executeTool('query_schedule', { date: '2026-09-30', labName: 'E999' }, { dataset: dataset(), now: NOW });
   assert.equal(r.ok, true, '房间不存在是可恢复的"空结果"，不是工具失败');
-  if (r.ok) assert.equal(r.result.reason, 'lab_not_found');
+  if (r.ok && r.resultKind === 'schedule') assert.equal(r.result.reason, 'lab_not_found');
 
-  const bad = executeTool('query_schedule', { date: '乱写' }, { dataset: dataset(), now: NOW });
+  const bad = await executeTool('query_schedule', { date: '乱写' }, { dataset: dataset(), now: NOW });
   assert.equal(bad.ok, false);
   if (!bad.ok) assert.equal(bad.code, 'bad_date');
 });
@@ -336,19 +338,45 @@ test('executeTool：参数非法时返回 ok=false 而不是抛异常（让模�
 //  意图解析
 // ---------------------------------------------------------------------------
 
+/** F10：合法结果取日期；非法结果在测试里显式失败 */
+function dateOf(r: ReturnType<typeof resolveDate>): string | null {
+  if (r === null) return null;
+  if ('invalid' in r) throw new Error(`不该出现非法日期：${r.raw}`);
+  return r.date;
+}
+
 test('resolveDate：相对日 / 星期 / 绝对日 / 月日 四类都要对', () => {
-  assert.equal(resolveDate('今天有哪些课', NOW)?.date, '2026-09-26');
-  assert.equal(resolveDate('明天的课', NOW)?.date, '2026-09-27');
-  assert.equal(resolveDate('昨天有哪些课', NOW)?.date, '2026-09-25');
-  assert.equal(resolveDate('后天呢', NOW)?.date, '2026-09-28');
-  assert.equal(resolveDate('本周三', NOW)?.date, '2026-09-23', '本周（09-21~09-27）的周三');
-  assert.equal(resolveDate('下周三', NOW)?.date, '2026-09-30');
-  assert.equal(resolveDate('上周五', NOW)?.date, '2026-09-18');
-  assert.equal(resolveDate('周三', NOW)?.date, '2026-09-23', '裸写星期默认取本周');
-  assert.equal(resolveDate('2026-09-30', NOW)?.date, '2026-09-30');
-  assert.equal(resolveDate('2026年9月30日', NOW)?.date, '2026-09-30');
-  assert.equal(resolveDate('9月30日', NOW)?.date, '2026-09-30');
+  assert.equal(dateOf(resolveDate('今天有哪些课', NOW)), '2026-09-26');
+  assert.equal(dateOf(resolveDate('明天的课', NOW)), '2026-09-27');
+  assert.equal(dateOf(resolveDate('昨天有哪些课', NOW)), '2026-09-25');
+  assert.equal(dateOf(resolveDate('后天呢', NOW)), '2026-09-28');
+  assert.equal(dateOf(resolveDate('本周三', NOW)), '2026-09-23', '本周（09-21~09-27）的周三');
+  assert.equal(dateOf(resolveDate('下周三', NOW)), '2026-09-30');
+  assert.equal(dateOf(resolveDate('上周五', NOW)), '2026-09-18');
+  assert.equal(dateOf(resolveDate('周三', NOW)), '2026-09-23', '裸写星期默认取本周');
+  assert.equal(dateOf(resolveDate('2026-09-30', NOW)), '2026-09-30');
+  assert.equal(dateOf(resolveDate('2026年9月30日', NOW)), '2026-09-30');
+  assert.equal(dateOf(resolveDate('9月30日', NOW)), '2026-09-30');
   assert.equal(resolveDate('这天有没有课', NOW), null, '解析不出来必须返回 null，不许猜');
+});
+
+test('F10：显式非法日期必须返回 invalid 标记，绝不静默回落到今天', () => {
+  for (const bad of ['E310 2026-02-30 有哪些课？', '2026-13-01 的课', 'E310 9月32日 有课吗？']) {
+    const r = resolveDate(bad, NOW);
+    assert.ok(r !== null && 'invalid' in r, `「${bad}」应判为非法`);
+    if (r && 'invalid' in r) assert.match(r.reason, /不是真实存在的日期|无效/);
+  }
+});
+
+test('F12：节次范围（上午/下午/晚上）与阿拉伯数字节次', () => {
+  const it1 = parseIntent('明天下午哪些实验室空着？', NOW);
+  assert.deepEqual(it1.periodKeys, ['pm1', 'pm2']);
+  assert.equal(it1.periodKey, null);
+  const it2 = parseIntent('明天下午第2大节哪些房间空着？', NOW);
+  assert.equal(it2.periodKey, 'pm2', '阿拉伯数字"第2大节"要能识别');
+  assert.equal(it2.periodKeys, null);
+  const it3 = parseIntent('上午第二大节', NOW);
+  assert.equal(it3.periodKey, 'am2');
 });
 
 test('resolvePeriodKey：六节次的中文说法', () => {
@@ -424,21 +452,42 @@ test('query_lab_status：缺 labName 抛参数错误', () => {
   assert.throws(() => runQueryLabStatus({}, dataset(), NOW), (e: unknown) => e instanceof ToolArgumentError);
 });
 
-test('query_free_rooms：按节次列空闲房间，被占用/停用的处理正确', () => {
+test('F11：空闲主名单只含档案开放房间，关闭/停用进 excluded 并给理由', () => {
   const r = runQueryFreeRooms({ date: '2026-09-30', periodKey: 'am1' }, dataset(), NOW);
-  // 2026-09-30 是周三：am1 有 E310 的"每周课" → E310 不空闲
   const am1 = r.freeByPeriod[0];
   assert.equal(am1.periodKey, 'am1');
-  const freeNames = am1.rooms.map((x) => x.labName);
-  assert.equal(freeNames.includes('E310'), false, 'am1 被占用');
-  assert.deepEqual(freeNames, ['D517', 'D526'], 'D517/D526 该节次空闲（状态仍然如实带出）');
+  assert.equal(am1.rooms.map((x) => x.labName).includes('E310'), false, 'am1 被占用');
+  // D517/D526 档案关闭：即使无排课也进 excluded，不当主推荐
+  assert.deepEqual(am1.rooms.map((x) => x.labName), []);
+  assert.deepEqual(r.excluded.map((x) => x.labName), ['D517', 'D526']);
+  assert.ok(r.excluded.every((x) => x.reason.length > 0));
 });
 
-test('query_free_rooms：单双周过滤生效（第 4 周双周，am2 的单周课不占用）', () => {
-  // 2026-09-30 = 第 4 教学周（双周）；tt_2 是单周课 → am2 空闲
-  const r = runQueryFreeRooms({ date: '2026-09-30', periodKey: 'am2' }, dataset(), NOW);
-  const freeNames = r.freeByPeriod[0].rooms.map((x) => x.labName);
-  assert.equal(freeNames.includes('E310'), true, '双周不命中单周课，E310 在 am2 空闲');
+test('query_free_rooms：termEnd 齐备才判 complete + F12 节次范围', () => {
+  // R09：补上 termEnd 后日期在覆盖范围内 → complete，双周不命中单周课
+  const withEnd = dataset({
+    term: { term: 'T1', termStart: '2026-09-07', termEnd: '2027-01-15', holidays: [] }
+  });
+  const r = runQueryFreeRooms({ date: '2026-09-30', periodKey: 'am2' }, withEnd, NOW);
+  assert.equal(r.coverage, 'complete');
+  assert.deepEqual(r.freeByPeriod[0].rooms.map((x) => x.labName), ['E310'], '双周不命中单周课，开放的 E310 空闲');
+  // F12：下午范围 = pm1+pm2
+  const r2 = runQueryFreeRooms({ date: '2026-09-30', periodKeys: ['pm1', 'pm2'] }, withEnd, NOW);
+  assert.deepEqual(r2.periodKeys, ['pm1', 'pm2']);
+  assert.equal(r2.periodFilter, null);
+  assert.equal(r2.freeByPeriod.length, 2);
+  // F09：课表为空 → coverage=missing，不给确定名单（rooms 必须为空，候选进 unknownCandidates）
+  const empty = dataset({ timetable: [] });
+  const r3 = runQueryFreeRooms({ date: '2026-09-30' }, empty, NOW);
+  assert.equal(r3.coverage, 'missing');
+  assert.deepEqual(r3.freeByPeriod[0].rooms, [], 'missing 覆盖绝不输出确认空闲名单');
+  assert.deepEqual(r3.unknownCandidates, ['E310'], '未确认候选只含档案开放房间');
+  assert.ok(r3.notes.some((n) => n.includes('课表数据为空')));
+  // R09：termEnd 存在且日期超出 → out_of_range
+  const far = runQueryFreeRooms({ date: '2030-09-30' }, withEnd, NOW);
+  assert.equal(far.coverage, 'out_of_range');
+  assert.deepEqual(far.freeByPeriod[0].rooms, []);
+  assert.deepEqual(far.unknownCandidates, ['E310']);
 });
 
 test('query_free_rooms：全天口径按六个节次分组', () => {
@@ -450,9 +499,21 @@ test('query_free_rooms：全天口径按六个节次分组', () => {
 
 test('query_free_rooms：坏 periodKey 抛参数错误', () => {
   assert.throws(
-    () => runQueryFreeRooms({ date: '2026-09-30', periodKey: 'noon' }, dataset(), NOW),
+    () => runQueryFreeRooms({ date: '2026-09-30', periodKey: 'noon' as never }, dataset(), NOW),
     (e: unknown) => e instanceof ToolArgumentError && (e as ToolArgumentError).code === 'bad_period'
   );
+});
+
+test('R10：数字 periodKey / 字符串 periodKeys → 结构化参数错误，不变全天', async () => {
+  const r1 = await executeTool('query_free_rooms', { date: '2026-09-30', periodKey: 999 }, { dataset: dataset(), now: NOW });
+  assert.equal(r1.ok, false);
+  if (!r1.ok) assert.equal(r1.code, 'bad_period');
+  const r2 = await executeTool('query_free_rooms', { date: '2026-09-30', periodKeys: 'pm1' }, { dataset: dataset(), now: NOW });
+  assert.equal(r2.ok, false);
+  if (!r2.ok) assert.equal(r2.code, 'bad_period');
+  const r3 = await executeTool('query_schedule', { date: '2026-09-30', labName: 'E310', periodKey: 999 }, { dataset: dataset(), now: NOW });
+  assert.equal(r3.ok, false);
+  if (!r3.ok) assert.equal(r3.code, 'bad_period');
 });
 
 test('会话承接：写入后可读，TTL 外或换 id 拿不到', () => {

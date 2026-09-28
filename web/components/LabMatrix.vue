@@ -51,8 +51,9 @@ const filteredGroups = computed(() => {
 
 function ask(lab: Lab): void {
   store.selectedLab = lab.name;
-  const d = store.demoDate;
-  emit('ask', d ? `${lab.name} ${d} 有哪些课？` : `${lab.name} 今天有哪些课？`);
+  // F29：只回填草稿（由父组件填入输入框），日期用"今天"由服务端解析；
+  // 不再偷偷使用第 4 教学周周三的示范日期，也不自动发请求
+  emit('ask', `${lab.name} 今天有哪些课？`);
 }
 </script>
 

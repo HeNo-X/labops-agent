@@ -83,6 +83,15 @@ export interface AppConfig {
     snapshotPath: string;
     fallbackDemoPath: string;
   };
+  /**
+   * ops.v1 沙盒身份（任务书 §7.2 的最小版）。
+   * 老系统没有可复用的登录体系 → 沙盒用演示身份：默认角色由 .env 决定，
+   * 前端可在沙盒内切换演示视角（学生/志愿者/管理员），能力边界由服务端校验。
+   * production 环境未接入；接入后此处必须换成真实身份委托，绝不能沿用演示身份。
+   */
+  sandbox: {
+    defaultRole: 'admin' | 'volunteer' | 'student';
+  };
   logLevel: 'debug' | 'info' | 'warn' | 'error';
 }
 
@@ -113,6 +122,13 @@ export function getConfig(): AppConfig {
       snapshotPath: path.join(PROJECT_ROOT, 'seed', 'snapshot.json'),
       fallbackDemoPath: path.join(PROJECT_ROOT, 'seed', 'fallback-demo.json')
     },
+    sandbox: {
+      defaultRole: (['admin', 'volunteer', 'student'] as const).includes(
+        str('LABOPS_SANDBOX_ROLE', 'admin') as 'admin' | 'volunteer' | 'student'
+      )
+        ? (str('LABOPS_SANDBOX_ROLE', 'admin') as 'admin' | 'volunteer' | 'student')
+        : 'admin'
+    },
     logLevel: (str('LOG_LEVEL', 'info') as AppConfig['logLevel'])
   };
   return cached;
@@ -126,6 +142,7 @@ export function describeConfig(c: AppConfig): string[] {
     `Agnes API Key   : ${c.agnes.apiKey ? '已配置 ✓（仅服务端持有）' : '未配置 → 进入演示引擎模式'}`,
     `步数/墙钟上限   : ${c.agent.maxSteps} 步 / ${c.agent.wallClockMs} ms`,
     `实时数据开关    : ${c.data.live ? '开（LIVE_DATA=1，直接读真实 state.json）' : '关（默认用脱敏快照）'}`,
+    `沙盒演示身份    : ${c.sandbox.defaultRole}（ops.v1 业务写操作仅在沙盒执行，生产适配器未接入）`,
     `日志级别        : ${c.logLevel}`
   ];
 }

@@ -25,10 +25,24 @@ export interface DateResolution {
   source: string;
 }
 
+/** 显式非法的日期输入（如 2026-02-30 / 2026-13-01）——绝不允许静默回落到今天（F10） */
+export interface DateInvalid {
+  invalid: true;
+  raw: string;
+  reason: string;
+}
+
 export interface Intent {
   date: DateResolution | null;
+  /** 用户写了日期但日期不合法 —— 优先级高于一切缺省/沿用逻辑 */
+  dateInvalid: DateInvalid | null;
+  /** 单一节次（与 periodKeys 二选一） */
   periodKey: PeriodKey | null;
+  /** 节次范围（"上午"= am1+am2；"下午"= pm1+pm2；"晚上"= eve_ab+eve_cd）—— F12 */
+  periodKeys: PeriodKey[] | null;
   labName: string | null;
+  /** 上一问任务类型（由 run.ts 从会话上下文注入，N08 追问继承） */
+  lastTask?: string | null;
   /** 解析过程中发现的歧义/降级说明 */
   notes: string[];
 }
@@ -52,6 +66,9 @@ function stripDateLike(text: string): string {
     .replace(/\d{1,2}\s*[-/]\s*\d{1,2}(?!\d)/g, ' ');
 }
 
+// N08："现在/此刻/当前"是显式时间条件，必须覆盖上下文里的历史日期
+const NOW_WORDS = /现在|此刻|当前|目前|刚刚|这会儿|眼下/;
+
 const REL_DAYS: Array<[RegExp, number, string]> = [
   [/前天/, -2, '前天 = 服务端当天 - 2 天'],
   [/昨天|昨日/, -1, '昨天 = 服务端当天 - 1 天'],
@@ -63,8 +80,9 @@ const REL_DAYS: Array<[RegExp, number, string]> = [
 /**
  * 解析用户问题里的日期指代。解析不出来返回 null —— 由调用方决定是否回退到"今天"，
  * 绝不悄悄假定一个日期然后当成事实说出来。
+ * 写了日期但日期非法（2026-02-30 / 2026-13-01）→ 返回 DateInvalid，调用方必须显式报错（F10）。
  */
-export function resolveDate(text: string, now: ServerNow): DateResolution | null {
+export function resolveDate(text: string, now: ServerNow): DateResolution | DateInvalid | null {
   const t = String(text ?? '');
 
   // ① 绝对日期优先：2026-09-30 / 2026年9月30日 / 9月30日
@@ -74,6 +92,11 @@ export function resolveDate(text: string, now: ServerNow): DateResolution | null
     if (isValidDateString(iso)) {
       return { date: iso, raw: abs[0], source: `识别为完整日期：${iso}` };
     }
+    return {
+      invalid: true,
+      raw: abs[0],
+      reason: `「${abs[0]}」不是真实存在的日期（${iso} 无效），请检查月份和日期后重试`
+    };
   }
   const md = t.match(/(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
   if (md) {
@@ -82,6 +105,11 @@ export function resolveDate(text: string, now: ServerNow): DateResolution | null
     if (isValidDateString(iso)) {
       return { date: iso, raw: md[0], source: `识别为「月日」形式，按当前年份 ${year} 补全：${iso}` };
     }
+    return {
+      invalid: true,
+      raw: md[0],
+      reason: `「${md[0]}」不是真实存在的日期（${iso} 无效），请检查后重试`
+    };
   }
 
   const weekBase = mondayOfWeek(now.date);
@@ -116,6 +144,11 @@ export function resolveDate(text: string, now: ServerNow): DateResolution | null
     if (re.test(t)) return { date: addDays(now.date, delta), raw: t.match(re)![0], source: src };
   }
 
+  // ④ "现在"类指代：显式取服务端当天（N08），不允许沿用上一问的日期
+  if (NOW_WORDS.test(t)) {
+    return { date: now.date, raw: t.match(NOW_WORDS)![0], source: `「${t.match(NOW_WORDS)![0]}」= 服务端当前日期 ${now.date}（Asia/Shanghai）` };
+  }
+
   return null;
 }
 
@@ -124,22 +157,40 @@ export function resolveDate(text: string, now: ServerNow): DateResolution | null
 // ===========================================================================
 
 const PERIOD_PHRASES: Array<[RegExp, PeriodKey]> = [
-  [/上午\s*第?一\s*大?节/, 'am1'],
-  [/上午\s*第?二\s*大?节/, 'am2'],
-  [/下午\s*第?一\s*大?节/, 'pm1'],
-  [/下午\s*第?二\s*大?节/, 'pm2'],
+  [/上午\s*第?\s*[一1]\s*大?节/, 'am1'],
+  [/上午\s*第?\s*[二两2]\s*大?节/, 'am2'],
+  [/下午\s*第?\s*[一1]\s*大?节/, 'pm1'],
+  [/下午\s*第?\s*[二两2]\s*大?节/, 'pm2'],
   [/晚上\s*(?:AB|ab|A、?B)\s*节?/, 'eve_ab'],
   [/晚上\s*(?:CD|cd|C、?D)\s*节?/, 'eve_cd'],
-  [/早\s*上\s*(?:第)?一\s*大?节/, 'am1'],
-  [/第一\s*大\s*节/, 'am1'],
-  [/第二\s*大\s*节/, 'am2']
+  [/早\s*上\s*(?:第)?\s*[一1]\s*大?节/, 'am1'],
+  [/第?\s*[一1]\s*大\s*节/, 'am1'],
+  [/第?\s*[二两2]\s*大\s*节/, 'am2']
 ];
 
+/** 直接写 key 也认 */
 export function resolvePeriodKey(text: string): PeriodKey | null {
   const t = String(text ?? '');
   for (const [re, key] of PERIOD_PHRASES) if (re.test(t)) return key;
-  // 直接写 key 也认
   for (const p of PERIODS) if (new RegExp(`\\b${p.key}\\b`).test(t)) return periodByKey(p.key)?.key ?? null;
+  return null;
+}
+
+/**
+ * 半天范围指代（F12）：上午=am1+am2，下午=pm1+pm2，晚上=eve_ab+eve_cd。
+ * "上午第二大节"这类精确指代由 resolvePeriodKey 先命中，不走范围。
+ */
+const PERIOD_RANGE_PHRASES: Array<[RegExp, PeriodKey[]]> = [
+  [/上午|早上|清晨|am/i, ['am1', 'am2']],
+  [/下午|午后|pm/i, ['pm1', 'pm2']],
+  [/晚上|晚间|夜里|晚上好/, ['eve_ab', 'eve_cd']]
+];
+
+export function resolvePeriodRange(text: string): PeriodKey[] | null {
+  const t = String(text ?? '');
+  // 精确节次优先：已经能定位单节次就不做范围放宽
+  if (resolvePeriodKey(t)) return null;
+  for (const [re, keys] of PERIOD_RANGE_PHRASES) if (re.test(t)) return [...keys];
   return null;
 }
 
@@ -172,14 +223,19 @@ export function resolveAllLabNames(text: string): string[] {
 
 export function parseIntent(text: string, now: ServerNow): Intent {
   const notes: string[] = [];
-  const date = resolveDate(text, now);
+  const rawDate = resolveDate(text, now);
+  const dateInvalid = rawDate && 'invalid' in rawDate ? rawDate : null;
+  const date = rawDate && !('invalid' in rawDate) ? rawDate : null;
   const periodKey = resolvePeriodKey(text);
+  const periodKeys = periodKey ? null : resolvePeriodRange(text);
   const labName = resolveLabName(text);
 
-  if (!date) notes.push('未识别到日期指代 → 缺省按服务端当天处理，并在上下文里标明这是缺省值');
-  if (labName && !date) notes.push(`识别到房间号 ${labName}，但未识别到日期`);
+  if (dateInvalid) notes.push(`日期输入非法：${dateInvalid.reason}`);
+  if (!date && !dateInvalid) notes.push('未识别到日期指代 → 缺省按服务端当天处理，并在上下文里标明这是缺省值');
+  if (labName && !date && !dateInvalid) notes.push(`识别到房间号 ${labName}，但未识别到日期`);
+  if (periodKeys) notes.push(`识别到时间范围（${periodKeys.join('/')}）——"整个范围都空闲"与"其中一节空闲"含义不同，需按口径处理`);
 
-  return { date, periodKey, labName, notes };
+  return { date, dateInvalid, periodKey, periodKeys, labName, notes };
 }
 
 /** 给模型看的"当前时间与指代解算"上下文块（人话，省 token 且模型理解更准） */
@@ -193,10 +249,13 @@ export function buildTimeContext(now: ServerNow, intent: Intent, weekNote: strin
     lines.push(
       `【已解算的日期指代】用户说的「${intent.date.raw}」= ${intent.date.date}（${WEEKDAY_LABELS[weekdayOf(intent.date.date)]}）。依据：${intent.date.source}`
     );
+  } else if (intent.dateInvalid) {
+    lines.push(`【非法日期】用户写的 ${intent.dateInvalid.raw} 不是合法日期。请提示用户修正，不要按今天处理，也不要调用工具。`);
   } else {
     lines.push(`【日期指代】用户没有明确说日期。若需要日期，请用 ${now.date}（今天）。`);
   }
   if (intent.labName) lines.push(`【已识别的房间号】${intent.labName}`);
   if (intent.periodKey) lines.push(`【已识别的节次】${intent.periodKey}`);
+  if (intent.periodKeys) lines.push(`【已识别的节次范围】${intent.periodKeys.join('、')}`);
   return lines.join('\n');
 }

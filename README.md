@@ -1,7 +1,7 @@
-# LabOps Agent · 实验室任务画布
+# LabOps Agent · 实验室任务助手
 
-> 用一句话完成实验室运维查询。第一阶段（本仓库当前状态）打通一条纵向链路：
-> **一句话输入 → 任务进度可视化 → 只读工具查课表 → 课程结果 + 数据来源标识。**
+> 用一句话交办实验室任务，Agent 查证后给结论、需要办理的给办理单。当前状态（阶段 2B 首片）：
+> **一句话输入 → 任务流可视化（指令 → 工具 → 结论）→ 3 个只读工具（课表 / 房间状态 / 空闲房间）→ 结构化结果 + 数据来源标识 → 会话承接（"那 E312 呢？"）→ 业务办理（报修 / 临时停用 / 站内通知 / 值班收尾 / 运营日报）→ 提案卡一次确认 → 沙盒执行 → 业务单号与回执**。
 
 来源项目：本校在用的实验室管理系统（真实场景、真实数据、已公网部署）。
 本仓库是**全新独立仓库**，不合并老系统的 Git 历史（老历史含旧版凭据）。
@@ -92,22 +92,23 @@ HOST=0.0.0.0 npm run build && HOST=0.0.0.0 npm start
 | `npm start` | 生产启动（API + 静态托管） |
 | `npm run typecheck` | 前后端全量类型检查 |
 | `npm run seed -- <state.json>` | 从真实数据生成脱敏快照 |
-| `npm test` | 单元测试（35 条） |
-| `npm run test:acceptance` | 端到端验收（打真实 SSE 接口，33 项） |
-| `npm run test:browser` | 真实浏览器验收（桌面 + 手机，32 项） |
+| `npm test` | 单元测试（45 条） |
+| `npm run test:acceptance` | 端到端验收（打真实 SSE 接口，50 项，含会话持久化闭环） |
+| `npm run test:browser` | 真实浏览器验收（桌面 + 手机，45 项，含 P0 竞态与历史恢复用例） |
 | `npm run test:all` | 上面三套全跑 |
 
 ---
 
-## 当前运行状态（2026-09-26 实测）
+## 当前运行状态（2026-09-26 第二轮实测后）
 
 | 项 | 值 |
 |---|---|
 | 推理引擎 | **演示引擎**（未配置 `AGNES_API_KEY`）—— 服务端规则解析，未调用大模型 |
 | 数据来源 | **脱敏快照**（`seed/snapshot.json`） |
 | 数据规模 | 实验室 10 + 开放实验室 6 / 课表 **139** 条 / 学期 `2026-2027-1`，起始日 `2026-09-07` |
-| 已注册工具 | **1 个**：`query_schedule`（只读） |
-| 测试 | 单元 35/35 ｜ 端到端 33/33 ｜ 浏览器 32/32 |
+| 已注册工具 | **3 个**（全部只读）：`query_schedule` / `query_lab_status` / `query_free_rooms` |
+| 会话能力 | **持久化会话工作台**（node:sqlite）：左侧导航最近会话、连续消息流、刷新/重启后历史恢复、`clientRequestId` 幂等提交；`sessionId` 承接上一问的房间号与日期（非法实体不入上下文） |
+| 测试 | 单元 45/45 ｜ 端到端 53/53 ｜ 浏览器 46/46 |
 
 **为什么现在是演示引擎**：`AGNES_API_KEY` 未配置。
 Agnes 适配层已完整实现（`server/llm/agnes.ts`，OpenAI 兼容 `POST /v1/chat/completions`），
@@ -163,7 +164,7 @@ labops-agent/
 │   ├── data/store.ts           live / snapshot / demo 三态载入 + 载入时伪名化
 │   ├── time/term.ts            教学周与节次解算（Asia/Shanghai）
 │   └── obs/trace.ts            trace_id + 结构化日志 + PII 脱敏
-├── web/                        任务画布（Vue 3 + Pinia + TS）
+├── web/                        Agent 工作台（Vue 3 + Pinia + TS）
 │   ├── App.vue                 外壳与布局
 │   ├── stores/run.ts           显式六态状态机
 │   ├── composables/            SSE 消费（UTF-8 增量解码 + seq 去重）
@@ -222,18 +223,92 @@ npm run seed -- /绝对路径/state.json
 
 ---
 
-## 第一阶段能力边界
+## 业务沙盒（2026-09-27 第五轮，阶段 2B）
 
-**能做**：查某房间某天的排课（含合班、单双周、节次过滤、假期、停课），并给出数据来源与依据。
+按《LabOps-Agent-实验室实操功能设计与下一阶段开发任务书》（GPT 生成、P0+P1 批次）交付"模型准备、服务端提交"的业务办理链路：
+
+- **ops.v1 契约**：`shared/operations-contract.ts`（Task / Proposal / Decision / OperationReceipt + `need_confirm` / `task_updated` / `operation_result` 事件）；`ToolResultKind` 扩展 `operation_proposal` / `operations_report`。
+- **持久化**：`ops_tasks` / `ops_proposals` / `ops_decisions` / `ops_operations` / `ops_audit` / `ops_outbox` + 沙盒业务表 `biz_issues` / `biz_notifications` / `biz_closures` / `biz_duty_sessions`（幂等键唯一索引、提案 TTL 30 分钟、惰性过期）。
+- **5 个准备类工具**（`server/tools/prepare-tools.ts`，effect=draft，只生成办理单不执行）：
+  `prepare_issue_ticket`（F01 报修）、`prepare_room_closure`（F02 停用，服务端按教学周口径计算受影响排课，可联动建单+通知）、`prepare_notification`（F03 站内通知，班级受众按课表数据校验）、`prepare_duty_session`（F06 值班开始/收尾交接，清单按用户陈述预填、未提到的一律"未确认"）、`create_operations_report`（F10 日报草稿，缺数据源指标如实标"未知"而非 0）。
+- **执行通道**：`POST /api/tasks/:id/decisions` 是唯一执行入口（模型无权调用）。请求只允许 `proposalId + proposalVersion + decision + clientRequestId`，业务参数从服务端持久化提案读取（T04）；幂等键重放返回原回执（T05）；版本错配/过期/已决定/越权分别返回结构化错误；执行走 `server/operations/gateway.ts`，复合操作单事务全成全败，逐对象审计 + outbox 投递记录。
+- **身份与能力**：沙盒演示身份（admin / volunteer / student，`LABOPS_SANDBOX_ROLE` 配默认，前端可切换演示视角），能力清单 `issue:create:self` / `notice:publish` / `availability:write` / `duty:write` / `report:create:self` 按角色收敛，学生确认发布通知返回 403（T02）。**production 环境未接入**：回执 `executionEnvironment` 恒为 sandbox，界面全程标注"沙盒演示"。
+- **界面**：消息内嵌**提案卡**（影响预览 + 一次确认 + 业务回执，历史卡自动向服务端核对状态——已执行显示回执、过期不可确认，T11）+ **日报卡**（缺失指标标未知）+ 左侧**我的任务**中心 + 沙盒身份切换。
+- **与任务书的偏离**（按项目现状）：无真实登录体系 → 沙盒演示身份代替身份委托；`roomId` 采用数据集房间号；值班无排班实体 → start 按房间建会话、handover 由用户逐项确认清单；附件仅登记引用（上传服务未接入）。
+- **测试**：`npm test` 含 `tests/operations.test.ts`（提案→决策→回执、幂等、越权、版本错配、过期、复合停用、值班闭环、日报口径）；浏览器验收 46/46、HTTP 验收 53/53 保持全过。
+
+## 工作台外观与聊天模式（2026-09-27 第六轮）
+
+按用户实测反馈完成的四项改造：
+
+- **全宽布局**：去掉 1760px 最大宽度与两侧大留白，中间对话区拿到全部剩余空间。
+- **输入框固定视口底部**：会话视图列高锁定视口（`.chat--conv`），消息区内部滚动，composer 不再随内容下移；空会话保持居中 hero 形态不变。
+- **房间清单改为停靠式侧边栏**：右侧常驻，可收起为 44px 窄轨（竖排"房间清单"标签 + « 展开钮），不再用"整体移除 + 独立展开按钮"；窄屏收起时正文右侧让位、展开时为抽屉。
+- **会话分「聊天 / 任务」两种**：会话携带 `mode` 字段（conversations 表，PATCH 可切换，服务端为权威）。聊天模式**无任何工具**——不能查询数据、不能执行任务操作，Agnes 提示词切换为自由对话版（PROMPT_VERSION 升至 v2.1.0）；演示引擎下诚实说明"聊天需接入大模型"。hero 建会话时先选模式；头部可随时切换；左侧会话列表带「聊」标。任务模式行为不变。
+
+实现备注：Vue 的 Boolean prop 未传时会被置为 `false` 而非 undefined——`CommandBar` 的 `examples` 等可选布尔 prop 必须用 `withDefaults` 给默认值，否则"不传=显示"的语义失效（本轮实测踩坑）。
+
+## 阶段 2A 能力边界
+
+
+> 阶段 2B（业务沙盒）已在上节交付：报修 / 临时停用 / 站内通知 / 值班收尾 / 运营日报可在**沙盒**内办理（提案卡确认 → 业务单号与回执）。下表"零写操作"的表述仅针对 2A；2B 起写操作边界 = 提案卡确认 + 服务端能力校验 + 沙盒执行。
+
+**能做**（3 个只读工具 + 5 个准备类工具）：
+- 查某房间某天的排课（含合班、单双周、节次过滤、假期、停课），给出数据来源与依据
+- 查房间档案与状态：位置、容量、开放状态、当日排课概况、下一节课（`query_lab_status`）
+- 找某天（某节次）没排课的房间（`query_free_rooms`）—— 注意"空闲"= 课表无排课，不代表室内无人
+- 会话承接：同 sessionId 内「那 E312 呢？」沿用上一问的日期（沿用会在回答里说明，不伪装成本轮识别）
 
 **不能做（明确说了"做不到"而不是编一个答案）**：
 
-- 签到人数 / 在室人数（线上三类签到记录当前都是 0）
-- 钥匙位置、值班名册
-- 知识库问答（RAG 不在第一阶段范围）
-- 发布通知、创建工单（**零写操作**，确认位只有禁用的骨架）
+- 签到人数 / 在室人数（没有数据来源；`query_lab_status.occupancy` 恒为 `null`）
+- 钥匙位置、签到办理、排班换班、课表导入调课、用房预约、积分核对、人员导入（F04/F05/F07/F08/F09/F11/F12 排后；未注册工具，界面不提供入口）
+- 知识库问答（RAG 未接入）
+- 真实业务写入（production 适配器未接入；沙盒办理全程标注"沙盒演示"，回执 `executionEnvironment=sandbox`）
 - 历史统计（数据只覆盖当前学期）
-- 不指定房间号的全量扫描
+- `query_schedule` 的日期范围 / 班级筛选（下一批，等数据契约扩充）
+
+---
+
+## 可靠会话（2026-09-27 第四轮，阶段 2A.3）
+
+按《LabOps-Agent-压缩包4复核与下一阶段开发提示词》完成 M0 + M1 核心 + M2 快赢（N01–N13/N15/N17–N21/N23）：
+
+- **崩溃与事务（N01/N02/N04）**：会话路由可 await、统一异常边界；runId 由服务端生成；user/assistant/run 三件套**单事务创建**（失败整组回滚，绝不半写入）；同会话并发 run 互斥（事务预检 + 部分唯一索引，冲突返回 409+活跃 runId）；终态**先落库成功再发权威 end**，落库失败发 save_failed 明示；增量刷写 32 条或 1.5 秒取先到。
+- **幂等（N17）**：clientRequestId 唯一索引 + 预检，重复返回 409 引用既有执行。
+- **结果归属（N03）**：TaskResult 改纯 props 渲染器，**每条助手消息拥有自己的结构化结果卡**（来自 toolCalls[].result），切会话/刷新/重启后正文+卡片+来源完整恢复，不再读取全局单例。
+- **失败与取消（N05/N06）**：run_failed 的错误码/说明落库（meta.error），失败消息带"重新执行上一问"按钮；新增 `POST /api/runs/:id/cancel` 显式取消接口（幂等），服务端终态记 cancelled —— 与断连的 interrupted 诚实区分；**取消压过完成**（abort 后不再补发 run_completed，验收实测 cancelled 而非 completed）。
+- **上下文持久化（N07/N08）**：ContextSnapshot 落库（conversations.contextLab/Date/Task），服务重启后"那 E312 呢"仍承接日期与任务类型；"现在/此刻"显式解析为服务端当天，覆盖继承的未来日期；追问按字段继承任务类型，不再整包跳回课表。
+- **覆盖与未知（N09/N10-lite）**：空课表/超学期范围（教学周>40）/教学周不可确定 → coverage=missing/out_of_range/unknown，`freeByPeriod.rooms` 一律为空，候选进 unknownCandidates（界面标注"未知"，绝不当空闲推荐）。
+- **参数校验（N11）**：coerce 移入工具受控边界，显式非法（错误类型/非法枚举/数组类型错）返回结构化 ok=false，不再静默放宽为全天。
+- **可用性（N15/N18/N20/N21/N23）**：会话缓存始终后台重新核对（请求代次防串）；手机空态有"会话"入口；会话改名（✎）与删除确认；草稿按会话保存；正文浅灰对比度提至 ≥4.5:1；Esc 关抽屉。
+- **本轮未做（按任务书排后）**：N10 完整学期日历、N12/N16 多房间比较与分页、N14 真实模型多轮与 deadline、N22 Markdown、N25 数据质量报告、N27 完整迁移体系、N28 认证层、N29–N32。
+
+## 会话工作台（2026-09-27 第三轮，阶段 2A.2）
+
+按《LabOps-Agent-新版深度审查与会话工作台开发提示词》完成 M0+M1+M2 核心：
+
+- **持久化**：`server/persistence/db.ts`（node:sqlite，零依赖）。Conversation/Message/Run 落库（ToolCall 嵌入 message.meta）；`clientRequestId` 唯一索引幂等（重复返回 409，重试恢复协议待完成）；服务重启在**建唯一索引之前**把遗留 running/streaming/save_failed 标为 interrupted（旧库多条 running 也能安全升级）；会话软删除（暂无恢复入口）。数据库文件 `server/data/labops.sqlite`（已 gitignore，可用 `LABOPS_DB_PATH` 隔离测试）。
+- **API**：`GET/POST /api/conversations`、`GET/PATCH/DELETE /api/conversations/:id`、`POST /api/conversations/:id/messages`（SSE：`run_accepted` 携带正式消息 ID → 引擎事件 → **终态事务成功后**发权威 `run_completed` → `end`（payload.saved 标记保存结果，失败另有 `save_failed` 事件）；运行中消息按 32 条或 1.5 秒（另有 700ms 定时兜底）增量落库）；`GET/POST /api/runs/:id/cancel` 显式取消（已终态返回既有状态）；旧 `POST /api/agent/chat` 保留（验收脚本兼容）。
+- **界面**：左侧导航（新聊天 / 最近会话 / 主题与来源徽章）+ 右侧可展开/收起的实验室房间面板+ 中央连续消息流 + 布局内 composer（不悬浮遮挡）；房间点击只回填草稿；发送后清空草稿；每条助手消息带工具卡（参数可查）、复制按钮与终态标签。
+- **正确性修复（2A.4 增补）**：前端消费 `end.saved` 与 `save_failed`（保存失败可见、状态转 failed、可重试）；run_completed 权威全文对齐流式正文；`run_accepted` 对齐正式消息 ID（按 ID 解析活跃消息，历史刷新不跟丢）；取消先等服务端确认再断流（cancelled/interrupted 可区分）；`task`/`lastTask` 字段统一（追问保持任务类型）；空闲覆盖以 `termEnd` 数据契约为准（缺失 → unknown + unknownCandidates，卡片不写"无空闲房间"）；数字/数组类型的工具参数显式报错。
+- **已知边界（下一批）**：F14–F16（真实模型多轮上下文/比较任务）、F20–F22、F24–F26 深化、F31 Markdown 渲染、F37–F40（deadline/finishReason/SSE 严校验）、F41 认证层。
+
+## 工作台改造记录（2026-09-26 第二轮）
+
+本轮在运行页面上实测后完成的改造（详见《LabOps-Agent-工作台改造与阶段2A开发提示词》）：
+
+| 类别 | 内容 |
+|---|---|
+| **P0 竞态修复** | 运行生命周期（`runStatus`）与结果类型（`resultKind`）拆分；只有终态事件 + 流收尾才解锁输入；浏览器用例固化（工具结果已到、回答未结束时无法二次提交） |
+| **任务隔离** | 前端为每次任务生成 `runId` 随请求发送，store 丢弃一切不匹配的事件 —— 旧流迟到事件不可能污染新任务 |
+| **toolCallId 进契约** | `tool_started/tool_result` 按 `toolCallId` 一一配对（Agnes 用模型 call.id，演示引擎生成 `tc{step}_{i}`） |
+| **重复检测前置** | 指纹 = 工具名 + 排序参数，**执行前**检查；命中即拦截（`duplicate_call_blocked`），不重复执行；删除死代码 `fp` |
+| **时间线单一终态** | 终态事件关闭"正在生成回答"步骤；不再出现"进行中"与"任务完成"并存 |
+| **取消贯穿** | AbortSignal 传入 Agent 循环与模型请求；前端把取消呈现为中性"任务已取消"（不是红色故障），输入立即解锁 |
+| **数据缓存失效** | `loadDataset()` 按源文件 mtime 失效重建 —— 实时模式下底层文件更新后能拿到新数据 |
+| **布局重排** | 空态 hero（大输入 + 示例点击即发起 + 能力一句话）；任务卡 = 指令 → 轨迹（短摘要+可展开明细）→ 结论 → 结构化结果卡 → 折叠的数据依据；房间清单瘦身为侧栏可搜索紧凑行；移除常驻占位确认卡；开发备注移出产品界面 |
+| **阶段 2A 首片** | sessionId 会话承接 + `query_lab_status` + `query_free_rooms`（注册表 = 真实能力清单，无数据的工具继续不注册） |
 
 ---
 
@@ -241,7 +316,7 @@ npm run seed -- /绝对路径/state.json
 
 | 约束 | 落地位置 | 具体做法 |
 |---|---|---|
-| **有界自主** | `agent/run.ts` | 四个停止条件：`max_steps`(6) / 墙钟(60s) / 无工具调用 / 重复调用检测（同工具同参数 2 次即打断）。绝无 `while(true)` |
+| **有界自主** | `agent/run.ts` | 四个停止条件：`max_steps`(6) / 墙钟(60s) / 无工具调用 / 重复调用检测（同工具+同参数 2 次即**在执行前**拦截）。绝无 `while(true)` |
 | **超时+重试+降级** | `llm/agnes.ts` | 每次调用 `AbortController` 超时；仅对**尚未产出任何文字**的失败重试（流一旦开始就不再重试，否则会拼出重复内容）；指数退避 + 抖动；401/400/404 判定为不可重试 |
 | **不静默降级** | 全局 | 配了 Key 但调用失败 → 报**真实错误码**，绝不悄悄换回演示引擎 |
 | **未知工具可恢复** | `tools/registry.ts` | 不在白名单的工具返回 `ok:false` + 可用工具清单，让模型有一次自我纠正机会，而不是抛异常中断 |

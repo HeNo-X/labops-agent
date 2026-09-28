@@ -54,6 +54,32 @@ async function chat(message: string, opts: { runId?: string; sessionId?: string 
   return events;
 }
 
+async function readSse(res: Response): Promise<RunEvent[]> {
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const events: RunEvent[] = [];
+  const reader = res.body!.getReader();
+  const dec = new TextDecoder('utf-8');
+  let buf = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i: number;
+    while ((i = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      const line = block.split('\n').find((l) => l.startsWith('data: '));
+      if (!line) continue;
+      try {
+        events.push(JSON.parse(line.slice(6)) as RunEvent);
+      } catch {
+        /* 跳过坏块 */
+      }
+    }
+  }
+  return events;
+}
+
 const checks: Array<{ name: string; pass: boolean; detail: string }> = [];
 function assert(name: string, pass: boolean, detail: string): void {
   checks.push({ name, pass, detail });
@@ -298,6 +324,128 @@ async function main(): Promise<void> {
     const evE = await chat('那 D501 呢？', { sessionId: `acc-${today}-b` });
     const re = resultOf(evE);
     assert('换 sessionId 不承接（日期回落到服务端当天）', re?.['date'] === today, `date=${String(re?.['date'])}`);
+  }
+
+  // ================================================================= 用例 9
+  console.log('\n[用例 9] M1 会话持久化 —— 创建/发送/历史恢复/幂等/非法日期');
+  {
+    // ① F10：非法日期不查课表、显式报错
+    const evF = await chat('E310 2026-02-30 有哪些课？');
+    const fCompleted = evF.some((e) => e.type === 'run_completed');
+    const fNoTool = !evF.some((e) => e.type === 'tool_result');
+    const fText = answerOf(evF);
+    assert('非法日期不调用工具且收尾正常', fCompleted && fNoTool, fText.split('\n')[0] ?? '');
+    assert('非法日期给出明确修正建议', /不是真实存在的日期|非法|无效/.test(fText), fText.split('\n')[0] ?? '');
+
+    // ② 会话创建 → 发消息（SSE 落库）→ 历史恢复
+    const createRes = await fetch(`${BASE}/api/conversations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    const { id: convId } = (await createRes.json()) as { id: string };
+    assert('POST /api/conversations 返回会话 id', typeof convId === 'string' && convId.length > 0, convId ?? '');
+
+    const clientRequestId = `acc-req-${today}-${Math.random().toString(36).slice(2, 8)}`;
+    const mres = await fetch(`${BASE}/api/conversations/${convId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: `E310 ${DEMO_DATE} 有哪些课？`, clientRequestId })
+    });
+    const mev = await readSse(mres);
+    const mDone = mev.some((e) => e.type === 'run_completed') && mev.some((e) => e.type === 'end');
+    assert('会话消息端点返回完整事件流并收尾', mDone, `事件 ${mev.length} 条`);
+
+    const hist = (await (await fetch(`${BASE}/api/conversations/${convId}`)).json()) as {
+      title: string;
+      messages: Array<Record<string, unknown>>;
+    };
+    const roles = hist.messages.map((m) => String(m['role']));
+    const userMsg = hist.messages.find((m) => m['role'] === 'user');
+    const aiMsg = hist.messages.find((m) => m['role'] === 'assistant');
+    assert(
+      '刷新后历史完整（user+assistant+工具调用+最终文本）',
+      roles.join(',') === 'user,assistant' &&
+        String(userMsg?.['text']).includes('E310') &&
+        Number(((aiMsg?.['meta'] as Record<string, unknown>)?.['toolCalls'] as unknown[])?.length ?? 0) === 1 &&
+        String(aiMsg?.['text']).includes('条排课'),
+      `title=${hist.title} roles=${roles.join(',')} answer=${String(aiMsg?.['text']).slice(0, 40)}…`
+    );
+
+    // ③ 幂等：同一 clientRequestId 重复提交 → 409，不重复执行
+    const dup = await fetch(`${BASE}/api/conversations/${convId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: `E310 ${DEMO_DATE} 有哪些课？`, clientRequestId })
+    });
+    assert('重复 clientRequestId 返回 409 不重复执行', dup.status === 409, `HTTP ${dup.status}`);
+
+    // ④ 会话列表包含该会话且按活动排序
+    const list = (await (await fetch(`${BASE}/api/conversations`)).json()) as { conversations: Array<{ id: string }> };
+    assert('会话列表包含新会话', list.conversations.some((c) => c.id === convId), `共 ${list.conversations.length} 个会话`);
+
+    // ⑤ 软删除
+    await fetch(`${BASE}/api/conversations/${convId}`, { method: 'DELETE' });
+    const afterDel = await fetch(`${BASE}/api/conversations/${convId}`);
+    assert('删除后详情 404', afterDel.status === 404, `HTTP ${afterDel.status}`);
+  }
+
+  // ================================================================= 用例 10
+  console.log('\n[用例 10] B04 并发互斥 / B09 取消终态 / B16 现在覆盖继承日期');
+  {
+    // B04：同一会话并发第二个 run → 409 run_conflict
+    const c2 = await fetch(`${BASE}/api/conversations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json());
+    const first = fetch(`${BASE}/api/conversations/${c2.id}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: `E310 ${DEMO_DATE} 有哪些课？`, clientRequestId: `b04a-${Date.now()}` })
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    const second = await fetch(`${BASE}/api/conversations/${c2.id}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: `E312 ${DEMO_DATE} 有哪些课？`, clientRequestId: `b04b-${Date.now()}` })
+    });
+    const secondBody = (await second.json()) as Record<string, unknown>;
+    const firstRes = await first;
+    void firstRes.body?.cancel();
+    assert('B04 同会话并发第二个 run 被拒（409+活跃 run 引用）', second.status === 409 && typeof secondBody['activeRunId'] === 'string', `HTTP ${second.status} ${JSON.stringify(secondBody).slice(0, 90)}`);
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // B09：显式取消 → run 与消息终态都是 cancelled（区别于断连 interrupted）
+    const c3 = await fetch(`${BASE}/api/conversations`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then((r) => r.json());
+    const sse = await fetch(`${BASE}/api/conversations/${c3.id}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: `E310 ${DEMO_DATE} 有哪些课？`, clientRequestId: `b09-${Date.now()}` })
+    });
+    const reader = sse.body!.getReader();
+    const dec = new TextDecoder('utf-8');
+    let buf3 = '';
+    let runId3 = '';
+    let sawEnd = false;
+    const types3: string[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf3 += dec.decode(value, { stream: true });
+      let i: number;
+      while ((i = buf3.indexOf('\n\n')) >= 0) {
+        const block = buf3.slice(0, i);
+        buf3 = buf3.slice(i + 2);
+        const line = block.split('\n').find((l) => l.startsWith('data: '));
+        if (!line) continue;
+        const ev = JSON.parse(line.slice(6)) as { type: string; runId: string };
+        types3.push(ev.type);
+        if (ev.type === 'run_started') {
+          runId3 = ev.runId;
+          setTimeout(() => void fetch(`${BASE}/api/runs/${runId3}/cancel`, { method: 'POST' }), 120);
+        }
+        if (ev.type === 'end') sawEnd = true;
+      }
+    }
+    const hist3 = (await (await fetch(`${BASE}/api/conversations/${c3.id}`)).json()) as { messages: Array<Record<string, unknown>> };
+    const ai3 = hist3.messages.find((m) => m['role'] === 'assistant');
+    assert('B09 显式取消后 run/消息终态为 cancelled 且流收尾', sawEnd && ai3?.['status'] === 'cancelled', `types=${types3.filter((t) => t !== 'answer_delta').join(',')} ai=${String(ai3?.['status'])}`);
+
+    // B16/N08：查过未来日期后问"现在开放吗" —— 当前日期覆盖继承日期
+    const sid = `b16-${today}`;
+    await chat(`E310 ${DEMO_DATE} 有哪些课？`, { sessionId: sid });
+    const nowRes = resultOf(await chat('E310 现在开放吗？', { sessionId: sid }));
+    assert('B16 "现在"覆盖上下文中的未来日期', nowRes?.['date'] === today, `date=${String(nowRes?.['date'])}（期望 ${today}）`);
   }
 
   // ================================================================= 汇总

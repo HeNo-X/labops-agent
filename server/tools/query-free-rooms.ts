@@ -1,11 +1,14 @@
 /**
- * 只读工具：query_free_rooms —— 找空实验室（阶段 2A）
+ * 只读工具：query_free_rooms —— 找空实验室（阶段 2A / F09·F11·F12 修正）
  * ============================================================================
- *  「明天下午第二大节哪些实验室空着」的正解。与 query_schedule 同源同口径：
+ *  「明天下午哪些实验室空着」的正解。与 query_schedule 同源同口径：
  *  一个房间在某节次"空闲" = 该节次没有命中周次的排课（停课、跨学期、周次/单双周
- *  过滤与 query_schedule 完全一致 —— 这不是巧合，是同一条过滤链）。
+ *  过滤与 query_schedule 完全一致）。
  *
- *  ⚠️ 空闲 ≠ 无人：没有签到数据，"空闲"只表示课表上没有排课，界面与模型话术都要带这层说明。
+ *  事实边界（F09/F11）：
+ *    · coverage='complete' 仅当课表数据非空——空表不能从"没有记录"推出"全部空闲"；
+ *    · rooms[] 只列**档案开放**的房间；关闭/停用进 excluded[] 并给理由；
+ *    · 「空闲」= 课表无排课 ≠ 室内无人 ≠ 可预约，notes 固定声明。
  */
 
 import type { FreeRoomsArgs, FreeRoomsResult, ScheduleQueryResult } from '../../shared/types.ts';
@@ -30,7 +33,8 @@ export function runQueryFreeRooms(
     );
   }
 
-  let periodFilter: PeriodKey | null = null;
+  // F12：支持节次范围（如"下午"= pm1+pm2）；periodKey 仍兼容
+  let wanted: PeriodKey[];
   if (args.periodKey !== undefined && args.periodKey !== null && String(args.periodKey).trim() !== '') {
     const p = periodByKey(String(args.periodKey).trim());
     if (!p) {
@@ -39,20 +43,53 @@ export function runQueryFreeRooms(
         `periodKey 只能是 ${PERIODS.map((x) => x.key).join(' / ')}，收到：${String(args.periodKey)}`
       );
     }
-    periodFilter = p.key;
+    wanted = [p.key];
+  } else if (Array.isArray(args.periodKeys) && args.periodKeys.length) {
+    wanted = [];
+    for (const raw of args.periodKeys) {
+      const p = periodByKey(String(raw).trim());
+      if (!p) {
+        throw new ToolArgumentError(
+          'bad_period',
+          `periodKeys 里含非法节次：${String(raw)}（合法值：${PERIODS.map((x) => x.key).join(' / ')}）`
+        );
+      }
+      if (!wanted.includes(p.key)) wanted.push(p.key);
+    }
+  } else {
+    wanted = [...PERIODS.map((p) => p.key)];
   }
 
   const weekday = weekdayOf(date);
   const week = describeWeek(date, ds.term);
   const holiday = isHoliday(date, ds.term);
 
+  // F09/R09：覆盖判断以数据契约为准 —— termEnd 缺失就不能证明任何日期的完整覆盖，
+  // 绝不用"教学周不超过 N 周"之类的臆造阈值代替证明。
+  let coverage: FreeRoomsResult['coverage'];
+  if (ds.timetable.length === 0) {
+    coverage = 'missing';
+  } else if (ds.term.termEnd && ds.term.termStart) {
+    coverage = date >= ds.term.termStart && date <= ds.term.termEnd ? 'complete' : 'out_of_range';
+    if (coverage === 'complete' && (!week.determinable || week.weekNo === null)) coverage = 'unknown';
+  } else {
+    coverage = 'unknown';
+  }
+
   const notes: string[] = [week.note];
   if (!week.determinable) notes.push('⚠️ 教学周不可确定，以下结果未做周次过滤，可能包含非本周的占用');
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
-  notes.push('「空闲」指课表上无排课，不代表房间内无人（无签到数据）');
-  notes.push('开放状态来自房间档案；关闭/停用的房间即使课表空闲也建议先确认是否可借用');
+  if (coverage === 'missing') {
+    notes.push('⚠️ 系统内课表数据为空，无法判断哪些房间空闲——本结果不可作为找空房间的依据');
+  } else if (coverage === 'out_of_range') {
+    notes.push(`⚠️ 日期超出学期覆盖范围（${ds.term.termStart ?? '?'} ~ ${ds.term.termEnd ?? '?'}），无法判断空闲——本结果不可作为依据`);
+  } else if (coverage === 'unknown') {
+    notes.push('⚠️ 学期结束日未配置（或教学周不可确定），无法证明该日期的课表完整覆盖——以下候选状态未知，不能当作确认空闲');
+  }
+  notes.push('「空闲」指课表上无排课，不代表房间内无人，也不代表可以预约借用');
+  notes.push('主名单只含档案状态为「开放」的房间；关闭/停用房间移入"已排除"并给出原因');
 
-  const periodsToList = periodFilter ? PERIODS.filter((p) => p.key === periodFilter) : PERIODS;
+  const periodsToList = PERIODS.filter((p) => wanted.includes(p.key));
 
   // 该星期几、当前学期、未停课、周次匹配的全部排课（教学周不可确定时不过滤并声明）
   const dayRows: TimetableRow[] = ds.timetable.filter(
@@ -63,9 +100,19 @@ export function runQueryFreeRooms(
       (week.determinable ? weekMatches(row.weeks, week.weekNo) : true)
   );
 
-  const rooms = [...ds.labs, ...ds.openLabs].sort((a, b) =>
+  // F11：档案开放 → 主名单；关闭/停用 → excluded 并给理由
+  const allRooms = [...ds.labs, ...ds.openLabs].sort((a, b) =>
     a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true })
   );
+  const activeRooms = allRooms.filter((l) => l.status === 'active');
+  const excluded = allRooms
+    .filter((l) => l.status !== 'active')
+    .map((l) => ({
+      labName: l.name,
+      location: l.location,
+      status: (l.status as 'closed' | 'inactive') ?? 'closed',
+      reason: l.status === 'inactive' ? '档案状态：停用/修整' : '档案状态：关闭'
+    }));
 
   const freeByPeriod: FreeRoomsResult['freeByPeriod'] = periodsToList.map((p) => {
     const busy = new Set(
@@ -76,14 +123,18 @@ export function runQueryFreeRooms(
       periodLabel: p.label,
       startTime: p.start,
       endTime: p.end,
-      rooms: rooms
-        .filter((l) => !busy.has(normalizeLabName(l.name)))
-        .map((l) => ({
-          labName: l.name,
-          location: l.location,
-          status: (l.status as FreeRoomsResult['freeByPeriod'][number]['rooms'][number]['status']) ?? null,
-          capacity: l.capacity
-        }))
+      // F09：非 complete 覆盖时绝不输出"已确认空闲"名单
+      rooms:
+        coverage === 'complete'
+          ? activeRooms
+              .filter((l) => !busy.has(normalizeLabName(l.name)))
+              .map((l) => ({
+                labName: l.name,
+                location: l.location,
+                status: 'active' as const,
+                capacity: l.capacity
+              }))
+          : []
     };
   });
 
@@ -105,22 +156,39 @@ export function runQueryFreeRooms(
   return {
     date,
     weekdayLabel: weekdayLabelOf(date),
-    periodFilter,
+    periodFilter: wanted.length === 1 ? wanted[0]! : null,
+    periodKeys: wanted,
+    coverage,
     term: ds.term.term,
     weekNo: week.weekNo,
     weekDeterminable: week.determinable,
     freeByPeriod,
+    excluded,
+    unknownCandidates: coverage === 'complete' ? [] : activeRooms.map((l) => l.name),
     notes,
     provenance
   };
 }
 
-/** 供注册表做参数收敛 */
+/** 供注册表做参数收敛。显式非法的节次抛错而不是静默丢弃（F17） */
 export function coerceFreeRoomsArgs(raw: Record<string, unknown>): FreeRoomsArgs {
   const out: FreeRoomsArgs = {};
   const date = raw['date'];
   if (typeof date === 'string' && date.trim()) out.date = date.trim();
+  else if (date !== undefined && date !== null && date !== '') {
+    throw new ToolArgumentError('bad_date', `date 参数必须是字符串（YYYY-MM-DD），收到：${typeof date}`);
+  }
   const periodKey = raw['periodKey'];
   if (typeof periodKey === 'string' && periodKey.trim()) out.periodKey = periodKey.trim() as PeriodKey;
+  else if (periodKey !== undefined && periodKey !== null && periodKey !== '') {
+    // R10：显式给了错误类型（如数字 999）也是参数错误，不能静默丢弃后放宽为全天
+    throw new ToolArgumentError('bad_period', `periodKey 必须是字符串节次键，收到：${typeof periodKey}(${String(periodKey)})`);
+  }
+  const periodKeys = raw['periodKeys'];
+  if (Array.isArray(periodKeys) && periodKeys.length) {
+    out.periodKeys = periodKeys.map((k) => String(k).trim() as PeriodKey);
+  } else if (periodKeys !== undefined && periodKeys !== null && periodKeys !== '') {
+    throw new ToolArgumentError('bad_period', `periodKeys 必须是字符串数组，收到：${typeof periodKeys}(${String(periodKeys)})`);
+  }
   return out;
 }

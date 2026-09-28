@@ -9,25 +9,50 @@
  *    **点击即发起任务**，不再只填充
  *  · 运行中禁止二次提交：锁定与否只看 runStatus（结果到达不解锁），但允许取消
  */
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed } from 'vue';
 import { useRunStore } from '../stores/run';
 import StatusTag from './StatusTag.vue';
 
-const props = defineProps<{ variant?: 'hero' | 'dock' }>();
+// ⚠️ Boolean prop 必须显式给默认值：Vue 对未传入的 Boolean 类型 prop 会直接置为
+// false（而不是 undefined），不写 withDefaults 会让 `examples?: boolean` 的
+// "不传=显示" 语义失效（实测踩坑：任务模式示例因此消失）。
+const props = withDefaults(
+  defineProps<{
+    variant?: 'hero' | 'dock';
+    submitting?: boolean;
+    /** 是否显示示例问题（聊天模式下任务型示例会造成误导，由父组件关闭） */
+    examples?: boolean;
+    /** 输入框占位文案（聊天/任务模式文案不同） */
+    placeholder?: string;
+    /** 提交按钮文案 */
+    submitLabel?: string;
+  }>(),
+  {
+    variant: 'hero',
+    submitting: false,
+    examples: true,
+    placeholder: undefined,
+    submitLabel: undefined
+  }
+);
 const store = useRunStore();
-const text = ref('');
-const inputEl = ref<HTMLTextAreaElement | null>(null);
+/** 草稿由父组件 v-model 持有：房间点击可回填、失败可恢复、切会话可分别保存（F27/F29） */
+const text = defineModel<string>('draft', { default: '' });
 
 const isHero = computed(() => props.variant !== 'dock');
 /** 输入锁定只看运行生命周期；工具结果到达不解锁（P0 修复） */
-const canSubmit = computed(() => text.value.trim().length > 0 && !store.inputLocked);
-const busy = computed(() => store.inputLocked);
+// R16：提交状态（创建会话/等待接受）也要锁输入并可见，避免"点了没反应"或重复提交
+const canSubmit = computed(() => text.value.trim().length > 0 && !store.inputLocked && !props.submitting);
+const busy = computed(() => store.inputLocked || Boolean(props.submitting));
 
 const emit = defineEmits<{ submit: [string]; cancel: [] }>();
 
 function submit(): void {
   if (!canSubmit.value) return;
-  emit('submit', text.value.trim());
+  const q = text.value.trim();
+  emit('submit', q);
+  // F27：发出即清空草稿（父组件已在会话内保存该轮消息）
+  text.value = '';
 }
 
 /** 示例问题：点击即发起（一句话交办，少一次无意义点击） */
@@ -42,22 +67,14 @@ function onKeydown(e: KeyboardEvent): void {
     submit();
   }
 }
-
-watch(
-  () => store.runStatus,
-  (p, old) => {
-    if (old === 'running' && p !== 'running' && !isHero.value) {
-      void nextTick(() => inputEl.value?.focus());
-    }
-  }
-);
+// F27：不再在任务结束时抢焦点 —— 用户可能正在读历史或操作其他控件
 </script>
 
 <template>
   <section class="bar" :class="isHero ? 'bar--hero' : 'bar--dock'" aria-labelledby="bar-h">
     <h2 id="bar-h" class="sr-only">命令栏</h2>
 
-    <div v-if="isHero" class="bar__examples">
+    <div v-if="isHero && props.examples !== false" class="bar__examples">
       <button
         v-for="q in store.exampleQuestions"
         :key="q"
@@ -78,24 +95,24 @@ watch(
         v-model="text"
         class="bar__input"
         :rows="isHero ? 2 : 1"
-        placeholder="用一句话交办，例如：E310 2026-09-30 有哪些课？"
+        :placeholder="props.placeholder ?? '用一句话交办，例如：E310 2026-09-30 有哪些课？'"
         :disabled="busy"
         @keydown="onKeydown"
       />
       <button v-if="!busy" type="button" class="bar__btn" :disabled="!canSubmit" @click="submit">
-        {{ isHero ? '交给 Agent' : '发起任务' }}
+        {{ props.submitLabel ?? (isHero ? '交给 Agent' : '发起任务') }}
       </button>
       <button v-else type="button" class="bar__btn bar__btn--ghost" @click="emit('cancel')">取消</button>
     </div>
 
     <div class="bar__hint">
-      <StatusTag v-if="busy" tone="info" glyph="◌" label="任务执行中" title="正在处理，请稍候" />
+      <StatusTag v-if="busy" tone="info" glyph="◌" :label="props.submitting && !store.inputLocked ? '正在提交…' : '任务执行中'" title="正在处理，请稍候" />
       <span v-if="isHero && store.demoDate" class="bar__hint-text">
         说「今天」「下周三」「9月30日」都可以；当前学期第 4 教学周的周三是 <b>{{ store.demoDate }}</b>
       </span>
     </div>
 
-    <div v-if="!isHero" class="bar__examples bar__examples--dock">
+    <div v-if="!isHero && props.examples !== false" class="bar__examples bar__examples--dock">
       <span class="bar__examples-label">示例：</span>
       <button v-for="q in store.exampleQuestions" :key="q" type="button" class="chip" :disabled="busy" @click="useExample(q)">
         {{ q }}
@@ -187,7 +204,7 @@ watch(
   border: 1px solid var(--primary);
   border-radius: var(--radius);
   background: var(--primary);
-  color: #fff;
+  color: var(--primary-contrast);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;

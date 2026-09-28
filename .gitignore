@@ -24,3 +24,4 @@ Thumbs.db
 
 # 浏览器验收截图（可重新生成，不入库；需要看时跑 npm run test:browser）
 .screenshots/
+server/data/*.sqlite

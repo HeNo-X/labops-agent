@@ -150,15 +150,12 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
   }
 
   const week = describeWeek(intent.date?.date ?? now.date, ds.term);
-  // 会话类型：chat=纯聊天 —— 不提供任何工具（查询与业务办理都在任务模式）
+  // 会话类型：chat=聊天（可查询真实数据，不能办理业务）；task=任务（可生成办理单）
+  // 用户口径：聊天模式只是不能"执行操作"，数据读取与回答照常 —— 查询类工具全部保留
   const convMode: 'chat' | 'task' = input.mode === 'chat' ? 'chat' : 'task';
+  const modeTools = convMode === 'chat' ? toolSpecs().filter((t) => t.name.startsWith('query_')) : toolSpecs();
   const toolListText =
-    convMode === 'chat'
-      ? ''
-      : '【可用工具】\n' +
-        toolSpecs()
-          .map((t) => `- ${t.name}：${t.description}`)
-          .join('\n');
+    '【可用工具】\n' + modeTools.map((t) => `- ${t.name}：${t.description}`).join('\n');
   const injectionSuspected = detectInjection(question);
 
   log.info('run_started', { engine, sourceType, weekNo: week.weekNo, injectionSuspected });
@@ -189,7 +186,7 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
       weekDeterminable: week.determinable,
       note: week.note
     },
-    allowedTools: convMode === 'chat' ? [] : toolSpecs().map((t) => t.name)
+    allowedTools: modeTools.map((t) => t.name)
   } satisfies RunStartedPayload);
 
   try {
@@ -253,12 +250,23 @@ interface DemoArgs {
 }
 
 async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
-  // 聊天模式 × 演示引擎：规则引擎没有自由对话能力，诚实说明而不是装样子
-  if (a.mode === 'chat') {
+  const plan = planDemo(a.question, a.intent, a.ds);
+  a.log.info('demo_plan', { callTool: plan.callTool, args: plan.args, disclosures: plan.needsDisclosure, mode: a.mode });
+
+  // 用户口径（2A.4 复核）：聊天模式可以查真实数据，只是不能办理业务。
+  // 演示引擎在聊天模式下照常路由查询工具；仅当问题指向业务办理（prepare_*/报告单）时
+  // 诚实告知需切换任务模式。
+  if (a.mode === 'chat' && plan.callTool && !String(plan.tool).startsWith('query_')) {
+    const OPS_NAMES: Record<string, string> = {
+      prepare_issue_ticket: '报修工单',
+      prepare_room_closure: '房间停用',
+      prepare_notification: '通知发布',
+      prepare_duty_session: '值班安排',
+      create_operations_report: '运营报告'
+    };
     const text =
-      '当前会话是「聊天」模式：自由对话需要接入大模型（在 .env 配置 AGNES_API_KEY 后重启）。' +
-      '演示引擎只能按规则查课表、查房间状态、找空闲房间和生成业务办理单，请在「任务」模式下使用；' +
-      '配置模型后即可在本模式自由聊天（同样不能执行任务操作）。';
+      '「聊天」模式只提供查询（课表 / 房间状态 / 空闲房间），不生成业务办理单。' +
+      `请切换到「任务」模式后再办理${OPS_NAMES[String(plan.tool)] ?? ''}。`;
     yield* streamText(text, a.emit, a.signal);
     yield a.emit('run_completed', {
       answer: text,
@@ -270,9 +278,6 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
     } satisfies RunCompletedPayload);
     return;
   }
-
-  const plan = planDemo(a.question, a.intent, a.ds);
-  a.log.info('demo_plan', { callTool: plan.callTool, args: plan.args, disclosures: plan.needsDisclosure });
 
   if (!plan.callTool) {
     const text = (plan.directReply ?? '我无法处理这个问题。') + renderDisclosure(plan.needsDisclosure, true);

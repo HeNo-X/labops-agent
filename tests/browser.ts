@@ -138,8 +138,18 @@ async function readState(page: Page): Promise<RunPageState> {
   }));
 }
 
+/** 登录门面（本地演示模式）：任意账号 + 4 位以上密码即可进入 */
+async function loginIfNeeded(page: Page): Promise<void> {
+  if ((await page.locator('.login').count()) === 0) return;
+  await page.fill('#username', 'demo@labops');
+  await page.fill('#password', 'demo1234');
+  await page.locator('.login-btn').click();
+  await page.waitForSelector('.nav', { timeout: 15000 });
+}
+
 async function runFlow(page: Page, label: string, shotPrefix: string): Promise<void> {
   await page.goto(BASE, { waitUntil: 'networkidle' });
+  await loginIfNeeded(page);
   await page.waitForSelector('.nav', { timeout: 15000 });
   await page.waitForSelector('.hero', { timeout: 15000 });
   await page.waitForSelector('.bar--hero', { timeout: 15000 });

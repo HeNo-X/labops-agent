@@ -15,6 +15,7 @@ import { useAgentStream } from './composables/useAgentStream';
 import LabMatrix from './components/LabMatrix.vue';
 import CommandBar from './components/CommandBar.vue';
 import ChatMessage from './components/ChatMessage.vue';
+import LoginView from './components/LoginView.vue';
 import SourceBadge from './components/SourceBadge.vue';
 import { ACTOR_ROLE_LABELS, actorHeaders, actorRole, setActorRole } from './actor';
 import type { ActorRole } from './actor';
@@ -33,6 +34,12 @@ interface TaskRow {
 
 const store = useRunStore();
 const session = useSessionStore();
+// 登录门面（本地演示模式）：会话内记住登录；不做真实身份校验（R26 边界不变）
+const authed = ref(sessionStorage.getItem('labops.auth') !== null);
+function onLogin(account: string): void {
+  sessionStorage.setItem('labops.auth', account);
+  authed.value = true;
+}
 const { start, cancel } = useAgentStream();
 
 const draft = ref('');
@@ -369,7 +376,8 @@ function onPickRoom(q: string): void {
 </script>
 
 <template>
-  <div class="app" :class="{ 'app--railclosed': !roomsOpen }">
+  <LoginView v-if="!authed" @done="onLogin" />
+  <div v-else class="app" :class="{ 'app--railclosed': !roomsOpen }">
     <!-- 左侧导航 -->
     <aside class="nav" :class="{ 'nav--open': navOpen }" aria-label="会话导航">
       <div class="nav__brand">

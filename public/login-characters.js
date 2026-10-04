@@ -4,9 +4,10 @@
    - 对外接口：
        LoginCharacters.triggerSadState(ms)        登录失败 → 全体悲伤脸
        LoginCharacters.playSuccessTransition(cb)  登录成功 → 粉色扩散转场
-   - 状态优先级：error > 明文偷看 > 密文回避 > 账号聚焦 > 待机
-   - 密码框节奏：聚焦先"惊呆"约 0.5s，随后集体扭开回避；
-     点击显示密码 → 各自偷看表情；失焦 → 放松恢复待机
+   - 状态优先级：error > 明文聚焦 > 密文回避 > 账号聚焦 > 待机
+   - 密码框节奏：聚焦先“惊呆”约 0.5s，随后集体扭开回避；
+     点击显示密码 → 全员凑近好奇偷看（pose-curious，v3 调优，比账号聚焦更靠近）；
+     失焦 → 放松恢复待机。stage 上会写 dataset.mode，CSS 可按状态定型
    ============================================================ */
 (function () {
     'use strict';
@@ -109,11 +110,11 @@
             /* 注册 Tab：降级为待机 + 眨眼，不做特殊编排 */
             set('purple'); set('black'); set('orange'); set('yellow');
         } else if (s.passwordFocused && s.showPassword) {
-            /* 明文偷看：黑色瞪眼直视、橙色捂脸偷笑、黄色单眼瞄、紫色闭眼仍不肯看 */
-            set('purple', { eyes: 'squint', mouth: 'frown', pose: 'flinch', look: { x: -.9, y: -.4 } });
-            set('black',  { eyes: 'wide', mouth: 'flat', look: { x: 1, y: .05 } });
-            set('orange', { eyes: 'smile', mouth: 'smile', look: { x: .9, y: .1 } });
-            set('yellow', { eyes: 'wink', mouth: 'flat', look: { x: .9, y: .05 } });
+            /* 明文聚焦（v3 改版）：密码可见 → 全员凑近偷看，比账号聚焦更靠近、更专注 */
+            set('purple', { eyes: 'wide', mouth: 'line',  pose: 'curious', look: { x: 1, y: .12 } });
+            set('black',  { eyes: 'wide', mouth: 'flat',  pose: 'curious', look: { x: .95, y: .12 } });
+            set('orange', { eyes: 'wide', mouth: 'line',  pose: 'curious', look: { x: .9, y: .15 } });
+            set('yellow', { eyes: 'wide', mouth: 'flat',  pose: 'curious', look: { x: .9, y: .1 } });
         } else if (s.passwordFocused) {
             if (s.coverBeat) {
                 /* 密文回避：紫扭身难过、黑转身闭眼、橙闭眼下蹲、黄紧张单眼+波浪嘴 */
@@ -284,6 +285,7 @@
         var mode = computeMode(state);
         var changed = mode !== state.mode;
         state.mode = mode;
+        if (stage) stage.dataset.mode = mode;
 
         if (changed) {
             clearAllTimers();

@@ -35,7 +35,7 @@ onMounted(() => {
     // ⚠️ public/ 里的文件名是固定的，必须带版本参数，否则浏览器会一直用旧缓存
     //    （2026-10-04 实际踩过：改了本文件但用户侧"没反应"）
     //    改 public/login-characters.js 时把这里和 index.html 的 css 版本一起往上加
-    s.src = '/login-characters.js?v=20261004b';
+    s.src = '/login-characters.js?v=20261004c';
     s.addEventListener('load', () => window.LoginCharacters && window.LoginCharacters.rebind());
     document.body.appendChild(s); // 挂载后加载：rebind 确保 #username/#password/#pwdToggle 绑定生效
   }
@@ -323,6 +323,14 @@ input[type='password']::-ms-clear { display: none; }
 }
 .login .char-spot {
   background: #d9d9d9;
+}
+/* 明文好奇态：全员凑近密码框 —— 比账号聚焦的 8px 倾靠明显更靠近 */
+.login .pose-curious .char-body {
+  transform: translateX(46px) skewX(-5deg) scale(1.02);
+  transition-duration: 0.5s;
+}
+.login .char--purple.pose-curious .char-body {
+  transform: translateX(58px) skewX(-6deg) scale(1.03);
 }
 /* 转场层由 lib 挂在 body 上（.login 外），必须全局覆盖才能命中 */
 .success-veil {

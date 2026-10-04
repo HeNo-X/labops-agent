@@ -352,7 +352,7 @@
         triggerSadState: triggerSadState,
         playSuccessTransition: playSuccessTransition,
         setRegisterMode: function (on) { state.registerMode = !!on; render(); },
-        rebind: function () { formBound = false; bindFormEvents(); }
+        rebind: function () { bindFormEvents(); }
     };
 
     /* ---------- 表单事件绑定（只读，不干预业务） ----------
@@ -360,20 +360,24 @@
     var usernameInput = null;
     var passwordInput = null;
     var toggleBtn = null;
-    var formBound = false;
+    var docBound = false;
 
+    /* R：绑定带元素级防重入守卫 —— rebind 幂等，绝不会双重绑定
+      （否则点击一次 = 两个处理器各切一次 = 看起来"无效"） */
     function bindFormEvents() {
-        if (formBound) return;
         usernameInput = document.getElementById('username');
         passwordInput = document.getElementById('password');
         toggleBtn = document.getElementById('pwdToggle');
         if (!usernameInput || !passwordInput) return; // 未就绪：可由 LoginCharacters.rebind() 再次调用
-        formBound = true;
 
-        document.addEventListener('focusin', syncAccountFocus);
-        document.addEventListener('focusout', scheduleFocusSync);
+        if (!docBound) {
+            document.addEventListener('focusin', syncAccountFocus);
+            document.addEventListener('focusout', scheduleFocusSync);
+            docBound = true;
+        }
 
-        if (passwordInput) {
+        if (passwordInput.dataset.lgBound !== '1') {
+            passwordInput.dataset.lgBound = '1';
             passwordInput.addEventListener('focus', function () {
                 state.passwordFocused = true;
                 render();
@@ -381,7 +385,8 @@
             passwordInput.addEventListener('blur', scheduleFocusSync);
         }
 
-        if (toggleBtn && passwordInput) {
+        if (toggleBtn && toggleBtn.dataset.lgBound !== '1') {
+            toggleBtn.dataset.lgBound = '1';
             toggleBtn.addEventListener('click', function (e) {
                 e.preventDefault();
                 var wasFocused = document.activeElement === passwordInput;
@@ -473,7 +478,7 @@
     });
 
     /* ---------- 启动 ---------- */
-    bindFormEvents();                // R：表单元素就绪即绑定；SPA 延迟场景由 rebind() 兜底
+    bindFormEvents();                // 元素就绪即绑定；SPA 延迟场景由 rebind() 兜底（幂等）
     render();
     cacheGeometry();
     scheduleGeometryRefresh(1200);   // 入场动画结束后重新校准眼珠基准

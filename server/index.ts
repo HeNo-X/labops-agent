@@ -113,11 +113,20 @@ function serveStatic(res: http.ServerResponse, urlPath: string): void {
   }
 
   const data = fs.readFileSync(finalPath);
+  // 缓存策略：只有 Vite 产出的 /assets/<name>-<hash>.<ext> 才能长缓存 —— 它的内容变了名字必变。
+  // 判据用"是否在 assets/ 目录下"，**不要猜文件名里有没有哈希**：
+  //   login-characters.js 里的 "-characters" 长得完全像哈希，猜文件名会误判成可长缓存，
+  //   于是 public/ 拷进来的固定名文件被永久缓存，用户侧永远看不到新版本
+  //   （2026-10-04 实际踩过：修了登录页 bug，用户"没反应"）
+  // 其余（public/ 拷来的、favicon、index.html）一律 no-cache：每次带条件请求回来校验，成本极低。
+  const relToDist = path.relative(DIST_DIR, finalPath).split(path.sep).join('/');
+  const cacheControl = relToDist.startsWith('assets/')
+    ? 'public, max-age=31536000, immutable'
+    : 'no-cache';
   res.writeHead(200, {
     'Content-Type': MIME[path.extname(finalPath).toLowerCase()] ?? 'application/octet-stream',
     'Content-Length': data.length,
-    // 带 hash 的资源可长缓存；index.html 必须短缓存，否则发新版用户看不到
-    'Cache-Control': /index\.html$/.test(finalPath) ? 'no-cache' : 'public, max-age=31536000, immutable',
+    'Cache-Control': cacheControl,
     'X-Content-Type-Options': 'nosniff'
   });
   res.end(data);

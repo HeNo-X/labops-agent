@@ -1,3 +1,4 @@
+import { actorHeaders } from '../actor';
 /**
  * 会话 store —— 持久化会话与连续消息（M1/M2，F01·F08·F23）
  * ============================================================================
@@ -116,7 +117,7 @@ export const useSessionStore = defineStore('session', () => {
     listLoading.value = true;
     listError.value = null;
     try {
-      const res = await fetch('/api/conversations');
+      const res = await fetch('/api/conversations', {headers: actorHeaders()});
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = (await res.json()) as { conversations: ConvSummary[] };
       conversations.value = j.conversations ?? [];
@@ -151,7 +152,7 @@ export const useSessionStore = defineStore('session', () => {
     const hadCache = Boolean(messages.value[id]);
     if (!hadCache) messagesLoading.value = true;
     try {
-      const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`);
+      const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {headers: actorHeaders()});
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = (await res.json()) as {
         mode?: 'chat' | 'task';
@@ -204,7 +205,7 @@ export const useSessionStore = defineStore('session', () => {
    */
   async function ensureConversation(question: string, existingId: string | null, clientRequestId: string, mode: 'chat' | 'task' = 'task'): Promise<string> {
     if (existingId) return existingId;
-    const res = await fetch('/api/conversations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+    const res = await fetch('/api/conversations', { method: 'POST', headers: { ...actorHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
     if (!res.ok) throw new Error(`创建会话失败：HTTP ${res.status}`);
     const { id } = (await res.json()) as { id: string };
     saveCurrentId(id);
@@ -249,7 +250,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function removeConversation(id: string): Promise<void> {
-    await fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: actorHeaders() });
     delete messages.value[id];
     delete messagesErrors.value[id];
     if (currentId.value === id) saveCurrentId(null);
@@ -260,7 +261,7 @@ export const useSessionStore = defineStore('session', () => {
   async function setConversationMode(id: string, mode: 'chat' | 'task'): Promise<void> {
     const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...actorHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode })
     });
     if (!res.ok) throw new Error(`切换模式失败：HTTP ${res.status}`);
@@ -270,7 +271,7 @@ export const useSessionStore = defineStore('session', () => {
   async function renameConversation(id: string, title: string): Promise<void> {
     await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...actorHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ title })
     });
     await loadConversations();

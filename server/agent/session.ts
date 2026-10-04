@@ -76,3 +76,5 @@ export function forgetSession(sessionId: string | null | undefined): void {
 export function resetSessionsForTest(): void {
   sessions.clear();
 }
+
+export function forgetOwnerSessions(owner:string):void{for(const key of sessions.keys())if(key.startsWith(owner+':'))sessions.delete(key);}

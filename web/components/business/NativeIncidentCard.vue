@@ -1,0 +1,55 @@
+<script setup lang="ts">
+import {computed,onMounted,ref,watch} from 'vue';
+import {useBusinessStore,businessApi} from '../../stores/business';
+import type {NativeContext,NativeIncident,NativeIncidentSet,NativeImpact,NativePlan,NativeReceipt,NativeTaskDetail,NativeJointOption} from '@shared/business';
+import {PERIODS} from '@shared/periods';
+const props=defineProps<{scopeKey:string;incidentId?:string;taskId?:string;readonly?:boolean}>();
+const currentTaskId=ref(props.taskId||'');
+const business=useBusinessStore(),context=ref<NativeContext>(),incident=ref<NativeIncident>(),impact=ref<NativeImpact>(),set=ref<NativeIncidentSet>(),plan=ref<NativePlan|null>(null),receipt=ref<NativeReceipt|null>(null);
+const roomId=ref(''),date=ref(''),description=ref(''),device=ref(''),periodKeys=ref<string[]>(['pm1']),preference=ref('keep_period'),note=ref(''),undoMoves=ref(false),busy=ref(false),error=ref(''),edited=ref(false);
+const sameScope=computed(()=>business.connected&&business.scopeKey===props.scopeKey),admin=computed(()=>business.profile?.identity==='admin'),mine=computed(()=>!incident.value||(incident.value.coordinatorId||incident.value.actorId)===business.profile?.username);
+const payload=(b:Record<string,unknown>)=>({...b,scopeKey:props.scopeKey});
+const period=(k:string)=>PERIODS.find(p=>p.key===k)?.label||k;
+const status:Record<string,string>={draft:'事件草稿',in_progress:'已登记处置 · 维修待验收',completed:'已确认恢复开放'};
+async function work(fn:()=>Promise<void>){if(!sameScope.value)return;busy.value=true;error.value='';try{await fn();if(!sameScope.value)throw new Error('授权已变化，请重新查询');}catch(e){error.value=(e as Error).message;}finally{busy.value=false;}}
+async function refresh(){
+ const ctx=await businessApi<NativeContext>('proxy/context');if(!sameScope.value)return;context.value=ctx;if(!date.value)date.value=ctx.date;if(!roomId.value)roomId.value=ctx.rooms[0]?.id||'';
+ const incidentId=incident.value?.id||props.incidentId;
+ if(incidentId){const r=await businessApi<{incident:NativeIncident;impact:NativeImpact}>('proxy/incidents/'+incidentId);if(!sameScope.value)return;incident.value=r.incident;impact.value=r.impact;if(!edited.value){roomId.value=r.incident.roomId;date.value=r.incident.date;description.value=r.incident.description;device.value=r.incident.device;periodKeys.value=[...r.incident.periodKeys];}
+  if(mine.value){const t=await businessApi<NativeTaskDetail>('proxy/tasks/'+(currentTaskId.value||r.incident.taskId));if(!sameScope.value)return;plan.value=t.plan;receipt.value=t.receipt;if(t.candidateSet?.kind==='incident.bundle')set.value=t.candidateSet;}
+ }
+}
+async function save(){await work(async()=>{const r=await businessApi<{incident:NativeIncident}>('proxy/incidents/draft',payload({incidentId:incident.value?.id,expectedRevision:incident.value?.revision,roomId:roomId.value,date:date.value,description:description.value,device:device.value,periodKeys:periodKeys.value}));incident.value=r.incident;edited.value=false;plan.value=null;receipt.value=null;set.value=undefined;await refresh();});}
+async function analyze(){await work(async()=>{if(!incident.value||edited.value)throw new Error('请先保存故障事实及影响范围');const r=await businessApi<{candidateSet:NativeIncidentSet}>('proxy/incidents/'+incident.value.id+'/analyze',payload({preference:preference.value}));set.value=r.candidateSet;impact.value=r.candidateSet.impact;plan.value=null;receipt.value=null;});}
+async function choose(o:NativeJointOption){await work(async()=>{if(!incident.value||!set.value||edited.value)throw new Error('请重新保存并分析');const r=await businessApi<{plan:NativePlan}>('proxy/incidents/'+incident.value.id+'/preview',payload({candidateSetId:set.value.id,optionId:o.id}));plan.value=r.plan;currentTaskId.value=r.plan.taskId||'';edited.value=false;receipt.value=null;});}
+async function commit(){await work(async()=>{if(!plan.value||edited.value)throw new Error('条件已变化，请重新准备');const r=await businessApi<{receipt:NativeReceipt}>('proxy/plans/commit',payload({planId:plan.value.id,version:plan.value.version}));receipt.value=r.receipt;const done=await businessApi<{plan:NativePlan}>('proxy/plans/'+plan.value.id);plan.value=done.plan;await refresh();});}
+async function takeover(){await work(async()=>{if(!incident.value)return;const r=await businessApi<{plan:NativePlan}>('proxy/incidents/'+incident.value.id+'/takeover',payload({note:note.value}));plan.value=r.plan;currentTaskId.value=r.plan.taskId||'';edited.value=false;receipt.value=null;});}
+async function restore(){await work(async()=>{if(!incident.value)return;const r=await businessApi<{plan:NativePlan}>('proxy/incidents/'+incident.value.id+'/restore',payload({note:note.value,undoMoves:undoMoves.value}));plan.value=r.plan;currentTaskId.value=r.plan.taskId||'';edited.value=false;receipt.value=null;});}
+function dirty(){edited.value=true;}
+onMounted(()=>void work(refresh));watch(()=>props.scopeKey,()=>{incident.value=undefined;plan.value=null;receipt.value=null;set.value=undefined;void work(refresh);});
+</script>
+<template><section class="native-card incident-card" data-view="incidents" aria-label="故障事件联合办理">
+ <div class="native-card__head"><b>故障事件联合办理</b><span>{{incident?status[incident.status]:'登记故障事实'}}</span></div>
+ <p v-if="!sameScope" class="native-card__warn">业务授权已变化，请重新打开当前账号的任务。</p>
+ <template v-else>
+  <p class="native-card__source" v-if="incident">{{incident.id}} · 事件 v{{incident.revision}} · 当前管理人 {{incident.coordinatorId||incident.actorId}} · 任务 {{incident.taskId}} · 用户声明</p>
+  <form v-if="admin&&!mine&&!readonly&&incident?.status!=='completed'" class="native-form" @submit.prevent="takeover"><p class="wide">可通过本人确认的接续方案承担此事件管理，保留原创建人和历史。</p><label class="wide">事件接续说明<textarea aria-label="事件接续说明" v-model="note" required @input="plan?.kind==='incident.takeover'&&(edited=true)"></textarea></label><button :disabled="busy">准备由本人接续事件</button></form>
+  <form v-if="admin&&mine&&!readonly&&(!incident||incident.status==='draft')" class="native-form" @submit.prevent="save">
+   <label>故障房间<select aria-label="事件故障房间" v-model="roomId" @change="dirty"><option v-for="r in context?.rooms||[]" :key="r.id" :value="r.id">{{r.name}}</option></select></label><label>影响日期<input aria-label="事件影响日期" type="date" v-model="date" required @input="dirty"></label>
+   <label class="wide">故障事实<textarea aria-label="事件故障事实" v-model="description" required rows="2" @input="dirty" placeholder="填写观察及未核实事项"></textarea></label><label class="wide">设备名称（可留空）<input v-model="device" @input="dirty"></label>
+   <fieldset class="wide"><legend>影响节次</legend><label v-for="p in PERIODS" :key="p.key" class="check"><input type="checkbox" v-model="periodKeys" :value="p.key" @change="dirty">{{p.label}}</label></fieldset><button :disabled="busy">保存事件草稿</button>
+  </form>
+  <p v-if="impact">{{impact.date}} · {{impact.activityCount===null?'教学影响未知':`当前影响 ${impact.activityCount} 项教学活动`}} · {{impact.classNames.join('、')}} · {{impact.note}}</p>
+  <div v-if="incident?.status==='draft'&&admin&&mine&&!readonly" class="native-form"><label>方案偏好<select aria-label="联合方案偏好" v-model="preference" @change="plan=null;set=undefined"><option value="keep_period">尽量不改节次</option><option value="few_rooms">尽量少用房间</option><option value="early">优先较早节次</option></select></label><button :disabled="busy||edited" @click="analyze">分析教学影响与联合方案</button></div>
+  <template v-if="set&&incident?.status==='draft'"><p class="native-card__source">候选 {{set.id}} · 版本 {{set.version}} · {{set.note}}</p><p v-for="b in set.blocked" :key="b" class="native-card__warn">{{b}}</p>
+   <article v-for="(o,n) in set.options" :key="o.id" class="object-row joint-option"><b>联合方案 {{n+1}} · 改节次 {{o.cost.periodChanges}} · 使用房间 {{o.cost.distinctRooms}}</b><p v-for="m in o.moves" :key="m.source.id">{{m.source.courseName}} · {{m.source.labName}} {{period(m.source.periodKey)}} → {{m.candidate.roomName}} {{period(m.candidate.periodKey)}} · {{m.candidate.headcount}}人 / {{m.candidate.capacity}}席</p><button v-if="admin&&mine&&!readonly" :disabled="busy||edited" @click="choose(o)">准备此联合方案</button></article>
+  </template>
+  <div v-if="plan" class="native-confirm"><b>{{plan.kind==='incident.takeover'?'事件管理接续方案':plan.kind==='incident.restore'?'恢复开放方案':'故障联合处置方案'}} · {{plan.id}} · {{plan.state==='executed'?'已提交':'待本人确认'}}</b><p v-if="plan.kind==='incident.bundle'">一次提交全部调课、故障范围停用、1张待指派工单和受影响班级站内通知。提交前再次验证全组冲突；通知存入信箱不代表已读，工单登记不代表故障修复。</p><div v-if="plan.kind==='incident.bundle'"><p v-for="m in plan.payload.moves||[]" :key="m.source.id"><b>{{m.source.courseName}}</b> · {{m.source.classNames?.join('、')||m.source.className}} · {{plan.payload.date}}<br>{{m.source.labName}} {{period(m.source.periodKey)}} → {{m.candidate.roomName}} {{period(m.candidate.periodKey)}} · {{m.candidate.headcount}}人 / {{m.candidate.capacity}}席</p><p>停用：{{plan.payload.closure?.roomName}} · {{plan.payload.closure?.startDate}} · {{plan.payload.closure?.periodKeys.map(period).join('、')}}</p><p>创建工单：{{plan.payload.issue?.description}}</p><details><summary>核对本次班级通知正文</summary><p v-for="n in plan.payload.notices||[]" :key="n.audience.className">{{n.audience.className}} · {{n.title}} · {{n.content}}</p></details></div><p v-else-if="plan.kind==='incident.restore'">恢复故障范围开放 · {{plan.payload.undoMoves?'同时撤销本事件调课（重新验证冲突）':'保留已确认的教学调整'}}</p><p v-if="plan.kind==='incident.restore'||plan.kind==='incident.takeover'">{{plan.payload.note}}</p><button v-if="!readonly&&(mine||plan.kind==='incident.takeover')" data-native-confirm :disabled="busy||edited||plan.state!=='awaiting_confirmation'" @click="commit">{{plan.kind==='incident.takeover'?'本人确认接续事件':'本人确认联合提交到原系统'}}</button></div>
+  <div v-if="receipt" class="native-receipt"><b>✓ 原系统回执 {{receipt.operationId}}</b><p>{{receipt.objects.map(o=>o.kind+':'+o.id).join('、')}}</p></div>
+  <div v-if="incident&&incident.status!=='draft'" class="object-row"><b>事件关联对象</b><p>调课 {{incident.adjustmentIds.join('、')}} · 停用 {{incident.closureIds.join('、')}}</p><p>工单 {{incident.issueIds.join('、')}} · 通知 {{incident.noticeIds.join('、')}}</p><p v-for="i in context?.issues.filter(i=>incident?.issueIds.includes(i.id))||[]" :key="i.id">{{i.id}} · {{i.status==='closed'?'已验收关闭':i.status==='awaiting_acceptance'?'待验收':i.status==='open'?'待指派':'处理中'}} · v{{i.revision}}</p>
+   <form v-if="admin&&mine&&!readonly&&incident.status==='in_progress'" class="native-form" @submit.prevent="restore"><label class="wide">恢复核验说明<textarea aria-label="恢复核验说明" v-model="note" required rows="2" @input="plan?.kind==='incident.restore'&&(edited=true)"></textarea></label><label class="check"><input v-model="undoMoves" type="checkbox" @change="plan?.kind==='incident.restore'&&(edited=true)">同时恢复原教学安排</label><button :disabled="busy">准备恢复开放（要求工单已验收）</button></form>
+  </div>
+  <details v-if="incident"><summary>事件历史</summary><p v-for="(h,n) in incident.history" :key="n">{{h.at}} · {{h.actorId}} · {{h.action}} · {{h.note}} · {{h.operationId}}</p></details>
+  <button class="quiet" :disabled="busy" @click="work(refresh)">回查事件与最新业务</button>
+ </template><p v-if="error" role="alert" class="native-card__warn">{{error}}</p>
+</section></template>

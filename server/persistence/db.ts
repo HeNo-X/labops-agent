@@ -11,6 +11,7 @@
  *    · 删除为软删除（deletedAt），误触可恢复
  */
 
+import { currentActor } from '../security/context.ts';
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -150,6 +151,13 @@ function initDatabase(): DatabaseSync {
       }
     }
 
+    const columns = conn.prepare('PRAGMA table_info(conversations)').all() as Array<Record<string, unknown>>;
+    if (!columns.some(c => c['name'] === 'ownerId')) conn.exec("ALTER TABLE conversations ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'legacy-unassigned'");
+    conn.exec(`
+      CREATE TABLE IF NOT EXISTS demo_sessions (tokenHash TEXT PRIMARY KEY, subject TEXT NOT NULL, expiresAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS request_quota (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, expiresAt INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS verified_facts (ownerId TEXT NOT NULL, sessionId TEXT NOT NULL, fact TEXT NOT NULL, updatedAt INTEGER NOT NULL, PRIMARY KEY(ownerId, sessionId));
+    `);
     // 关键顺序：**先**把遗留 running/streaming 恢复为 interrupted（记录原因），
     // **再**建同会话唯一活跃索引 —— 旧库多条 running 不会炸迁移（C01）
     const migrated = recoverInterrupted(conn);
@@ -166,6 +174,8 @@ function initDatabase(): DatabaseSync {
     // ops.v1（阶段 2B）：提案/决策/操作/审计/outbox + 沙盒业务表。
     // 全部 IF NOT EXISTS —— 旧库直接补建，新库一次到位。
     conn.exec(OPS_SCHEMA_V2);
+    conn.exec('CREATE TABLE IF NOT EXISTS ops_proposal_commits(proposalId TEXT PRIMARY KEY, operationId TEXT UNIQUE NOT NULL)');
+    conn.exec('PRAGMA user_version = 4');
     if (migrated) console.log('[persistence] 旧库升级完成（含遗留运行恢复）');
     return conn;
   } catch (err) {
@@ -219,11 +229,11 @@ export function listConversations(limit = 100): ConversationRow[] {
               (SELECT COUNT(*) FROM messages m WHERE m.conversationId = c.id) AS messageCount,
               (SELECT m2.text FROM messages m2 WHERE m2.conversationId = c.id ORDER BY m2.ordinal DESC LIMIT 1) AS preview
          FROM conversations c
-        WHERE c.deletedAt IS NULL
+        WHERE c.deletedAt IS NULL AND (? IS NULL OR c.ownerId = ?)
         ORDER BY c.lastActivityAt DESC
         LIMIT ?`
     )
-    .all(limit) as Array<Record<string, unknown>>;
+    .all(currentActor()?.id ?? null, currentActor()?.id ?? null, limit) as Array<Record<string, unknown>>;
   return rows.map((r) => ({
     id: String(r['id']),
     title: String(r['title']) || '未命名会话',
@@ -239,15 +249,15 @@ export function createConversation(title = '', mode: 'chat' | 'task' = 'task'): 
   const id = newId('conv');
   const now = new Date().toISOString();
   getDb()
-    .prepare(`INSERT INTO conversations (id, title, createdAt, lastActivityAt, mode) VALUES (?, ?, ?, ?, ?)`)
-    .run(id, title, now, now, mode === 'chat' ? 'chat' : 'task');
+    .prepare(`INSERT INTO conversations (id, title, createdAt, lastActivityAt, mode, ownerId) VALUES (?, ?, ?, ?, ?, ?)`)
+    .run(id, title, now, now, mode === 'chat' ? 'chat' : 'task', currentActor()?.id ?? 'legacy-unassigned');
   return { id, createdAt: now };
 }
 
 export function getConversationMeta(id: string): { id: string; title: string; createdAt: string; lastActivityAt: string; mode: 'chat' | 'task' } | null {
   const row = getDb()
-    .prepare(`SELECT id, title, createdAt, lastActivityAt, mode FROM conversations WHERE id = ? AND deletedAt IS NULL`)
-    .get(id) as Record<string, unknown> | undefined;
+    .prepare(`SELECT id, title, createdAt, lastActivityAt, mode FROM conversations WHERE id = ? AND deletedAt IS NULL AND (? IS NULL OR ownerId = ?)`)
+    .get(id, currentActor()?.id ?? null, currentActor()?.id ?? null) as Record<string, unknown> | undefined;
   if (!row) return null;
   return {
     id: String(row['id']),
@@ -789,8 +799,8 @@ export function getOpsTask(taskId: string): TaskRecord | null {
 
 export function listOpsTasks(limit = 50): TaskRecord[] {
   const rows = getDb()
-    .prepare(`SELECT * FROM ops_tasks ORDER BY createdAt DESC LIMIT ?`)
-    .all(limit) as Array<Record<string, unknown>>;
+    .prepare(`SELECT * FROM ops_tasks WHERE (? IS NULL OR actorId = ?) ORDER BY createdAt DESC LIMIT ?`)
+    .all(currentActor()?.id ?? null, currentActor()?.id ?? null, limit) as Array<Record<string, unknown>>;
   return rows.map(rowToTask);
 }
 
@@ -1077,9 +1087,10 @@ export function insertBizIssue(input: {
   };
 }
 
-export function listBizIssues(filters: { roomId?: string; status?: string } = {}): SandboxIssue[] {
+export function listBizIssues(filters: { roomId?: string; status?: string; actorId?:string } = {}): SandboxIssue[] {
   const clauses: string[] = [];
   const args: Array<string | number | bigint | null> = [];
+  if (filters.actorId || currentActor()) { clauses.push('reporterId = ?'); args.push(filters.actorId ?? currentActor()!.id); }
   if (filters.roomId) {
     clauses.push('roomId = ?');
     args.push(filters.roomId);
@@ -1089,7 +1100,7 @@ export function listBizIssues(filters: { roomId?: string; status?: string } = {}
     args.push(filters.status);
   }
   const rows = getDb()
-    .prepare(`SELECT * FROM biz_issues ${clauses.length ? 'WHERE ' + clauses.join(' AND ') : ''} ORDER BY createdAt DESC LIMIT 200`)
+    .prepare(`SELECT * FROM biz_issues ${clauses.length ? 'WHERE ' + clauses.join(' AND ') : ''} ORDER BY createdAt DESC`)
     .all(...args) as Array<Record<string, unknown>>;
   return rows.map((r) => ({
     id: String(r['id']),

@@ -1,3 +1,4 @@
+import { effectiveSchedule } from '../data/calendar.ts';
 /**
  * ops.v1 准备类工具（任务书 P1 首批：F01 报修 / F02 停用 / F03 通知 / F06 值班 / F10 日报）
  * ============================================================================
@@ -26,9 +27,7 @@ import {
   addDays,
   daysBetween,
   isValidDateString,
-  weekMatches,
-  weekNumber,
-  weekdayOf
+  serverNow
 } from '../time/term.ts';
 import { PERIODS, PERIOD_KEYS, isPeriodKey } from '../../shared/periods.ts';
 import type { PeriodKey } from '../../shared/periods.ts';
@@ -218,7 +217,7 @@ export async function runPrepareIssueTicket(args: Record<string, unknown>, ctx: 
     }
 
     // 同房间未结工单提示（防重复报修的准备侧支持；最终判定在业务侧）
-    const openIssues = listBizIssues({ roomId, status: 'open' });
+    const openIssues = listBizIssues({ roomId, status: 'open', actorId:requireActor(ctx).id });
     const missingDeps = attachmentIds.length
       ? ['附件上传服务未接入：attachmentIds 仅登记引用，不会保存文件内容']
       : [];
@@ -297,18 +296,17 @@ export async function runPrepareRoomClosure(args: Record<string, unknown>, ctx: 
     const affected: Array<{ date: string; courseName: string; className: string; periodKey: PeriodKey }> = [];
     const classNames = new Set<string>();
     for (let d = startDate; daysBetween(d, endDate) >= 0; d = addDays(d, 1)) {
-      const wd = weekdayOf(d);
-      const wn = weekNumber(d, termStart);
-      for (const row of ctx.dataset.timetable) {
+
+      for (const row of effectiveSchedule(ctx.dataset,d)) {
         if (normalizeLabName(row.labName) !== normalizeLabName(roomId)) continue;
-        if (row.weekday !== wd) continue;
+
         // TimetableRow.periodKey 在数据层是 string；此处已由 isPeriodKey 白名单收敛，可安全收窄
         if (!isPeriodKey(row.periodKey)) continue;
         if (!periodKeys.includes(row.periodKey)) continue;
-        if (!weekMatches(row.weeks, wn)) continue;
+
         affected.push({ date: d, courseName: row.courseName, className: row.className, periodKey: row.periodKey });
         row.classNames.forEach((c) => classNames.add(c));
-        if (affected.length >= 200) break;
+
       }
     }
     const notes: string[] = [];
@@ -518,7 +516,7 @@ export async function runPrepareDutySession(args: Record<string, unknown>, ctx: 
     // ---- handover：定位值班会话 + 用户逐项确认的检查清单 ----
     const note = strArg(args, 'note') ?? '';
     let sessionId = strArg(args, 'sessionId');
-    let session = sessionId ? findDutySession(sessionId) : findLatestOpenDutySession();
+    let session = sessionId ? findDutySession(sessionId) : findLatestOpenDutySession(requireActor(ctx).id);
     if (!session) {
       throw new OpsToolError(
         'duty_session_not_found',
@@ -621,13 +619,7 @@ export async function runCreateOperationsReport(args: Record<string, unknown>, c
       const weekDeterminable = Boolean(termStart);
       let count = 0;
       for (let d = startDate; daysBetween(d, endDate) >= 0; d = addDays(d, 1)) {
-        const wd = weekdayOf(d);
-        const wn = weekNumber(d, termStart);
-        for (const row of ctx.dataset.timetable) {
-          if (row.weekday !== wd) continue;
-          if (!weekMatches(row.weeks, wn)) continue;
-          count += 1;
-        }
+        count += effectiveSchedule(ctx.dataset,d).length;
       }
       if (!weekDeterminable) notes.push('教学周不可确定：排课统计未做周次过滤，数字偏大（按全部周次计）');
       metrics.push({
@@ -646,8 +638,8 @@ export async function runCreateOperationsReport(args: Record<string, unknown>, c
       });
     }
     if (sections.includes('issues')) {
-      const issues = listBizIssues();
-      const inRange = issues.filter((i) => i.createdAt.slice(0, 10) >= startDate && i.createdAt.slice(0, 10) <= endDate);
+      const issues = listBizIssues({actorId:actor.id});
+      const inRange = issues.filter((i) => serverNow(new Date(i.createdAt)).date >= startDate && serverNow(new Date(i.createdAt)).date <= endDate);
       metrics.push(
         { key: 'issues_created', label: '新建报修工单', value: inRange.length, unit: '张', status: 'known', note: '沙盒业务数据' },
         { key: 'issues_open', label: '未结工单（全量）', value: issues.filter((i) => i.status === 'open').length, unit: '张', status: 'known', note: '不限统计范围' }
@@ -655,11 +647,11 @@ export async function runCreateOperationsReport(args: Record<string, unknown>, c
       evidence.push({ section: 'issues', sourceType: 'demo', sourceLabel: '沙盒业务数据（biz_issues）', note: '仅统计沙盒内创建的工单' });
     }
     if (sections.includes('notifications')) {
-      const ntf = listBizNotifications();
+      const ntf = listBizNotifications(actor.id);
       metrics.push({
         key: 'notifications_published',
         label: '发布站内通知',
-        value: ntf.filter((n) => n.publishedAt.slice(0, 10) >= startDate && n.publishedAt.slice(0, 10) <= endDate).length,
+        value: ntf.filter((n) => serverNow(new Date(n.publishedAt)).date >= startDate && serverNow(new Date(n.publishedAt)).date <= endDate).length,
         unit: '条',
         status: 'known',
         note: '已读跟踪未接入，无触达统计'
@@ -667,7 +659,7 @@ export async function runCreateOperationsReport(args: Record<string, unknown>, c
       evidence.push({ section: 'notifications', sourceType: 'demo', sourceLabel: '沙盒业务数据（biz_notifications）', note: '无已读统计' });
     }
     if (sections.includes('closures')) {
-      const closures = listBizClosures();
+      const closures = listBizClosures(actor.id);
       metrics.push({
         key: 'closures_active',
         label: '生效中的停用',
@@ -679,7 +671,7 @@ export async function runCreateOperationsReport(args: Record<string, unknown>, c
       evidence.push({ section: 'closures', sourceType: 'demo', sourceLabel: '沙盒业务数据（biz_closures）', note: '' });
     }
     if (sections.includes('duty')) {
-      const duties = listBizDutySessions();
+      const duties = listBizDutySessions(actor.id);
       metrics.push(
         { key: 'duty_sessions_open', label: '进行中值班会话', value: duties.filter((d) => d.status === 'open').length, unit: '个', status: 'known', note: '沙盒数据' },
         { key: 'attendance_hours', label: '签到/在室人时', value: null, unit: '人时', status: 'unknown', note: '签到数据未接入，无法统计，不显示为 0' }
@@ -736,10 +728,10 @@ function findDutySession(id: string): (SandboxDutySession & { startedBy: Sandbox
   return row ? rowToSession(row) : null;
 }
 
-function findLatestOpenDutySession(): (SandboxDutySession & { startedBy: SandboxActor }) | null {
+function findLatestOpenDutySession(actorId:string): (SandboxDutySession & { startedBy: SandboxActor }) | null {
   const row = getDb()
-    .prepare(`SELECT * FROM biz_duty_sessions WHERE status = 'open' ORDER BY startedAt DESC LIMIT 1`)
-    .get() as Record<string, unknown> | undefined;
+    .prepare(`SELECT * FROM biz_duty_sessions WHERE status = 'open' AND startedById = ? ORDER BY startedAt DESC LIMIT 1`)
+    .get(actorId) as Record<string, unknown> | undefined;
   return row ? rowToSession(row) : null;
 }
 
@@ -747,17 +739,17 @@ function findLatestOpenDutySession(): (SandboxDutySession & { startedBy: Sandbox
 //  日报用的其余 biz 计数（与 listBizIssues 同风格；详见 db.ts）
 // ---------------------------------------------------------------------------
 
-function listBizNotifications(): Array<{ publishedAt: string }> {
-  const rows = getDb().prepare(`SELECT publishedAt FROM biz_notifications ORDER BY publishedAt DESC LIMIT 500`).all() as Array<Record<string, unknown>>;
+function listBizNotifications(actorId:string): Array<{ publishedAt: string }> {
+  const rows = getDb().prepare(`SELECT publishedAt FROM biz_notifications WHERE publishedById = ?`).all(actorId) as Array<Record<string, unknown>>;
   return rows.map((r) => ({ publishedAt: String(r['publishedAt']) }));
 }
 
-function listBizClosures(): Array<{ status: string }> {
-  const rows = getDb().prepare(`SELECT status FROM biz_closures ORDER BY createdAt DESC LIMIT 500`).all() as Array<Record<string, unknown>>;
+function listBizClosures(actorId:string): Array<{ status: string }> {
+  const rows = getDb().prepare(`SELECT status FROM biz_closures WHERE createdById = ?`).all(actorId) as Array<Record<string, unknown>>;
   return rows.map((r) => ({ status: String(r['status']) }));
 }
 
-function listBizDutySessions(): Array<{ status: string }> {
-  const rows = getDb().prepare(`SELECT status FROM biz_duty_sessions ORDER BY startedAt DESC LIMIT 500`).all() as Array<Record<string, unknown>>;
+function listBizDutySessions(actorId:string): Array<{ status: string }> {
+  const rows = getDb().prepare(`SELECT status FROM biz_duty_sessions WHERE startedById = ?`).all(actorId) as Array<Record<string, unknown>>;
   return rows.map((r) => ({ status: String(r['status']) }));
 }

@@ -88,7 +88,7 @@ export async function handleTasksApi(req: IncomingMessage, res: ServerResponse, 
         decision: rawDecision,
         clientRequestId: String(b['clientRequestId'] ?? '')
       };
-      const outcome: DecisionOutcome = decideOnProposal({ ...input, actor });
+      const outcome: DecisionOutcome = decideOnProposal({ ...input, actor, taskId });
       if (!outcome.ok) {
         json(res, HTTP_STATUS[outcome.code] ?? 400, outcome);
         return true;
@@ -105,7 +105,7 @@ export async function handleTasksApi(req: IncomingMessage, res: ServerResponse, 
     const taskMatch = /^\/api\/tasks\/([^/]+)$/.exec(pathname);
     if (taskMatch && method === 'GET') {
       const task = getOpsTask(decodeURIComponent(taskMatch[1]!));
-      if (!task) {
+      if (!task || task.actor.id !== actor.id) {
         json(res, 404, { error: 'task_not_found' });
         return true;
       }
@@ -120,7 +120,7 @@ export async function handleTasksApi(req: IncomingMessage, res: ServerResponse, 
     if (propMatch && method === 'GET') {
       expireStaleProposals();
       const stored = getOpsProposal(decodeURIComponent(propMatch[1]!));
-      if (!stored) {
+      if (!stored || getOpsTask(stored.proposal.taskId)?.actor.id !== actor.id) {
         json(res, 404, { error: 'proposal_not_found' });
         return true;
       }
@@ -132,7 +132,7 @@ export async function handleTasksApi(req: IncomingMessage, res: ServerResponse, 
     const opMatch = /^\/api\/operations\/([^/]+)$/.exec(pathname);
     if (opMatch && method === 'GET') {
       const receipt = getOpsOperation(decodeURIComponent(opMatch[1]!));
-      if (!receipt) {
+      if (!receipt || receipt.actor.id !== actor.id) {
         json(res, 404, { error: 'operation_not_found' });
         return true;
       }

@@ -98,7 +98,7 @@ export async function handleAgentChat(req: IncomingMessage, res: ServerResponse)
   }
 
   const runId = typeof payload['runId'] === 'string' && payload['runId'] ? payload['runId'] : newTraceId('run');
-  const sessionId = typeof payload['sessionId'] === 'string' && payload['sessionId'] ? payload['sessionId'] : undefined;
+  const sessionId = typeof payload['sessionId'] === 'string' && payload['sessionId'] ? `${resolveActor(undefined).id}:${payload['sessionId'].slice(0, 128)}` : undefined;
 
   sseHeaders(res);
 
@@ -112,7 +112,7 @@ export async function handleAgentChat(req: IncomingMessage, res: ServerResponse)
     aborted = true;
     if (!res.writableEnded) ac.abort();
   };
-  req.on('close', onDisconnect);
+  req.on('aborted', onDisconnect);
   res.on('close', onDisconnect);
 
   const send = (type: string, data: unknown): void => {

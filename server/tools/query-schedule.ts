@@ -1,3 +1,4 @@
+import { effectiveSchedule, calendar } from '../data/calendar.ts';
 /**
  * 只读工具：query_schedule
  * ============================================================================
@@ -21,7 +22,6 @@ import {
   describeWeek,
   isHoliday,
   isValidDateString,
-  weekMatches,
   weekdayLabelOf,
   weekdayOf
 } from '../time/term.ts';
@@ -103,7 +103,7 @@ export function runQuerySchedule(
     timezone: `${APP_TZ} (UTC${APP_TZ_OFFSET})`,
     coverage:
       ds.sourceType === 'live'
-        ? '实时数据：直接读取当前真实 state.json，反映线上此刻的排课'
+        ? '实时数据：经授权读取原系统排课，来源与读取时间见查询信息'
         : ds.sourceType === 'snapshot'
           ? '脱敏快照：从真实 state.json 导出后已脱敏（教师姓名伪名化，不含用户/名册/凭据），非实时'
           : '模拟演示：内置构造的示例数据，与真实实验室无关，仅用于验证链路'
@@ -150,13 +150,10 @@ export function runQuerySchedule(
     (row) => Number(row.weekday) === weekday && normalizeLabName(row.labName) === labKey
   );
 
-  const matched: TimetableRow[] = sameWeekday.filter((row) => {
-    if (row.status === 'cancelled') return false; // 停课
-    if (row.term && ds.term.term && row.term !== ds.term.term) return false; // 跨学期
-    if (!weekMatches(row.weeks, week.weekNo)) return false; // 周次 / 单双周
-    if (periodFilter && row.periodKey !== periodFilter) return false;
-    return true;
-  });
+  const matched: TimetableRow[] = effectiveSchedule(ds,date).filter(row => normalizeLabName(row.labName) === labKey && (!periodFilter || row.periodKey === periodFilter));
+  const statistics = calendar.stats(matched);
+  notes.push(`统计口径：${statistics.recordCount} 条班级展开记录、${statistics.activityCount} 个教学活动、${statistics.classCount} 个班级、${statistics.occupiedPeriodCount} 个占用大节。`);
+  if (statistics.conflicts.length) notes.push(`⚠️ 存在 ${statistics.conflicts.length} 个疑似冲突时段，须核实合班或导入数据；不能据此确认房间可用。`);
 
   // ---------- 6. 展开成 lessons（合班时每班一条，与老系统一致）----------
   const lessons: ScheduleLesson[] = [];

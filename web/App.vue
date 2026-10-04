@@ -7,7 +7,7 @@
  *  · 房间点击只回填草稿，不自动发请求（F29）；发送后草稿清空（F27）
  *  · 主题：跟随系统 = 显式解析 prefers-color-scheme 并实时响应（F28 已修，保持）
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRunStore } from './stores/run';
 import { useSessionStore } from './stores/session';
 import type { ChatMessage as ChatMessageData } from './stores/session';
@@ -15,6 +15,9 @@ import { useAgentStream } from './composables/useAgentStream';
 import LabMatrix from './components/LabMatrix.vue';
 import CommandBar from './components/CommandBar.vue';
 import ChatMessage from './components/ChatMessage.vue';
+import NativeWorkPanel from './components/NativeWorkPanel.vue';
+import BusinessConnectionPanel from './components/BusinessConnectionPanel.vue';
+import {useBusinessStore} from './stores/business';
 import LoginView from './components/LoginView.vue';
 import SourceBadge from './components/SourceBadge.vue';
 import { ACTOR_ROLE_LABELS, actorHeaders, actorRole, setActorRole } from './actor';
@@ -32,8 +35,21 @@ interface TaskRow {
   createdAt: string;
 }
 
+const updateViewport=()=>document.documentElement.style.setProperty('--app-height',Math.round(window.visualViewport?.height||window.innerHeight)+'px');
+onMounted(()=>{updateViewport();window.visualViewport?.addEventListener('resize',updateViewport);window.addEventListener('resize',updateViewport);});
+onUnmounted(()=>{window.visualViewport?.removeEventListener('resize',updateViewport);window.removeEventListener('resize',updateViewport);});
 const store = useRunStore();
 const session = useSessionStore();
+const business=useBusinessStore();
+watch(()=>business.scopeKey,(next,old)=>{
+  if(old===next)return;
+  void store.loadOverview();
+  if(store.runStatus!=='running'){
+    store.resetRun();
+    session.messages={};
+    if(session.currentId)void session.openConversation(session.currentId);
+  }
+});
 // 登录门面（本地演示模式）：会话内记住登录；不做真实身份校验（R26 边界不变）
 const authed = ref(sessionStorage.getItem('labops.auth') !== null);
 function onLogin(account: string): void {
@@ -57,7 +73,7 @@ const navOpen = ref(false);
 const roomsOpen = ref(window.innerWidth >= 1280);
 try {
   const saved = localStorage.getItem('labops.rooms');
-  if (saved === 'open') roomsOpen.value = true;
+  if (saved === 'open' && window.innerWidth > 900) roomsOpen.value = true;
   else if (saved === 'closed') roomsOpen.value = false;
 } catch {
   /* 忽略 */
@@ -70,6 +86,13 @@ function toggleRooms(open: boolean): void {
     /* 忽略 */
   }
 }
+let lastViewportWidth = window.innerWidth;
+function collapseRailOnMobile(): void {
+  if (window.innerWidth <= 900 && lastViewportWidth > 900) roomsOpen.value = false;
+  lastViewportWidth = window.innerWidth;
+}
+onMounted(() => window.addEventListener('resize', collapseRailOnMobile));
+onUnmounted(() => window.removeEventListener('resize', collapseRailOnMobile));
 
 // ---- 会话类型（聊天 / 任务）----
 // hero（未创建会话）用 draftMode 选择；已创建的会话以服务端存储为准（session.convModes）
@@ -151,8 +174,16 @@ async function loadTasks(): Promise<void> {
 }
 
 function switchRole(r: ActorRole): void {
+  if(store.runStatus==='running'||r===actor.value)return;
   setActorRole(r);
+  session.startDraft();
+  session.messages={};
+  session.conversations=[];
+  store.resetRun();
+  void business.refresh();
   actor.value = r;
+  void session.loadConversations();
+  void store.loadOverview();
   void loadTasks();
 }
 
@@ -325,7 +356,7 @@ async function onCancel(): Promise<void> {
   if (session.currentId && store.runId) {
     try {
       await Promise.race([
-        fetch(`/api/runs/${encodeURIComponent(store.runId)}/cancel`, { method: 'POST' }),
+        fetch(`/api/runs/${encodeURIComponent(store.runId)}/cancel`, { method: 'POST', headers: actorHeaders() }),
         new Promise((r) => setTimeout(r, 800))
       ]);
     } catch {
@@ -431,7 +462,7 @@ function onPickRoom(q: string): void {
         <h2 class="nav__h">我的任务</h2>
         <p v-if="tasksError" class="nav__err" role="alert">{{ tasksError }}</p>
         <p v-else-if="!tasks.length" class="nav__hint">
-          还没有业务任务。试试「E310 投影没有信号，帮我报修」「发布通知《…》」或「结束值班收尾」。
+          {{ business.connected ? '原系统办理记录保存在对应会话中，点击最近会话可回查。' : '还没有业务任务。试试「E310 投影没有信号，帮我报修」「发布通知《…》」或「结束值班收尾」。' }}
         </p>
         <ul v-else class="nav__convs">
           <li v-for="t in tasks.slice(0, 12)" :key="t.taskId">
@@ -455,6 +486,7 @@ function onPickRoom(q: string): void {
             :key="r"
             type="button"
             class="theme__btn"
+            :disabled="store.runStatus==='running'"
             :class="{ 'theme__btn--on': actor === r }"
             :aria-pressed="actor === r"
             :title="`切换沙盒演示视角：${ACTOR_ROLE_LABELS[r]}（能力边界由服务端校验）`"
@@ -483,6 +515,7 @@ function onPickRoom(q: string): void {
 
     <!-- 主区：会话（有消息时列高锁定视口，输入框固定在底部） -->
     <main class="chat" :class="{ 'chat--conv': session.currentId && session.currentMessages.length > 0 }">
+      <BusinessConnectionPanel /><NativeWorkPanel />
       <!-- 空会话：欢迎页即输入（保持居中首屏形态） -->
       <div v-if="!session.currentId || session.currentMessages.length === 0" class="hero">
         <button type="button" class="chat__navtoggle hero__navtoggle" @click="navOpen = !navOpen">会话</button>
@@ -493,7 +526,7 @@ function onPickRoom(q: string): void {
             class="mode-seg__btn"
             :class="{ 'mode-seg__btn--on': draftMode === 'chat' }"
             :aria-pressed="draftMode === 'chat'"
-            title="纯聊天：不能执行任务操作、不能查询数据"
+            title="聊天查询：可读取数据，不准备办理单"
             @click="draftMode = 'chat'"
           >
             聊天
@@ -518,14 +551,14 @@ function onPickRoom(q: string): void {
           <CommandBar v-model:draft="draft" variant="hero" :submitting="submitting" @submit="onSubmit" @cancel="onCancel" />
           <p class="hero__scope">
             查课表、看房间开放状态、找空闲实验室；也可以直接交办事务：报修、临时停用、站内通知、值班收尾、运营日报
-            （沙盒演示环境办理，业务单号与回执以提案卡为准）。
-            在室人数、钥匙台账、排班换班、课表变更与用房预约尚未接入。历史会话在左侧导航找回。
+            （连接原系统后，按实际账号权限办理；未连接时为沙盒演示）。
+            连接账号后可在消息中比较调课、补全检查、处理工单、发布通知并回查；在室人数、钥匙台账和预约尚未接入。历史会话在左侧导航找回。
           </p>
         </template>
         <template v-else>
           <h1 class="hero__h">随便聊聊</h1>
           <p class="hero__p">
-            自由聊天模式：不能执行任务操作、不能查询具体数据；要交办任务请切回「任务」模式。
+            聊天模式可以查询课表、状态与操作说明；办理事务请切回「任务」模式。
           </p>
           <CommandBar
             v-model:draft="draft"
@@ -633,7 +666,7 @@ function onPickRoom(q: string): void {
   grid-template-columns: 264px minmax(0, 1fr) auto;
   gap: var(--sp-3);
   padding: var(--sp-4) var(--sp-2) 0;
-  min-height: 100vh;
+  min-height: var(--app-height,100dvh);
 }
 
 /* ---- 左侧导航 ---- */
@@ -810,7 +843,7 @@ function onPickRoom(q: string): void {
 /* 会话视图：列高锁定视口（顶部留出 app 的 padding-top），
    消息区内部滚动，composer 恒在视口底部（不随内容下移） */
 .chat--conv {
-  height: calc(100vh - var(--sp-4));
+  height: calc(var(--app-height,100dvh) - var(--sp-4));
   min-height: 0;
 }
 .hero {
@@ -883,6 +916,7 @@ function onPickRoom(q: string): void {
 .chat__composer {
   border-top: 1px solid var(--border);
   padding-top: var(--sp-3);
+  padding-bottom: env(safe-area-inset-bottom);
   flex: 0 0 auto;
 }
 

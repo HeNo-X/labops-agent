@@ -1,3 +1,4 @@
+import {businessScope,isBusinessConnected,businessRequest} from '../business/bridge.ts';
 /**
  * 会话 API —— 持久化会话/消息/运行的 REST 与 SSE（M0/M1 加固版）
  * ============================================================================
@@ -85,6 +86,9 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
   const cancelMatch = /^\/api\/runs\/([^/]+)\/cancel$/.exec(pathname);
   if (cancelMatch && method === 'POST') {
     const runId = decodeURIComponent(cancelMatch[1]!);
+    const { getRun } = await import('../persistence/db.ts');
+    const target = getRun(runId);
+    if (!target || !getConversationMeta(String(target['conversationId']))) return json(res, 404, {error:'run_not_found'}), true;
     const outcome = requestCancel(runId);
     if (outcome === 'not_found') {
       // R06：内存活跃表没有 ≠ 运行不存在 —— 查持久 Run，已终态返回既有状态
@@ -102,7 +106,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
   if (runMatch && method === 'GET') {
     const { getRun } = await import('../persistence/db.ts');
     const run = getRun(decodeURIComponent(runMatch[1]!));
-    if (!run) return json(res, 404, { error: 'run_not_found' }), true;
+    if (!run || !getConversationMeta(String(run['conversationId']))) return json(res, 404, { error: 'run_not_found' }), true;
     return json(res, 200, run), true;
   }
 
@@ -126,6 +130,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
   if (convMatch) {
     const conversationId = decodeURIComponent(convMatch[1]!);
     const isMessages = Boolean(convMatch[2]);
+    if (!getConversationMeta(conversationId)) return json(res, 404, {error:'conversation_not_found'}), true;
 
     if (!isMessages && method === 'GET') {
       const meta = getConversationMeta(conversationId);
@@ -133,7 +138,10 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
         json(res, 404, { error: 'conversation_not_found' });
         return true;
       }
-      json(res, 200, { ...meta, messages: getMessages(conversationId) });
+      if(isBusinessConnected()){try{await businessRequest('/context');}catch{/* expired credentials are invalidated; scoped history is redacted below */}}
+      const scope=businessScope().scopeKey;
+      const messages=getMessages(conversationId).map(m=>m.meta?.['authorityScope']&&m.meta['authorityScope']!==scope?{...m,text:'此条原系统历史结果属于其他账号或已失效授权范围。请重新连接相应账号并查询。',meta:{...m.meta,toolCalls:[]}}:m);
+      json(res, 200, { ...meta, messages });
       return true;
     }
     if (!isMessages && method === 'PATCH') {
@@ -194,8 +202,9 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
     json(res, 413, { error: 'message_too_long', message: `问题最长 ${MAX_QUESTION_CHARS} 字（当前 ${message.length} 字），请拆分或精简` });
     return;
   }
-  const clientRequestId =
+  const rawClientRequestId =
     typeof payload['clientRequestId'] === 'string' && payload['clientRequestId'] ? payload['clientRequestId'] : newTraceId('req');
+  const clientRequestId = `${resolveActor(undefined).id}:${conversationId}:${rawClientRequestId.slice(0,128)}`;
   // N01：正式 runId 一律由服务端生成（客户端 runId 只在旧 /api/agent/chat 兼容）
   const runId = newTraceId('run');
 
@@ -236,6 +245,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
     }
   });
 
+  let authorityScope=isBusinessConnected()?businessScope().scopeKey:null;
   const ac = new AbortController();
   let aborted = false;
   // F03/N06：客户端断开在 req/res 两个对象上都可能表现为 close —— 任一触发即中止
@@ -265,6 +275,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
   let failedError: { code: string; message: string } | null = null;
   const toolCalls: Array<Record<string, unknown>> = [];
   let completedPayload: Record<string, unknown> | null = null;
+  let cancelEventSent = false;
   const lastContext: { labName: string | null; date: string | null; task: string | null } = {
     labName: null,
     date: null,
@@ -306,8 +317,10 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
       // 取消必须压过随后到达的 run_completed，否则"已完成"会覆盖"已取消"
       if (aborted || ac.signal.aborted) break;
       lastSeq = ev.seq;
-      send(res, ev.type, ev);
+      if (!['run_completed','run_failed','run_cancelled'].includes(ev.type)) send(res, ev.type, ev);
       if (ev.type === 'run_started') {
+        // 原系统数据请求可能刚检测到角色变化；采用已验证后的范围。
+        authorityScope=isBusinessConnected()?businessScope().scopeKey:null;
         engine = String((ev.payload as Record<string, unknown>)['engine'] ?? '');
         sourceType = String((ev.payload as Record<string, unknown>)['sourceType'] ?? '');
       } else if (ev.type === 'answer_delta') {
@@ -350,10 +363,11 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         terminal = true;
         finalStatus = 'cancelled';
         send(res, ev.type, ev);
+        cancelEventSent = true;
       }
     }
   } catch (err) {
-    if (!aborted) {
+    if (!aborted && !runHandle.cancelRequested()) {
       lastSeq += 1;
       send(res, 'run_failed', {
         seq: lastSeq,
@@ -370,7 +384,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
   } finally {
     clearInterval(flushTimer);
     cancelRequested = runHandle.cancelRequested();
-    if (cancelRequested && !terminal) {
+    if (cancelRequested) {
       // N06：用户显式取消（经取消接口）→ cancelled；单纯断连 → interrupted
       finalStatus = 'cancelled';
       terminal = true;
@@ -384,13 +398,15 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
     try {
       finalizeAssistantMessage(assistant.id, runId, finalStatus, answerText, {
         conversationId,
+        authorityScope,
         runId,
-        engine,
+        engine:completedPayload?.['engine']||engine,
         sourceType,
         ms: elapsedMs,
         toolCalls,
         error: failedError,
         clientRequestId,
+        usage: completedPayload?.['usage'] ?? null,
         context: lastContext
       });
     } catch (err) {
@@ -409,6 +425,13 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         payload: { ...completedPayload, durable: true }
       });
     }
+    if (cancelRequested && !cancelEventSent) {
+      lastSeq += 1;
+      send(res, 'run_cancelled', {
+        seq: lastSeq, v: 1, runId, type: 'run_cancelled', ts: new Date().toISOString(),
+        payload: { ms: elapsedMs, message: '你取消了本次任务。' }
+      });
+    }
     if (!saved) {
       // R02：终态写入失败 → 尽力把 run 标为 save_failed，避免悬挂的假 running 锁；
       // 连这步都失败时保留活跃登记（createMessageWithRun 冲突时会对 finalizeFailed 修复）
@@ -421,6 +444,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         ts: new Date().toISOString(),
         payload: {
           status: finalStatus,
+          answer: answerText,
           message: '本轮结果已生成，但写入会话历史失败——刷新后可能丢失，请复制保留重要内容'
         }
       });
@@ -437,7 +461,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
       runId,
       type: 'end',
       ts: new Date().toISOString(),
-      payload: { runId, status: finalStatus, saved, ...(saved ? {} : { saveError: saveError.slice(0, 200) }) }
+      payload: { runId, status: saved ? finalStatus : cancelRequested ? 'cancelled' : 'failed', saved, ...(saved ? {} : { saveError: saveError.slice(0, 200) }) }
     });
     if (!res.writableEnded) res.end();
   }

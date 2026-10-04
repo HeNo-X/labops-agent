@@ -1,3 +1,5 @@
+import { effectiveSchedule } from '../data/calendar.ts';
+import { closuresFor } from '../data/closures.ts';
 /**
  * 只读工具：query_lab_status —— 房间档案 + 该日排课统计（阶段 2A）
  * ============================================================================
@@ -9,7 +11,7 @@
 import type { LabStatusArgs, LabStatusResult, ScheduleQueryResult } from '../../shared/types.ts';
 import type { Dataset, LabRow, TimetableRow } from '../data/store.ts';
 import { findLab, findOpenLab, normalizeLabName } from '../data/store.ts';
-import { APP_TZ, APP_TZ_OFFSET, describeWeek, isHoliday, isValidDateString, weekMatches, weekdayLabelOf, weekdayOf } from '../time/term.ts';
+import { APP_TZ, APP_TZ_OFFSET, describeWeek, isHoliday, isValidDateString, weekdayLabelOf } from '../time/term.ts';
 import { PERIODS, toMinutes } from '../../shared/periods.ts';
 import { ToolArgumentError, availableRoomNames } from './query-schedule.ts';
 import type { ServerNow } from '../time/term.ts';
@@ -57,7 +59,7 @@ export function runQueryLabStatus(
       timezone: `${APP_TZ} (UTC${APP_TZ_OFFSET})`,
       coverage:
         ds.sourceType === 'live'
-          ? '实时数据：直接读取当前真实 state.json'
+          ? '实时数据：经授权读取原系统业务数据，来源见查询信息'
           : ds.sourceType === 'snapshot'
             ? '脱敏快照：从真实 state.json 导出后已脱敏，非实时'
             : '模拟演示：内置构造的示例数据，与真实实验室无关'
@@ -88,7 +90,6 @@ export function runQueryLabStatus(
     };
   }
 
-  const weekday = weekdayOf(date);
   const week = describeWeek(date, ds.term);
   const holiday = isHoliday(date, ds.term);
 
@@ -100,15 +101,9 @@ export function runQueryLabStatus(
   notes.push('在室人数没有数据来源（无签到/门禁数据），本工具无法提供，请勿据此回答人数问题');
 
   const labKey = normalizeLabName(lab.name);
-  const matched: TimetableRow[] =
-    ds.timetable.filter(
-      (row) =>
-        Number(row.weekday) === weekday &&
-        normalizeLabName(row.labName) === labKey &&
-        row.status !== 'cancelled' &&
-        (!row.term || !ds.term.term || row.term === ds.term.term) &&
-        (week.determinable ? weekMatches(row.weeks, week.weekNo) : true)
-    ) ?? [];
+  const matched: TimetableRow[] = effectiveSchedule(ds,date).filter(row=>normalizeLabName(row.labName)===labKey);
+  const closures=closuresFor(ds,date).filter(c=>c.roomId===lab.id||normalizeLabName(c.roomId)===labKey);
+  if(closures.length) notes.push('该日期包含'+(ds.sourceType==='live'?'原系统':'沙盒/快照')+'临时停用，按停用节次限制使用；关门与停用分别判断。');
 
   const occupiedPeriods: LabStatusResult['schedule']['occupiedPeriods'] = [];
   for (const p of PERIODS) {
@@ -146,6 +141,8 @@ export function runQueryLabStatus(
 
   return {
     ...base,
+    serviceState: closures.length||lab.status==='inactive'?'suspended':'normal',
+    suspendedPeriods: [...new Set(closures.flatMap(c=>c.periodKeys))],
     labId: lab.id,
     labName: lab.name,
     labLocation: lab.location,

@@ -1,3 +1,5 @@
+import { planNativeDialogue, verifiedRecommendation } from '../tools/business.ts';
+import type { BusinessResult } from '../../shared/business.ts';
 /**
  * Agent 编排 —— 有界自主循环（C5）
  * ============================================================================
@@ -24,6 +26,8 @@ import type {
   ToolStartedPayload
 } from '../../shared/types.ts';
 import type { NeedConfirmPayload, Proposal, SandboxActor } from '../../shared/operations-contract.ts';
+import { saveFacts, listFacts, transformSchedule } from './facts.ts';
+import { isBusinessConnected, businessScope, readBusinessTask, listBusinessTasks, loadAuthorizedDataset } from '../business/bridge.ts';
 import { getConfig } from '../config.ts';
 import { loadDataset } from '../data/store.ts';
 import type { Dataset } from '../data/store.ts';
@@ -33,7 +37,7 @@ import { describeWeek, serverNow } from '../time/term.ts';
 import type { ServerNow } from '../time/term.ts';
 import { isAgnesConfigured, AgnesError, streamChat } from '../llm/agnes.ts';
 import type { ChatMessage, TokenUsage } from '../llm/agnes.ts';
-import { executeTool, toolSpecs } from '../tools/registry.ts';
+import { executeTool, toolSpecs, toolsForMode } from '../tools/registry.ts';
 import { availableRoomNames } from '../tools/query-schedule.ts';
 import { LAB_STATUS_RE } from './demo-engine.ts';
 import { buildTimeContext, parseIntent } from './intent.ts';
@@ -41,7 +45,7 @@ import type { Intent } from './intent.ts';
 import { getSession, rememberSession } from './session.ts';
 import { loadContext } from '../persistence/db.ts';
 import { planDemo, renderDemoAnswer, runDemoTool, FREE_ROOMS_RE, SMALLTALK_RE } from './demo-engine.ts';
-import { PROMPT_VERSION, buildSystemPrompt, detectInjection, sanitizeInput } from './prompts.ts';
+import { RECOMMENDATION_FORMAT, PROMPT_VERSION, buildSystemPrompt, detectInjection, sanitizeInput } from './prompts.ts';
 import { normalizeLabName } from '../data/store.ts';
 
 export interface RunInput {
@@ -50,7 +54,7 @@ export interface RunInput {
   runId?: string;
   /** 会话 id：服务端据此承接该会话上一问的房间/日期指代 */
   sessionId?: string;
-  /** 会话类型（服务端权威存储）：task=任务工作台（默认）；chat=纯聊天，无工具、不能执行任务操作 */
+  /** 会话类型（服务端权威存储）：task=任务工作台（默认）；chat=只读对话，不能调用准备或办理工具 */
   mode?: 'chat' | 'task';
   /** ops.v1：服务端解析的沙盒演示身份（写操作准备必需；不传则 prepare 工具报 no_actor） */
   actor?: SandboxActor;
@@ -73,6 +77,32 @@ function nowIso(): string {
 }
 
 export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
+  const timeout = AbortSignal.timeout(getConfig().agent.wallClockMs);
+  const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
+  const originalSignal = input.signal;
+  let lastSeq = -1;
+  let lastRunId = input.runId ?? newTraceId('run');
+  const calls=new Map<string,{toolName:string;query:Record<string,unknown>}>();
+  let runScope:string|null=null;
+  for await (const event of runAgentCore({...input, runId:lastRunId, signal})) {
+    lastSeq = event.seq; lastRunId = event.runId;
+    if (timeout.aborted && !originalSignal?.aborted) break;
+    if(event.type==='run_started')runScope=businessScope(input.actor?.id).scopeKey;
+    if(runScope&&businessScope(input.actor?.id).scopeKey!==runScope){
+      yield {seq:lastSeq,v:1,runId:lastRunId,type:'run_failed',ts:nowIso(),payload:{code:'scope_changed',message:'本轮期间业务账号或授权范围已变化，请在当前身份下重新查询。'}};
+      return;
+    }
+    if(event.type==='tool_started'){const p=event.payload as ToolStartedPayload;calls.set(p.toolCallId,{toolName:p.tool,query:p.args});}
+    if (event.type === 'tool_result') {
+      const f = event.payload as ToolResultPayload;
+      if (input.actor && input.sessionId && f.ok && f.resultKind && f.result) saveFacts(input.actor.id,input.sessionId,{ok:true,resultKind:f.resultKind,result:f.result,summary:f.summary} as Parameters<typeof saveFacts>[2], {...calls.get(f.toolCallId),sourceRevision:(f.result as {provenance?:{sourceRevision?:string}}).provenance?.sourceRevision});
+    }
+    yield event;
+  }
+  if (timeout.aborted && !originalSignal?.aborted) yield {seq:lastSeq+1,v:1,runId:lastRunId,type:'run_failed',ts:nowIso(),payload:{code:'deadline_exceeded',message:'任务达到总时间上限，已中止；已产生的提案可在任务中心回查。',hint:'缩小查询范围后重试'}};
+}
+
+async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   const cfg = getConfig();
   let runId = input.runId ?? newTraceId('run');
   let seq = 0;
@@ -92,7 +122,7 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
   let ds: Dataset;
   let now: ServerNow;
   try {
-    ds = loadDataset();
+    ds = await loadAuthorizedDataset(input.signal);
     now = serverNow();
   } catch (err) {
     yield emit('run_failed', {
@@ -113,7 +143,8 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
   //   · 非法日期绝不继承，也绝不静默回落（dateInvalid 分支直接显式报错）；
   //   · 只有真实存在的房间才允许写入会话记忆（E999 这类错误实体不能升级为上下文）。
   const roomlessIntent = FREE_ROOMS_RE.test(question) || SMALLTALK_RE.test(question.trim());
-  let sess = getSession(input.sessionId);
+  const sessionKey=input.sessionId?`${input.actor?.id||'anonymous'}:${businessScope(input.actor?.id).scopeKey}:${input.sessionId}`:undefined;
+  let sess = getSession(sessionKey);
   // N07：进程重启后内存表为空 → 从会话库的 ContextSnapshot 回退加载
   if (!sess && input.sessionId?.startsWith('conv-')) {
     const snap = loadContext(input.sessionId);
@@ -136,7 +167,7 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
     }
     // 注意：节次（periodKey/periodKeys）不沿用 —— 节次过滤过强容易把"换个房间再问"变成"查不到"，宁缺勿错
   }
-  {
+  const commitContext = () => {
     const knownRooms = new Set(availableRoomNames(ds).map((n) => normalizeLabName(n)));
     const task: string | null =
       intent.dateInvalid || roomlessIntent ? (sess?.lastTask ?? null) : (planTaskOf(question) ?? sess?.lastTask ?? null);
@@ -145,15 +176,15 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
       date: intent.dateInvalid ? (sess?.date ?? null) : (intent.date?.date ?? sess?.date ?? null),
       task
     };
-    rememberSession(input.sessionId, { ...finalCtx, task: finalCtx.task, periodKey: intent.periodKey ?? sess?.periodKey ?? null, question });
+    rememberSession(sessionKey, { ...finalCtx, task: finalCtx.task, periodKey: intent.periodKey ?? sess?.periodKey ?? null, question });
     input.onContext?.({ labName: finalCtx.labName, date: finalCtx.date, task: finalCtx.task });
-  }
+  };
 
   const week = describeWeek(intent.date?.date ?? now.date, ds.term);
   // 会话类型：chat=聊天（可查询真实数据，不能办理业务）；task=任务（可生成办理单）
   // 用户口径：聊天模式只是不能"执行操作"，数据读取与回答照常 —— 查询类工具全部保留
   const convMode: 'chat' | 'task' = input.mode === 'chat' ? 'chat' : 'task';
-  const modeTools = convMode === 'chat' ? toolSpecs().filter((t) => t.name.startsWith('query_')) : toolSpecs();
+  const modeTools = toolsForMode(convMode);
   const toolListText =
     '【可用工具】\n' + modeTools.map((t) => `- ${t.name}：${t.description}`).join('\n');
   const injectionSuspected = detectInjection(question);
@@ -191,6 +222,28 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
 
   try {
     if (input.signal?.aborted) return;
+    const transformation=input.actor&&input.sessionId?transformSchedule(question,input.actor.id,input.sessionId,now):{kind:'none' as const};
+    if(transformation.kind==='error'){yield emit('run_failed',{code:'evidence_missing',message:transformation.message});return;}
+    if(transformation.kind==='answer'){
+      yield* streamText(transformation.answer,emit,input.signal);
+      // Formatting a historical result must not change remembered query objects.
+      yield emit('run_completed',{answer:transformation.answer,steps:0,toolCalls:0,ms:watch.ms,sourceType:transformation.fact.fact.resultKind==='schedule'?transformation.fact.fact.result.provenance.sourceType:sourceType,engine:'facts',strategy:'fact_transform'} satisfies RunCompletedPayload);return;
+    }
+    if(transformation.kind==='query'){
+      yield emit('tool_started',{step:1,toolCallId:'transform-query',tool:'query_schedule',args:transformation.args,sourceType} satisfies ToolStartedPayload);
+      const result=await executeTool('query_schedule',transformation.args,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode,signal:input.signal});
+      if(!result.ok||result.resultKind!=='schedule'){yield emit('run_failed',{code:result.ok?'unexpected_result':result.code,message:result.ok?'未取得课表':result.message});return;}
+      yield emit('tool_result',{step:1,toolCallId:'transform-query',tool:'query_schedule',ok:true,ms:0,sourceType,resultKind:result.resultKind,result:result.result,summary:result.summary} satisfies ToolResultPayload);
+      // Store the newly verified object before applying its requested presentation.
+      const converted=input.actor&&input.sessionId?transformSchedule(question.replace(/最新|重新查询|重新查|实时|现在/g,'').replace(/fact-[a-f0-9-]+|第[一二三123]份|前一次/g,'刚才'),input.actor.id,input.sessionId,now):{kind:'none' as const};
+      if(converted.kind!=='answer'){
+        const message=`已重新查询 ${result.result.labName} 在 ${result.result.date} 的课表，但${converted.kind==='error'?converted.message:'无法可靠完成所要求的展示变换，请明确字段和筛选条件。'}`;
+        yield* streamText(message,emit,input.signal);yield emit('run_failed',{code:'evidence_missing',message});return;
+      }
+      const answer=converted.answer;
+      intent.labName=String(transformation.args['labName']);intent.date={date:String(transformation.args['date']),raw:'本轮变更查询',source:'重新取得对应范围的课表'};commitContext();yield* streamText(answer,emit,input.signal);yield emit('run_completed',{answer,steps:1,toolCalls:1,ms:watch.ms,sourceType,engine:'facts',strategy:'verified_query_transform'} satisfies RunCompletedPayload);return;
+    }
+    commitContext();
     if (engine === 'demo') {
       yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode });
     } else {
@@ -250,13 +303,22 @@ interface DemoArgs {
 }
 
 async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
+  const nativePlan=isBusinessConnected()?planNativeDialogue(a.question,{dataset:a.ds,now:a.now,actor:a.actor,conversationId:a.conversationId,mode:a.mode,signal:a.signal}):null;
+  if(nativePlan){
+    yield a.emit('tool_started',{step:1,toolCallId:'native-dialogue',tool:nativePlan.tool,args:nativePlan.args,sourceType:a.sourceType});
+    const startedAt=Date.now();
+    const native=await nativePlan.execute();
+    if(a.mode==='chat'&&native.ok&&native.resultKind==='business_plan'&&native.result.plan){yield a.emit('run_failed',{code:'mode_forbidden',message:'聊天模式仅可查询，准备办理单请切换任务模式'});return;}
+    yield a.emit('tool_result',{step:1,toolCallId:'native-dialogue',tool:nativePlan.tool,ok:native.ok,ms:Date.now()-startedAt,sourceType:a.sourceType,summary:native.summary,...(native.ok?{resultKind:native.resultKind,result:native.result}:{error:{code:native.code,message:native.message}})});
+    const answer=native.ok?native.summary+renderDisclosure([],false):native.message;yield* streamText(answer,a.emit,a.signal);yield a.emit('run_completed',{answer,steps:1,toolCalls:1,ms:a.watch.ms,sourceType:a.sourceType,engine:'demo',...(native.ok&&native.resultKind==='business_plan'&&native.result.plan?{taskStatus:'awaiting_confirmation'}:{})});return;
+  }
   const plan = planDemo(a.question, a.intent, a.ds);
   a.log.info('demo_plan', { callTool: plan.callTool, args: plan.args, disclosures: plan.needsDisclosure, mode: a.mode });
 
   // 用户口径（2A.4 复核）：聊天模式可以查真实数据，只是不能办理业务。
   // 演示引擎在聊天模式下照常路由查询工具；仅当问题指向业务办理（prepare_*/报告单）时
   // 诚实告知需切换任务模式。
-  if (a.mode === 'chat' && plan.callTool && !String(plan.tool).startsWith('query_')) {
+  if (plan.callTool && !toolsForMode(a.mode ?? 'task').some(t => t.name === plan.tool)) {
     const OPS_NAMES: Record<string, string> = {
       prepare_issue_ticket: '报修工单',
       prepare_room_closure: '房间停用',
@@ -308,7 +370,7 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
     dataset: a.ds,
     now: a.now,
     actor: a.actor,
-    conversationId: a.conversationId ?? null
+    conversationId: a.conversationId ?? null, mode: a.mode, signal:a.signal
   });
   const ms = Date.now() - t0;
 
@@ -412,16 +474,23 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     chatMode: a.mode === 'chat'
   });
 
+  const authorizedFacts=a.actor&&a.conversationId?listFacts(a.actor.id,a.conversationId).slice(0,6).map(f=>JSON.stringify(f).length<6000?f:{...f,fact:{ok:true,resultKind:f.fact.resultKind,summary:f.fact.summary,payloadOmitted:true}}):[];
+  const active=readBusinessTask(a.conversationId) as unknown as BusinessResult|null;
+  const taskContext=active?{view:active.view,date:active.date,sourceLesson:active.sourceLesson,plan:active.plan,candidates:active.candidates?.filter(c=>c.eligible).slice(0,12),scopeKey:active.scopeKey}:null;
   const messages: ChatMessage[] = [
-    { role: 'system', content: system },
+    { role: 'system', content: system+'\n'+RECOMMENDATION_FORMAT },
+    { role:'system',content:JSON.stringify({authorizedHistoricalFacts:authorizedFacts,activeTask:taskContext,authorizedTasks:listBusinessTasks(a.conversationId).map(t=>({taskId:t['taskId'],view:t['view'],date:t['date'],sourceLesson:t['sourceLesson'],candidateSetId:t['candidateSetId']})),rule:'历史事实只可转换或参考。问最新、改变查询条件、准备执行时重新调用工具。编号必须来自事实；候选序号依据活动候选顺序。业务确认权仅属于用户。'}) },
     { role: 'user', content: a.question }
   ];
 
   let steps = 0;
   let toolCalls = 0;
   let answer = '';
-  let usage: TokenUsage | null = null;
+  let usage: TokenUsage = {promptTokens:0,completionTokens:0,totalTokens:0};
   let lastToolSummary: string | null = null;
+  const verifiedAnswers: string[] = [];
+  const businessFacts:BusinessResult[]=[];
+  let modelFinal='';
   /** ops.v1：本轮产出了待确认提案时，run_completed 必须如实带出任务状态 */
   let runTaskStatus: 'awaiting_confirmation' | undefined = undefined;
   /** 指纹 = 工具名 + 排序后的规范化参数；在**执行前**检查（写工具接入后防重复执行） */
@@ -431,27 +500,26 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     if (a.signal?.aborted) return;
     if (a.watch.ms > cfg.agent.wallClockMs) {
       a.log.warn('wall_clock_exceeded', { steps, ms: a.watch.ms });
-      answer += (answer ? '\n\n' : '') + `（已达单次任务时间上限 ${cfg.agent.wallClockMs} ms，以下为已获得的结果。）`;
-      break;
+      throw new AgnesError('deadline_exceeded','任务达到总时间上限',null,false);
     }
     steps += 1;
 
     let roundText = '';
     let calls: ChatMessage['tool_calls'] = undefined;
 
-    for await (const ev of streamChat({ messages, tools: a.mode === 'chat' ? undefined : toolSpecs(), signal: a.signal }, a.log)) {
+    for await (const ev of streamChat({ messages, tools: toolsForMode(a.mode ?? 'task'), signal: a.signal }, a.log)) {
       if (ev.type === 'text') {
         roundText += ev.text;
         answer += ev.text;
-        yield a.emit('answer_delta', { text: ev.text } satisfies AnswerDeltaPayload);
+
       } else if (ev.type === 'tool_calls') {
         calls = ev.calls as ChatMessage['tool_calls'];
       } else if (ev.type === 'usage') {
-        usage = ev.usage;
+        usage = {promptTokens:(usage?.promptTokens ?? 0)+ev.usage.promptTokens,completionTokens:(usage?.completionTokens ?? 0)+ev.usage.completionTokens,totalTokens:(usage?.totalTokens ?? 0)+ev.usage.totalTokens};
       }
     }
 
-    if (!calls || calls.length === 0) break; // 停止条件③：不再需要工具
+    if (!calls || calls.length === 0) {modelFinal=roundText;break;} // 停止条件③：不再需要工具
 
     messages.push({
       role: 'assistant',
@@ -530,12 +598,14 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
         dataset: a.ds,
         now: a.now,
         actor: a.actor,
-        conversationId: a.conversationId ?? null
+        conversationId: a.conversationId ?? null, mode: a.mode, signal:a.signal
       });
       const ms = Date.now() - t0;
       toolCalls += 1;
 
       if (exec.ok) {
+        if(exec.resultKind==='business_plan')businessFacts.push(exec.result);
+        verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey)}));
         lastToolSummary = exec.summary;
         yield a.emit('tool_result', {
           step: steps,
@@ -599,37 +669,15 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     }
   }
 
-  // 强制收敛（停止条件①）：还有余地但已到步数上限 → 要求不带工具再答一次
-  if (steps >= cfg.agent.maxSteps && !answer) {
-    messages.push({
-      role: 'system',
-      content: '已达到本次任务的工具调用上限。请不要再调用工具，直接依据已有结果给用户一个结论；信息不足就明确说信息不足。'
-    });
-    for await (const ev of streamChat({ messages, tools: undefined, signal: a.signal }, a.log)) {
-      if (ev.type === 'text') {
-        answer += ev.text;
-        yield a.emit('answer_delta', { text: ev.text } satisfies AnswerDeltaPayload);
-      } else if (ev.type === 'usage') {
-        usage = ev.usage;
-      }
-    }
+  if (verifiedAnswers.length) {
+    const explanation=verifiedRecommendation(modelFinal,businessFacts);
+    answer = verifiedAnswers.join('\n\n')+(explanation?'\n\n'+explanation:'');
+  } else if (!SMALLTALK_RE.test(a.question.trim())) {
+    yield a.emit('run_failed',{code:'evidence_missing',message:lastToolSummary ?? '本轮未取得可验证业务依据，未生成事实结论。请明确日期、房间或所需操作后重试。',hint:'查看工具结果，补齐参数再重试'} satisfies RunFailedPayload);
+    return;
   }
-
-  // 兜底：模型一个字都没给 → 用工具摘要补上，绝不给用户留空白
-  if (!answer.trim()) {
-    answer = lastToolSummary
-      ? `（模型未返回文本，以下为工具查询到的原始摘要）\n${lastToolSummary}`
-      : '本次没有得到有效结果。请换一种问法，例如「E310 2026-09-30 有哪些课？」。';
-    yield* streamText(answer, a.emit, a.signal);
-  }
-
-  // 数据来源一致性检查（便宜但有效的反幻觉护栏）
-  if (a.sourceType !== 'live' && /实时(数据)?/.test(answer)) {
-    const correction = `\n（说明：本次数据来源为「${a.ds.sourceLabel}」，不是实时数据。请以上方来源标识为准。）`;
-    answer += correction;
-    yield a.emit('answer_delta', { text: correction } satisfies AnswerDeltaPayload);
-    a.log.warn('answer_claimed_live_but_not', { sourceType: a.sourceType });
-  }
+  if (!answer.trim()) answer = '你好，可以查询课表、房间状态，或在任务模式准备办理单。';
+  yield* streamText(answer, a.emit, a.signal);
 
   if (a.signal?.aborted) return; // N06/B10：取消后不再补发完成终态
   a.log.info('run_completed', {

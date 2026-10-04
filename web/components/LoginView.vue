@@ -55,10 +55,16 @@ function submit(): void {
   if (!account.value.trim()) return fail('请输入账号（演示模式任意账号即可）');
   if (password.value.length < 4) return fail('密码至少 4 位（本地演示，无身份校验）');
   submitting.value = true;
-  window.LoginCharacters?.playSuccessTransition(() => {
+  let entered = false;
+  const finish = () => {
+    if (entered) return;
+    entered = true;
     document.querySelectorAll('.success-veil').forEach((v) => v.remove()); // SPA 内跳转：转场层手动移除
     emit('done', account.value.trim());
-  });
+  };
+  window.setTimeout(finish, 1800);
+  if (window.LoginCharacters) window.LoginCharacters.playSuccessTransition(finish);
+  else finish();
 }
 </script>
 

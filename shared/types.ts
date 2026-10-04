@@ -25,7 +25,7 @@ export const DATA_SOURCE_LABELS: Record<DataSourceType, string> = {
 };
 
 /** 推理引擎：agnes = 真实模型；demo = 服务端确定性规则（未配置 Key 时的诚实降级） */
-export type EngineType = 'agnes' | 'demo';
+export type EngineType = 'agnes' | 'demo' | 'facts';
 
 // ===========================================================================
 //  SSE 事件契约
@@ -127,7 +127,7 @@ export interface ToolStartedPayload {
 }
 
 /** 结构化结果的类别。前端据此选择渲染器，不再假设所有工具都返回课表 */
-export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report';
+export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan';
 
 export interface ToolResultPayload {
   step: number;
@@ -142,7 +142,7 @@ export interface ToolResultPayload {
   /** 结果类别，决定前端用哪个渲染器 */
   resultKind?: ToolResultKind;
   /** 结构化结果，前端只接受这一份（绝不插入模型返回的任意 HTML） */
-  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult;
+  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult;
   error?: { code: string; message: string };
 }
 
@@ -151,6 +151,8 @@ export interface AnswerDeltaPayload {
 }
 
 export interface RunCompletedPayload {
+  durable?: boolean;
+  strategy?: 'fact_transform'|'verified_query_transform';
   answer: string;
   steps: number;
   toolCalls: number;
@@ -217,6 +219,8 @@ export interface LabStatusArgs {
 }
 
 export interface LabStatusResult {
+  serviceState?: 'normal'|'suspended';
+  suspendedPeriods?: string[];
   labId: string | null;
   labName: string | null;
   labLocation: string | null;
@@ -384,6 +388,7 @@ export interface ScheduleQueryResult {
   notes: string[];
   /** 结果的数据来源与取证信息 */
   provenance: {
+    sourceRevision?: string;
     sourceType: DataSourceType;
     sourceLabel: string;
     /** 快照导出时间（sourceType=snapshot 时有值） */
@@ -397,3 +402,6 @@ export interface ScheduleQueryResult {
     coverage: string;
   };
 }
+
+export interface KnowledgeResult {summary:string;scope:string;hits:Array<{id:string;title:string;version:string;effectiveFrom:string;source:string;url:string;paragraphs:Array<{locator:string;text:string}>}>}
+export type BusinessPlanResult = import('./business.ts').BusinessResult;

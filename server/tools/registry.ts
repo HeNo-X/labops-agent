@@ -1,3 +1,7 @@
+import { isBusinessConnected, effectiveRole } from '../business/bridge.ts';
+import { runKnowledge } from './knowledge.ts';
+import { prepareSchedule, queryDuty, queryBusiness, prepareWorkflow, queryIncident, prepareIncident } from './business.ts';
+import type { KnowledgeResult, BusinessPlanResult } from '../../shared/types.ts';
 /**
  * 工具注册表 —— JSON Schema + 白名单 + 参数类型校验 + 人话摘要
  * ============================================================================
@@ -58,6 +62,8 @@ export interface RegisteredTool {
  * 身份绝不出现在模型可写的参数里；只读工具不使用这两个字段。
  */
 export interface ToolContext {
+  mode?: 'chat' | 'task';
+  signal?: AbortSignal;
   dataset: Dataset;
   now: ServerNow;
   /** 服务端解析的沙盒演示身份（ops.v1 写操作必需） */
@@ -73,6 +79,8 @@ export type ToolExecution =
   | { ok: true; resultKind: 'free_rooms'; result: FreeRoomsResult; summary: string }
   | { ok: true; resultKind: 'operation_proposal'; result: Proposal; summary: string }
   | { ok: true; resultKind: 'operations_report'; result: OperationsReportResult; summary: string }
+  | { ok: true; resultKind:'knowledge'; result:KnowledgeResult; summary:string }
+  | { ok: true; resultKind:'business_plan'; result:BusinessPlanResult; summary:string }
   | { ok: false; code: string; message: string; suggestions: string[]; summary: string };
 
 // ===========================================================================
@@ -426,6 +434,13 @@ function executeQueryFreeRooms(args: Record<string, unknown>, ctx: ToolContext):
 }
 
 export const REGISTRY: RegisteredTool[] = [
+  {spec:{name:'query_incident',description:'从原系统查询故障事件、影响范围和关联调课/停用/工单/通知。未登记事件先查询事件列表。',parameters:{type:'object',properties:{incidentId:{type:'string'}},additionalProperties:false},danger:false},execute:queryIncident,effect:'read'},
+  {spec:{name:'prepare_incident_plan',description:'管理员保存用户明确声明的故障事件草稿，分析最多6项教学活动的联合候选，或准备处置/恢复方案。只能准备，实际提交必须由本人点击确认。缺失事实不得猜测。',parameters:{type:'object',properties:{action:{type:'string',enum:['draft','analyze','preview','restore','takeover']},incidentId:{type:'string'},expectedRevision:{type:'integer'},roomId:{type:'string'},date:{type:'string'},description:{type:'string'},device:{type:'string'},periodKeys:{type:'array',items:{type:'string',enum:[...PERIOD_KEYS]}},preference:{type:'string',enum:['keep_period','few_rooms','early']},candidateSetId:{type:'string'},optionId:{type:'string'},note:{type:'string'},undoMoves:{type:'boolean'}},required:['action'],additionalProperties:false},danger:false},execute:prepareIncident,effect:'draft'},
+  {spec:{name:'query_business_context',description:'查询原系统当前账号可见的工单状态、通知已读、检查记录、临时停用或真实日报。不得拿沙盒统计冒充真实业务。',parameters:{type:'object',properties:{view:{type:'string',enum:['issues','notifications','closures','duty','report','tasks','incidents','health']},date:{type:'string'}},required:['view'],additionalProperties:false},danger:false},execute:queryBusiness,effect:'read'},
+  {spec:{name:'prepare_business_workflow',description:'准备原系统工单创建或流转、检查补全/最终交接/接收、通知或停用方案。先查 query_business_context 获取真实对象与版本。未明确说明的检查保持 unchecked。只准备，实际提交需本人点击消息卡。',parameters:{type:'object',properties:{kind:{type:'string',enum:['resource.patch','issue.create','issue.action','duty.handover','duty.accept','duty.reassign','duty.item','notification.publish','closure.create','closure.revoke']},resourceKind:{type:'string',enum:['room','class','course']},resourceId:{type:'string'},field:{type:'string',enum:['capacity','size','equipment','requiredEquipment']},after:{},expectedResourceVersion:{type:'string'},evidence:{type:'string'},roomId:{type:'string'},description:{type:'string'},issueId:{type:'string'},expectedRevision:{type:'integer'},action:{type:'string',enum:['assign','start','submit','close','return','complete','carry']},assigneeId:{type:'string',description:'仅action=assign可填写；其他工单动作不得携带此字段'},itemId:{type:'string'},targetShiftId:{type:'string'},adoptItemIds:{type:'array',items:{type:'string'}},leftovers:{type:'array',items:{type:'object'}},taskId:{type:'string'},note:{type:'string'},shiftId:{type:'string'},checklist:{type:'array',items:{type:'object',properties:{key:{type:'string'},state:{type:'string',enum:['done','abnormal','unchecked']}},required:['key','state']}},finalize:{type:'boolean'},createIssue:{type:'boolean'},receiverId:{type:'string'},recordId:{type:'string'},title:{type:'string'},content:{type:'string'},audience:{type:'object'},startDate:{type:'string'},endDate:{type:'string'},periodKeys:{type:'array',items:{type:'string',enum:[...PERIOD_KEYS]}},reason:{type:'string'},closureId:{type:'string'}},required:['kind'],additionalProperties:false},danger:false},execute:prepareWorkflow,effect:'draft'},
+  {spec:{name:'query_knowledge',description:'检索当前软件操作说明，返回版本、生效日期与段落引用；未导入学校制度或厂家手册时明确缺依据。',parameters:{type:'object',properties:{query:{type:'string'}},required:['query'],additionalProperties:false},danger:false},execute:runKnowledge,effect:'read'},
+  {spec:{name:'query_duty_context',description:'查询经原系统登录验证的本人正式排班，未连接或未配置时明确无法确定；不从历史签到猜测。',parameters:{type:'object',properties:{},additionalProperties:false},danger:false},execute:queryDuty,effect:'read'},
+  {spec:{name:'prepare_schedule_adjustment',description:'为原系统管理员比较指定日期调课候选或保存待确认方案。先用 query_schedule 获取 timetableId。未给目标时返回候选；仅符合已核实约束才可保存。确认必须由用户在LabOps消息卡点击，本工具不执行调课。',parameters:{type:'object',properties:{date:{type:'string'},timetableId:{type:'string'},taskId:{type:'string'},candidateSetId:{type:'string'},supersedePlanId:{type:'string'},toLabId:{type:'string'},toPeriodKey:{type:'string',enum:[...PERIOD_KEYS]},reason:{type:'string'}},required:['date','timetableId'],additionalProperties:false},danger:false},execute:prepareSchedule,effect:'draft'},
   { spec: QUERY_SCHEDULE_SPEC, execute: executeQuerySchedule, effect: 'read' },
   { spec: QUERY_LAB_STATUS_SPEC, execute: executeQueryLabStatus, effect: 'read' },
   { spec: QUERY_FREE_ROOMS_SPEC, execute: executeQueryFreeRooms, effect: 'read' },
@@ -478,7 +493,10 @@ export async function executeTool(name: unknown, args: Record<string, unknown>, 
       summary: `工具 ${String(name)} 不存在，可用工具：${toolNames().join('、')}`
     };
   }
-  return await tool.execute(args ?? {}, ctx);
+  if (ctx.mode === 'chat' && tool.effect !== 'read') return {ok:false,code:'mode_forbidden',message:'聊天模式只能查询，请切换任务模式',suggestions:[],summary:'当前模式禁止准备办理单'};
+  if (!args || Array.isArray(args) || typeof args !== 'object') return {ok:false,code:'bad_arguments',message:'参数必须为对象',suggestions:[],summary:'参数必须为对象'};
+  if(isBusinessConnected()&&!toolsForMode(ctx.mode||'task').some(t=>t.name===name))return {ok:false,code:'scope_forbidden',message:'当前原系统身份不支持此工具；沙盒工具不可混入原系统任务',suggestions:[],summary:'当前业务范围不允许此工具'};
+  return await tool.execute(args, ctx);
 }
 
 // ===========================================================================
@@ -543,4 +561,11 @@ function reasonText(r: ScheduleQueryResult): string {
 /** 供调试/管理端使用：把可用房号压成一行可读文本 */
 export function roomListHint(ds: Dataset): string {
   return `已收录房间号：${availableRoomNames(ds).join('、')}`;
+}
+
+/** Prompt, model tools and executor share this exact mode policy. */
+export function toolsForMode(mode: 'chat' | 'task'): ToolSpec[] {
+  const connected=isBusinessConnected();const role=effectiveRole('student');
+  const sandbox=new Set(['prepare_issue_ticket','prepare_room_closure','prepare_notification','prepare_duty_session','create_operations_report']);
+  return REGISTRY.filter(t => (mode === 'task' || t.effect === 'read')&&(!connected||!sandbox.has(t.spec.name))&&(!connected||role==='admin'||t.spec.name!=='prepare_schedule_adjustment'&&t.spec.name!=='prepare_incident_plan')).map(t => t.spec);
 }

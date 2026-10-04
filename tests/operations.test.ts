@@ -288,7 +288,7 @@ test('F02 停用联动：确认后一次产生 停用+工单+通知 三个对象
   if (outcome.ok && outcome.decision === 'confirm') {
     const kinds = outcome.receipt.objects.map((o) => o.kind).sort();
     assert.deepEqual(kinds, ['closure', 'issue', 'notification']);
-    assert.equal(outcome.receipt.deliveryStatus, 'sent');
+    assert.equal(outcome.receipt.deliveryStatus, 'pending');
   }
 });
 
@@ -360,7 +360,7 @@ test('能力协商：capabilities 描述沙盒环境与当前身份', async () =
   const caps = typeRegistry.toolNames();
   assert.ok(caps.includes('prepare_issue_ticket'));
   assert.ok(caps.includes('create_operations_report'));
-  assert.equal(caps.length, 8, '3 个只读 + 5 个准备类工具');
+  assert.equal(caps.length, 15, '7 个只读 + 8 个准备/草稿工具');
 });
 
 after(async () => {

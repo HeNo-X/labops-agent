@@ -10,7 +10,7 @@ dist/
 
 # 真实线上数据：绝不入库（只在本地/校内演示时使用）
 server/data/live/state.json
-data/
+/data/
 *.live.json
 
 # 未脱敏的中间产物
@@ -25,3 +25,9 @@ Thumbs.db
 # 浏览器验收截图（可重新生成，不入库；需要看时跑 npm run test:browser）
 .screenshots/
 server/data/*.sqlite
+server/data/*.sqlite-*
+
+# Delegated credentials: key is stored separately from SQLite, never published.
+server/credentials/
+*.key
+.evaluation/

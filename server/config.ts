@@ -142,7 +142,7 @@ export function describeConfig(c: AppConfig): string[] {
     `Agnes API Key   : ${c.agnes.apiKey ? '已配置 ✓（仅服务端持有）' : '未配置 → 进入演示引擎模式'}`,
     `步数/墙钟上限   : ${c.agent.maxSteps} 步 / ${c.agent.wallClockMs} ms`,
     `实时数据开关    : ${c.data.live ? '开（LIVE_DATA=1，直接读真实 state.json）' : '关（默认用脱敏快照）'}`,
-    `沙盒演示身份    : ${c.sandbox.defaultRole}（ops.v1 业务写操作仅在沙盒执行，生产适配器未接入）`,
+    `沙盒演示身份    : ${c.sandbox.defaultRole}（未连接时办理卡写沙盒；连接原账号后可在对话内办理真实业务）`,
     `日志级别        : ${c.logLevel}`
   ];
 }

@@ -30,6 +30,7 @@ import type {
 import { DATA_SOURCE_LABELS, RUN_EVENT_TYPES } from '@shared/types';
 import type { NeedConfirmPayload } from '@shared/operations-contract';
 import { PERIODS } from '@shared/periods';
+import { actorHeaders } from '../actor';
 
 export type RunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ResultKind = 'none' | 'schedule_hit' | 'schedule_empty' | 'config_insufficient' | 'lab_status' | 'free_rooms';
@@ -504,13 +505,16 @@ export const useRunStore = defineStore('run', () => {
       case 'run_completed': {
         if (runStatus.value === 'running') runStatus.value = 'completed';
         // R03/C04：以服务端权威全文对齐（delta 可能漏块；durable 确认在保存成功后发出）
-        const p2 = ev.payload as { answer?: string };
+        const p2 = ev.payload as { answer?: string; engine?: EngineType };
+        if(p2.engine) engine.value=p2.engine;
         if (typeof p2.answer === 'string' && p2.answer) stream.value = p2.answer;
         break;
       }
       case 'save_failed': {
         // R03：保存失败必须可见 —— 保留已生成内容，但明确"刷新后可能丢失"
-        const p3 = ev.payload as { message?: string };
+        const p3 = ev.payload as { message?: string; answer?: string };
+        if (runStatus.value !== 'cancelled') runStatus.value = 'failed';
+        if (typeof p3.answer === 'string') stream.value = p3.answer;
         error.value = { code: 'save_failed', message: p3.message ?? '本轮结果写入会话历史失败' };
         break;
       }
@@ -522,7 +526,7 @@ export const useRunStore = defineStore('run', () => {
             code: 'save_failed',
             message: `本轮结果已生成，但写入会话历史失败（${p4.saveError ?? '未知原因'}）。请复制保留重要内容。`
           };
-          if (runStatus.value === 'running') runStatus.value = 'failed';
+          if (runStatus.value !== 'cancelled') runStatus.value = 'failed';
         }
         break;
       }
@@ -544,7 +548,7 @@ export const useRunStore = defineStore('run', () => {
       case 'run_failed': {
         const p = ev.payload as StreamErrorInfo;
         error.value = p;
-        runStatus.value = 'failed';
+        if (runStatus.value !== 'cancelled') runStatus.value = 'failed';
         break;
       }
       case 'run_cancelled': {
@@ -605,9 +609,21 @@ export const useRunStore = defineStore('run', () => {
     }
   }
 
+  let overviewGeneration = 0;
   async function loadOverview(): Promise<void> {
+    const generation = ++overviewGeneration;
+    // 账号变更时立即移除旧来源；迟到的请求不得覆盖新身份的概览。
+    labs.value = [];
+    openLabs.value = [];
+    overviewSourceType.value = null;
+    overviewEngine.value = null;
+    overviewTerm.value = null;
+    selectedLab.value = null;
+    timetableCount.value = 0;
+    overviewLoaded.value = false;
+    overviewError.value = null;
     try {
-      const res = await fetch('/api/state');
+      const res = await fetch('/api/state', { headers: actorHeaders() });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = (await res.json()) as {
         sourceType: DataSourceType;
@@ -617,6 +633,7 @@ export const useRunStore = defineStore('run', () => {
         term: { term: string; termStart: string | null; holidays: string[] };
         timetableCount: number;
       };
+      if (generation !== overviewGeneration) return;
       labs.value = j.labs ?? [];
       openLabs.value = j.openLabs ?? [];
       overviewSourceType.value = j.sourceType;
@@ -627,6 +644,7 @@ export const useRunStore = defineStore('run', () => {
       overviewError.value = null;
       if (!selectedLab.value && labs.value.length) selectedLab.value = labs.value[0]?.name ?? null;
     } catch (e) {
+      if (generation !== overviewGeneration) return;
       overviewError.value = `无法载入实验室概览：${(e as Error).message}`;
       overviewLoaded.value = true;
     }

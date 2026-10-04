@@ -9,6 +9,7 @@
 
 import type { SandboxActor, SandboxRole } from '../../shared/operations-contract.ts';
 import { SANDBOX_ROLE_LABELS } from '../../shared/operations-contract.ts';
+import { currentActor } from '../security/context.ts';
 import { getConfig } from '../config.ts';
 
 /** 能力清单（与任务书 §7.2 的权限名对齐，取本轮用到的子集） */
@@ -31,6 +32,8 @@ export function isSandboxRole(v: unknown): v is SandboxRole {
 
 /** 从请求头解析演示身份（仅沙盒）；非法/缺省回落到服务端配置的默认角色 */
 export function resolveActor(headerRole: string | string[] | undefined | null): SandboxActor {
+  const verified = currentActor();
+  if (verified) return verified;
   const raw = Array.isArray(headerRole) ? headerRole[0] : headerRole;
   const cfg = getConfig();
   const role: SandboxRole = isSandboxRole(raw) ? raw : cfg.sandbox.defaultRole;

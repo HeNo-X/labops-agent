@@ -11,6 +11,10 @@
  */
 
 import http from 'node:http';
+import { documents } from './tools/knowledge.ts';
+import { currentActor } from './security/context.ts';
+import { effectiveRole, handleBusinessApi, loadAuthorizedDataset } from './business/bridge.ts';
+import { withHttpIdentity } from './security/http.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -136,13 +140,17 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const p = url.pathname;
 
+  if (p.startsWith('/api/knowledge/') && req.method === 'GET') { const doc=documents().find(d=>d.id===p.slice('/api/knowledge/'.length)&&d.roles.includes(effectiveRole(currentActor()?.role||'student'))); json(res,doc?200:404,doc||{error:'document_not_found'}); return; }
+  if (p.startsWith('/api/business/')) { await handleBusinessApi(req,res,p); return; }
+
   // 健康检查：给运行状态一个可机读的入口，也方便部署后验证
   if (req.method === 'GET' && (p === '/api/agent/health' || p === '/api/health')) {
     const ds = loadDataset();
     json(res, 200, {
       ok: true,
       service: 'labops-agent',
-      stage: '2b-ops-sandbox',
+      version: '0.4.0',
+      stage: 'reliable-native-workflows',
       capability: runtimeCapabilities(),
       data: {
         sourceType: ds.sourceType,
@@ -162,7 +170,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
 
   // 只读概览：前端实验室矩阵用（房间 + 学期 + 数据来源 + 当前引擎），不含任何人员数据
   if (req.method === 'GET' && p === '/api/state') {
-    const ds = loadDataset();
+    const ds = await loadAuthorizedDataset();
     json(res, 200, {
       sourceType: ds.sourceType,
       sourceLabel: ds.sourceLabel,
@@ -240,7 +248,7 @@ function main(): void {
   const server = http.createServer((req, res) => {
     // 兜底：路由层任何未捕获异常都不能把进程带崩
     const t0 = Date.now();
-    route(req, res)
+    withHttpIdentity(req, res, () => route(req, res))
       .catch((err: unknown) => {
         log.error('route_unhandled_error', { url: req.url, message: (err as Error).message });
         if (!res.headersSent) json(res, 500, { error: 'internal_error', message: '服务端内部错误' });
@@ -253,7 +261,7 @@ function main(): void {
 
   server.listen(cfg.port, cfg.host, () => {
     console.log('────────────────────────────────────────────────────────────');
-    console.log(' LabOps Agent · 实验室任务画布（第一阶段） 服务端已启动');
+    console.log(' LabOps Agent · 可靠任务助手与业务工作台 服务端已启动');
     console.log('────────────────────────────────────────────────────────────');
     for (const line of describeConfig(cfg)) console.log(' ' + line);
     console.log(' 数据来源        : ' + ds!.sourceLabel + '（' + ds!.sourceType + '）');

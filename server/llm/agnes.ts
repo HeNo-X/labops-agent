@@ -20,6 +20,7 @@
  *     否则会把重复内容拼进回答里（这是流式最容易翻的车）。
  */
 
+import { setTimeout as delay } from 'node:timers/promises';
 import { getConfig } from '../config.ts';
 import { loggerFor } from '../obs/trace.ts';
 import type { Logger } from '../obs/trace.ts';
@@ -83,10 +84,6 @@ function classify(status: number, body: string): AgnesError {
   return new AgnesError('agnes_http_error', `Agnes 返回未预期的状态码 ${status}。${snippet}`, status, false);
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 export interface StreamOptions {
   messages: ChatMessage[];
   tools?: ToolSpec[];
@@ -141,6 +138,7 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
     const ac = new AbortController();
     const onOuterAbort = (): void => ac.abort();
     opts.signal?.addEventListener('abort', onOuterAbort, { once: true });
+    if (opts.signal?.aborted) ac.abort();
     const timer = setTimeout(() => ac.abort(), c.timeoutMs);
 
     let started = false;
@@ -199,7 +197,7 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
 
       // 指数退避 + 抖动
       const backoff = Math.min(8000, 500 * 2 ** attempt) + Math.floor(Math.random() * 250);
-      await sleep(backoff);
+      await delay(backoff, undefined, {signal:opts.signal});
     }
   }
   throw lastError ?? new AgnesError('agnes_unknown', 'Agnes 调用失败（无更多信息）。', null, false);
@@ -210,7 +208,7 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
  * 用 TextDecoder({stream:true}) 增量解码 —— 中文 UTF-8 会被任意切断，逐块 toString()
  * 一定出乱码（难点 6 第 3 条）。
  */
-async function* parseSseStream(
+export async function* parseSseStream(
   body: ReadableStream<Uint8Array>,
   signal: AbortSignal
 ): AsyncGenerator<AgnesStreamEvent> {
@@ -219,7 +217,8 @@ async function* parseSseStream(
   let buffer = '';
   /** tool_calls 在流式里是分片到达的，必须按 index 累积后再一次性交给上层 */
   const partialCalls = new Map<number, { id: string; name: string; args: string }>();
-  let finishReason = 'stop';
+  let finishReason: string | null = null;
+  let sawDone = false;
   let usage: TokenUsage | null = null;
 
   try {
@@ -235,16 +234,17 @@ async function* parseSseStream(
         buffer = buffer.slice(idx + 1);
         if (!line.startsWith('data:')) continue;
         const data = line.slice(5).trim();
-        if (!data || data === '[DONE]') continue;
+        if (!data) continue;
+        if (data === '[DONE]') { sawDone = true; break; }
 
         let json: Record<string, unknown>;
         try {
           json = JSON.parse(data) as Record<string, unknown>;
         } catch {
-          // 单个分片坏掉不该毁掉整个回答，记一条继续（这里没有 logger，交给上层统计）
-          continue;
+          throw new AgnesError('invalid_stream','模型响应含损坏的数据片段',null,false);
         }
 
+        if (json['error']) throw new AgnesError('upstream_stream_error','模型流返回错误',null,false);
         const choices = (json['choices'] as Record<string, unknown>[]) ?? [];
         const choice = choices[0];
         if (choice) {
@@ -278,7 +278,11 @@ async function* parseSseStream(
           };
         }
       }
+      if (sawDone) break;
     }
+    if (!sawDone || !finishReason) throw new AgnesError('incomplete_stream','模型响应断流，未取得完整结束标记',null,false);
+    if (finishReason !== 'stop' && finishReason !== 'tool_calls') throw new AgnesError('truncated_response',`模型响应未正常完成（${finishReason}）`,null,false);
+    if (partialCalls.size && finishReason !== 'tool_calls') throw new AgnesError('incomplete_tool_call','模型工具调用未完成',null,false);
 
     // 流结束：一次性交付完整工具调用
     if (partialCalls.size) {
@@ -294,6 +298,7 @@ async function* parseSseStream(
     if (usage) yield { type: 'usage', usage };
     yield { type: 'done', finishReason };
   } finally {
+    await reader.cancel().catch(() => undefined);
     reader.releaseLock?.();
   }
 }

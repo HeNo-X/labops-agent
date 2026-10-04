@@ -1,0 +1,240 @@
+[
+  {
+    "id": "Q01",
+    "category": "基础查询",
+    "turns": [
+      "查询E310在2026-09-28的课表"
+    ],
+    "expect": {
+      "kind": "schedule",
+      "labName": "E310",
+      "date": "2026-09-28",
+      "records": 8
+    }
+  },
+  {
+    "id": "Q02",
+    "category": "基础查询",
+    "turns": [
+      "查询E312在2026-09-28的课表"
+    ],
+    "expect": {
+      "kind": "schedule",
+      "labName": "E312",
+      "date": "2026-09-28"
+    }
+  },
+  {
+    "id": "Q03",
+    "category": "基础查询",
+    "turns": [
+      "查询E310在2026-09-28的房间状态"
+    ],
+    "expect": {
+      "kind": "lab_status",
+      "labName": "E310"
+    }
+  },
+  {
+    "id": "M01",
+    "category": "多轮承接",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成两列表格"
+    ],
+    "expect": {
+      "strategy": "fact_transform",
+      "tableRows": 8
+    }
+  },
+  {
+    "id": "M02",
+    "category": "多轮承接",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成两列表格，只保留下午的课程"
+    ],
+    "expect": {
+      "strategy": "fact_transform",
+      "tableRows": 2
+    }
+  },
+  {
+    "id": "M03",
+    "category": "条件变化",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成两列表格，但改查E312在同日的课表"
+    ],
+    "expect": {
+      "strategy": "verified_query_transform",
+      "labName": "E312"
+    }
+  },
+  {
+    "id": "M04",
+    "category": "条件变化",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成两列表格，但改查2026-09-29的课表"
+    ],
+    "expect": {
+      "strategy": "verified_query_transform",
+      "labName": "E310",
+      "date": "2026-09-29"
+    }
+  },
+  {
+    "id": "M05",
+    "category": "历史选择",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "查询E310在2026-09-28的房间状态",
+      "把上次课表改成两列表格"
+    ],
+    "expect": {
+      "strategy": "fact_transform",
+      "tableRows": 8
+    }
+  },
+  {
+    "id": "M06",
+    "category": "历史选择",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "查询E312在2026-09-28的课表",
+      "把前一次课表改成两列表格"
+    ],
+    "expect": {
+      "strategy": "fact_transform",
+      "tableRows": 8
+    }
+  },
+  {
+    "id": "M07",
+    "category": "事实字段",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成表格，只列课程和班级并去重"
+    ],
+    "expect": {
+      "strategy": "fact_transform",
+      "contains": "| 课程 | 班级 |"
+    }
+  },
+  {
+    "id": "F01",
+    "category": "拒绝不支持变换",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成表格，列出课程和学分"
+    ],
+    "expect": {
+      "failure": "evidence_missing"
+    }
+  },
+  {
+    "id": "K01",
+    "category": "知识缺依据",
+    "turns": [
+      "查询学校报销金额制度的操作说明"
+    ],
+    "expect": {
+      "kind": "knowledge",
+      "hits": 0
+    }
+  },
+  {
+    "id": "M08",
+    "category": "课程筛选字段",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成两列表格，只保留课程名称等于「计算机网络原理」的记录"
+    ],
+    "expect": {
+      "strategy": "fact_transform",
+      "tableRows": 3,
+      "contains": "实际筛选条件"
+    }
+  },
+  {
+    "id": "M09",
+    "category": "精确名称无匹配",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成两列表格，只保留课程名称等于「不存在的隔离样例课程」的记录"
+    ],
+    "expect": {
+      "strategy": "fact_transform",
+      "tableRows": 0
+    }
+  },
+  {
+    "id": "M10",
+    "category": "无法解析筛选",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成两列表格，只保留课程名称等于"
+    ],
+    "expect": {
+      "failure": "evidence_missing"
+    }
+  },
+  {
+    "id": "M11",
+    "category": "重查后的变换失败",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成表格，改查E312同日，列课程和学分"
+    ],
+    "expect": {
+      "failure": "evidence_missing"
+    }
+  },
+  {
+    "id": "M12",
+    "category": "更换日期保留筛选条件",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成两列表格，改查2026-09-29，只保留课程名称等于「不存在的隔离样例课程」的记录"
+    ],
+    "expect": {
+      "strategy": "verified_query_transform",
+      "tableRows": 0
+    }
+  },
+  {
+    "id": "M13",
+    "category": "私人字段缺依据",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成表格，列出教师和手机号"
+    ],
+    "expect": {
+      "failure": "evidence_missing"
+    }
+  },
+  {
+    "id": "M14",
+    "category": "按已有字段排序",
+    "turns": [
+      "查询E310在2026-09-28的课表",
+      "把刚才课表改成两列表格，按开始时间降序排序"
+    ],
+    "expect": {
+      "strategy": "fact_transform",
+      "tableRows": 8
+    }
+  },
+  {
+    "id": "K02",
+    "category": "厂家手册未提供",
+    "turns": [
+      "查询某厂家未提供的投影仪维修手册依据"
+    ],
+    "expect": {
+      "kind": "knowledge",
+      "hits": 0
+    }
+  }
+]

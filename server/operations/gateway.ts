@@ -86,13 +86,14 @@ export function requestHashOf(parts: Record<string, unknown>): string {
 
 function runInTransaction<T>(fn: () => T): T {
   const d = getDb();
-  d.exec('BEGIN');
+  d.exec('SAVEPOINT gateway');
   try {
     const out = fn();
-    d.exec('COMMIT');
+    d.exec('RELEASE gateway');
     return out;
   } catch (err) {
-    d.exec('ROLLBACK');
+    d.exec('ROLLBACK TO gateway');
+    d.exec('RELEASE gateway');
     throw err;
   }
 }
@@ -194,6 +195,8 @@ export function execDutyStart(payload: DutyStartPayload, actor: SandboxActor, op
 
 export function execDutyHandover(payload: DutyHandoverPayload, actor: SandboxActor, operationId: string): ObjectRef[] {
   return runInTransaction(() => {
+    const existing = getBizDutySession(payload.sessionId);
+    if (!existing || existing.startedBy.id !== actor.id) throw new GatewayError('仅能交接本人创建的值班记录');
     const session = handOverBizDutySession({
       sessionId: payload.sessionId,
       checklist: payload.checklist,

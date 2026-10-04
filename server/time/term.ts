@@ -108,6 +108,7 @@ export interface TermConfig {
   /** 学期结束日（R09）：缺省时无法证明远期日期的课表完整覆盖 */
   termEnd?: string | null;
   holidays: string[];
+  specialDays?: Array<{date:string;teachingDate?:string;isTeachingDay?:boolean}>;
   labMismatchPolicy?: string;
 }
 
@@ -134,6 +135,12 @@ export function weekNumber(dateStr: string, termStart: string | null | undefined
 }
 
 export function describeWeek(dateStr: string, term: TermConfig): WeekContext {
+  const mapped = term.specialDays?.find(s=>s.date===dateStr)?.teachingDate;
+  if (mapped && isValidDateString(mapped)) {
+    const ordinary={...term,specialDays:[]};
+    const context=describeWeek(mapped,ordinary);
+    return {...context,note:`${dateStr} 按特殊教学日映射至 ${mapped}；${context.note}`};
+  }
   if (!term.termStart) {
     return {
       weekNo: null,
@@ -187,6 +194,8 @@ export function weekMatches(weeks: WeeksSpec | undefined | null, wn: number | nu
 }
 
 export function isHoliday(dateStr: string, term: TermConfig): boolean {
+  const special=term.specialDays?.find(s=>s.date===dateStr);
+  if(special)return special.isTeachingDay===false;
   return Array.isArray(term.holidays) && term.holidays.includes(dateStr);
 }
 

@@ -1,9 +1,9 @@
 {
   "name": "labops-agent",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "LabOps Agent · 实验室任务画布（第一阶段：一句话查课表）",
+  "description": "启真 LabOps：持久任务、故障事件联合办理与交接接续",
   "engines": {
     "node": ">=22.18.0"
   },
@@ -11,15 +11,25 @@
     "dev": "node scripts/dev.mjs",
     "dev:server": "node --watch server/index.ts",
     "dev:web": "vite",
-    "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "start": "node server/index.ts",
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "seed": "node seed/make-snapshot.ts",
-    "test": "node --test tests/unit.test.ts tests/operations.test.ts",
-    "test:acceptance": "node tests/acceptance.ts",
-    "test:browser": "node tests/browser.ts",
-    "test:all": "npm run test && npm run test:acceptance && npm run test:browser"
+    "test": "node --test tests/*.test.ts",
+    "test:acceptance": "node --test tests/bridge-http.test.ts tests/stream-facts.test.ts",
+    "test:browser": "node tests/review-browser.mjs",
+    "test:all": "npm run check:rules && npm run build && npm test && npm run test:review-browser && npm run test:next-browser && npm run test:v4-browser",
+    "sync:rules": "node scripts/sync-rules.mjs",
+    "check:rules": "node scripts/sync-rules.mjs --check",
+    "demo": "node scripts/run-review.mjs",
+    "demo:seed": "node scripts/create-review-fixture.mjs",
+    "test:review-browser": "node tests/review-browser.mjs",
+    "test:legacy:acceptance": "node tests/acceptance.ts",
+    "test:legacy:browser": "node tests/browser.ts",
+    "test:next-browser": "node tests/next-browser.mjs",
+    "eval:model": "node scripts/evaluate-model.ts",
+    "test:v4-browser": "node tests/v4-browser.mjs"
   },
   "dependencies": {
     "@vue/devtools-api": "8.2.1",

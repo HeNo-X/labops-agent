@@ -1,3 +1,4 @@
+import type { KnowledgeResult, BusinessPlanResult } from '../../shared/types.ts';
 /**
  * 演示引擎 —— 不依赖大模型的确定性兜底（无 AGNES_API_KEY 时启用）
  * ============================================================================
@@ -39,7 +40,7 @@ const OUT_OF_SCOPE_PATTERNS: Array<[RegExp, string]> = [
     '在室人数、签到记录属于记录类数据，签到办理（含异常申诉）尚未接入（没有数据来源），我无法提供，也不能估计。'
   ],
   [/换班|排班|排值班|值班表|排岗/, '值班编排与换班（F05）尚未接入：沙盒只有"开始值班/收尾交接"。'],
-  [/课表导入|导入课表|调课|代课|换教室/, '课表导入与临时调课（F04）尚未接入，我不能修改课表。'],
+  [/课表导入|导入课表|调课|代课|换教室/, '指定日期调课已在原系统业务工作台提供：先连接原系统账号，再比较候选并人工确认。对话演示引擎不会直接修改课表。'],
   [/预约|借用|申请用房|订房间|包场/, '临时用房申请与审批（F09）尚未接入，"课表空闲"不等于"可以预约"。'],
   [/积分|补记分|加分明细/, '积分核对与补记（F11）尚未接入。'],
   [/白名单|导入名单|导入学生|批量导入人员/, '人员导入预审（F12）尚未接入。'],
@@ -57,6 +58,8 @@ export const SMALLTALK_RE = /^(谢谢|多谢|感谢|辛苦了|辛苦|好的|好|
 
 export function planDemo(question: string, intent: Intent, ds: Dataset): DemoPlan {
   const q = String(question ?? '');
+  if(/制度|规程|手册|怎么用|操作说明|时间窗口/.test(q)) return {tool:'query_knowledge',callTool:true,args:{query:q},directReply:null,needsDisclosure:[]};
+  if(/下次值班|下一次值班|正式排班|我的班次/.test(q)) return {tool:'query_duty_context',callTool:true,args:{},directReply:null,needsDisclosure:[]};
 
   // F13：寒暄/确认类输入直接回应，不查任何数据、不沿用任何条件
   if (SMALLTALK_RE.test(q.trim())) {
@@ -432,6 +435,8 @@ export function renderDemoAnswer(
   extras: { dateWasDefaulted: boolean; periodFiltered: boolean }
 ): string {
   if ('kind' in result) {
+    if (result.kind === 'knowledge') { const r=result.payload as KnowledgeResult; return r.summary+'\n'+r.scope+'\n'+r.hits.map(h=>h.title+'（v'+h.version+'）\n'+h.paragraphs.map(p=>p.locator+' '+p.text).join('\n')).join('\n\n'); }
+    if (result.kind === 'business_plan') return (result.payload as BusinessPlanResult).summary+'\n请在消息内核对方案，确认后提交并回查。';
     if (result.kind === 'lab_status') return renderLabStatusAnswer(result.payload as LabStatusResult);
     if (result.kind === 'free_rooms') return renderFreeRoomsAnswer(result.payload as FreeRoomsResult);
     if (result.kind === 'operation_proposal') return renderProposalAnswer(result.payload as Proposal);

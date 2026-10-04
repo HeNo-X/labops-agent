@@ -222,6 +222,7 @@ export function resolveAllLabNames(text: string): string[] {
 // ===========================================================================
 
 export function parseIntent(text: string, now: ServerNow): Intent {
+  text=text.replace(/(?:fact-|plan-|business-plan-)?[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi,' ');
   const notes: string[] = [];
   const rawDate = resolveDate(text, now);
   const dateInvalid = rawDate && 'invalid' in rawDate ? rawDate : null;

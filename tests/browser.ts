@@ -23,6 +23,7 @@ const SHOT_DIR = path.join(HERE, '..', '.screenshots');
 const BASE = process.argv[2] ?? process.env['LABOPS_BASE'] ?? 'http://127.0.0.1:8787';
 
 const CSP_CANDIDATES = [
+  process.env['LABOPS_BROWSER_PATH'] || '',
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',

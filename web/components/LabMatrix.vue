@@ -62,7 +62,7 @@ function ask(lab: Lab): void {
     <header class="matrix__head">
       <h2 id="matrix-h">房间清单</h2>
       <p class="matrix__sub">
-        按楼宇 / 楼层 / 房间号排布，共 <b>{{ store.allRooms.length }}</b> 间。点击房间即发起课表查询。
+        按楼宇 / 楼层 / 房间号排布，共 <b>{{ store.allRooms.length }}</b> 间。点击房间回填查询问题。
       </p>
     </header>
 

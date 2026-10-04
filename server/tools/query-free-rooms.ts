@@ -1,3 +1,5 @@
+import { effectiveSchedule } from '../data/calendar.ts';
+import { closuresFor } from '../data/closures.ts';
 /**
  * 只读工具：query_free_rooms —— 找空实验室（阶段 2A / F09·F11·F12 修正）
  * ============================================================================
@@ -14,7 +16,7 @@
 import type { FreeRoomsArgs, FreeRoomsResult, ScheduleQueryResult } from '../../shared/types.ts';
 import type { Dataset, TimetableRow } from '../data/store.ts';
 import { normalizeLabName } from '../data/store.ts';
-import { APP_TZ, APP_TZ_OFFSET, describeWeek, isHoliday, isValidDateString, weekMatches, weekdayLabelOf, weekdayOf } from '../time/term.ts';
+import { APP_TZ, APP_TZ_OFFSET, describeWeek, isHoliday, isValidDateString, weekdayLabelOf } from '../time/term.ts';
 import type { ServerNow } from '../time/term.ts';
 import { PERIODS, periodByKey } from '../../shared/periods.ts';
 import type { PeriodKey } from '../../shared/periods.ts';
@@ -60,7 +62,6 @@ export function runQueryFreeRooms(
     wanted = [...PERIODS.map((p) => p.key)];
   }
 
-  const weekday = weekdayOf(date);
   const week = describeWeek(date, ds.term);
   const holiday = isHoliday(date, ds.term);
 
@@ -92,13 +93,7 @@ export function runQueryFreeRooms(
   const periodsToList = PERIODS.filter((p) => wanted.includes(p.key));
 
   // 该星期几、当前学期、未停课、周次匹配的全部排课（教学周不可确定时不过滤并声明）
-  const dayRows: TimetableRow[] = ds.timetable.filter(
-    (row) =>
-      Number(row.weekday) === weekday &&
-      row.status !== 'cancelled' &&
-      (!row.term || !ds.term.term || row.term === ds.term.term) &&
-      (week.determinable ? weekMatches(row.weeks, week.weekNo) : true)
-  );
+  const dayRows: TimetableRow[] = effectiveSchedule(ds,date);
 
   // F11：档案开放 → 主名单；关闭/停用 → excluded 并给理由
   const allRooms = [...ds.labs, ...ds.openLabs].sort((a, b) =>
@@ -127,7 +122,7 @@ export function runQueryFreeRooms(
       rooms:
         coverage === 'complete'
           ? activeRooms
-              .filter((l) => !busy.has(normalizeLabName(l.name)))
+              .filter((l) => !busy.has(normalizeLabName(l.name)) && !closuresFor(ds,date,p.key).some(c => c.roomId===l.id || normalizeLabName(c.roomId) === normalizeLabName(l.name)))
               .map((l) => ({
                 labName: l.name,
                 location: l.location,
@@ -138,7 +133,13 @@ export function runQueryFreeRooms(
     };
   });
 
+  if (closuresFor(ds,date).length) notes.push(ds.sourceType==='live'?'已依据原系统同版本临时停用范围逐节次排除房间。':'已按快照及当前身份的沙盒停用记录排除，不能当作原系统当前状态。');
+  for (const l of activeRooms) {
+    const blocked=periodsToList.filter(p=>closuresFor(ds,date,p.key).some(c=>c.roomId===l.id||normalizeLabName(c.roomId)===normalizeLabName(l.name)));
+    if(blocked.length) excluded.push({labName:l.name,location:l.location,status:'inactive',reason:'临时停用：'+blocked.map(p=>p.label).join('、')});
+  }
   const provenance: ScheduleQueryResult['provenance'] = {
+    sourceRevision: ds.sourceRevision,
     sourceType: ds.sourceType,
     sourceLabel: ds.sourceLabel,
     ...(ds.meta.snapshotAt ? { snapshotAt: ds.meta.snapshotAt } : {}),
@@ -147,7 +148,7 @@ export function runQueryFreeRooms(
     timezone: `${APP_TZ} (UTC${APP_TZ_OFFSET})`,
     coverage:
       ds.sourceType === 'live'
-        ? '实时数据：直接读取当前真实 state.json'
+        ? '实时数据：经授权读取原系统业务数据，来源见查询信息'
         : ds.sourceType === 'snapshot'
           ? '脱敏快照：从真实 state.json 导出后已脱敏，非实时'
           : '模拟演示：内置构造的示例数据，与真实实验室无关'

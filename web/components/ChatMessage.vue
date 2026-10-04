@@ -7,14 +7,18 @@
  *    活跃轮的工具数据由 run store 实时驱动，历史轮来自持久化 meta —— 同一组件两种来源
  *  · 状态不只靠颜色：符号 + 文字（✓ 完成 / ✕ 失败 / ⏹ 已取消 / ◌ 生成中 / ‼ 中断）
  */
+import type { KnowledgeResult, BusinessPlanResult } from '@shared/types';
 import { computed, ref } from 'vue';
 import type { ChatMessage, ToolCallRecord } from '../stores/session';
 import { useRunStore } from '../stores/run';
 import type { ScheduleQueryResult, LabStatusResult, FreeRoomsResult, EngineType } from '@shared/types';
 import type { OperationsReportResult } from '@shared/types';
 import type { Proposal } from '@shared/operations-contract';
+import MarkdownText from './MarkdownText.vue';
 import StatusTag from './StatusTag.vue';
 import TaskResult from './TaskResult.vue';
+import BusinessPlanCard from './BusinessPlanCard.vue';
+import {useSessionStore} from '../stores/session';
 import OperationCard from './OperationCard.vue';
 import ReportCard from './ReportCard.vue';
 import type { Tone } from './ui-types';
@@ -22,6 +26,7 @@ import type { Tone } from './ui-types';
 const props = defineProps<{ msg: ChatMessage }>();
 const emit = defineEmits<{ retry: []; decided: [] }>();
 const run = useRunStore();
+const session=useSessionStore();
 const copied = ref(false);
 
 /** N03：每条消息拥有自己的结果卡（toolCalls[].result → 对应渲染器） */
@@ -45,6 +50,9 @@ const reportArtifacts = computed(() =>
     .map((t) => ({ key: t.toolCallId, report: t.result as OperationsReportResult }))
 );
 
+const knowledgeArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind==='knowledge').map(t=>t.result as KnowledgeResult));
+const businessArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind==='business_plan'&&t.result).map(t=>({key:t.toolCallId,result:t.result as BusinessPlanResult})));
+
 const isUser = computed(() => props.msg.role === 'user');
 
 const statusMeta = computed<{ tone: Tone; glyph: string; label: string }>(() => {
@@ -52,7 +60,7 @@ const statusMeta = computed<{ tone: Tone; glyph: string; label: string }>(() => 
     case 'streaming':
       return { tone: 'info', glyph: '◌', label: '生成中' };
     case 'completed':
-      return { tone: 'ok', glyph: '✓', label: '完成' };
+      return { tone: 'ok', glyph: '✓', label: '本轮回答已保存' };
     case 'failed':
       return { tone: 'danger', glyph: '✕', label: '失败' };
     case 'cancelled':
@@ -105,7 +113,7 @@ async function copyAnswer(): Promise<void> {
 }
 
 const engineLabel = computed(() =>
-  props.msg.engine === 'agnes' ? 'Agnes 3.0 Flash' : props.msg.engine === 'demo' ? '演示引擎' : ''
+  props.msg.engine === 'agnes' ? 'Agnes 3.0 Flash' : props.msg.engine === 'demo' ? '演示引擎' : props.msg.engine === 'facts' ? '可靠事实转换' : ''
 );
 </script>
 
@@ -151,10 +159,12 @@ const engineLabel = computed(() =>
         </div>
       </details>
 
-      <pre v-if="msg.text" class="msg__text">{{ msg.text }}</pre>
+      <MarkdownText v-if="msg.text" :text="msg.text" />
       <p v-else-if="msg.status === 'streaming'" class="msg__pending">正在执行…</p>
       <p v-else-if="msg.status === 'failed'" class="msg__pending">本轮执行失败，未生成回答。</p>
       <p v-else-if="msg.status === 'interrupted'" class="msg__pending">本轮执行被中断，部分内容可能未生成。</p>
+      <div v-for="(k,i) in knowledgeArtifacts" :key="'knowledge-'+i"><p v-for="h in k.hits" :key="h.id"><a :href="h.url" target="_blank" rel="noopener">{{h.title}} · v{{h.version}} · 段落依据</a></p></div>
+      <BusinessPlanCard v-for="b in businessArtifacts" :key="b.key" :result="b.result" :card-id="msg.id+':'+b.key" :readonly="session.currentMode()==='chat'" />
       <!-- N03：本条消息自己的结构化结果卡（实时与历史同一渲染器） -->
       <OperationCard
         v-for="a in proposalArtifacts"

@@ -115,13 +115,13 @@ function main() {
       /** 只留前 16 位：够做「这份快照对应哪一版数据」的追溯，不构成完整指纹 */
       sourceSha256Prefix: sourceSha256.slice(0, 16),
       /** 顶层键白名单：明确列出**故意丢弃**了哪些表，避免以后有人以为漏导了 */
-      includedTables: ['sysConfig', 'labs', 'openLabs', 'timetable'],
+      includedTables: ['sysConfig', 'labs', 'openLabs', 'timetable', 'scheduleAdjust (public fields)'],
       droppedTables: [
         'users', 'classRoster', 'keys', 'courses', 'classes',
         'checkinRecords', 'volunteerRecords', 'openLabRecords',
-        'notifications', 'scheduleAdjust', 'openLabStatus', 'gamification'
+        'notifications', 'openLabStatus', 'gamification'
       ],
-      dropReason: '第一阶段唯一工具 query_schedule 不需要这些表；含真实姓名/学号/手机号/凭据，一律不入库',
+      dropReason: '脱敏快照只用于公开排课查询；身份、签到、钥匙、通知与业务流程通过授权接口读取，不进入快照',
       redaction: {
         teacher: '稳定伪名化（教师T01…，同次导出内一致，不可逆）',
         dropped: ['真实姓名', '手机号', '学号(sno)', '用户名', '钥匙持有人', '凭据/会话'],
@@ -138,12 +138,15 @@ function main() {
     term: {
       term: cfg['term'] ?? '',
       termStart: cfg['termStart'] ?? null,
+      termEnd: cfg['termEnd'] ?? null,
+      specialDays: Array.isArray(cfg['specialDays']) ? cfg['specialDays'] : [],
       holidays: Array.isArray(cfg['holidays']) ? cfg['holidays'] : [],
       labMismatchPolicy: cfg['labMismatchPolicy'] ?? 'warn'
     },
     labs,
     openLabs,
-    timetable
+    timetable,
+    scheduleAdjust: ((st['scheduleAdjust'] as Any[]) ?? []).map(a => pick(a, ['id', 'date', 'timetableId', 'action', 'toLabId', 'toPeriodKey', 'status']))
   };
 
   // ---- 残留自检（A5 要求：导出后必须能证明没有真实姓名/手机号/学号残留）----

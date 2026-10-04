@@ -15,7 +15,8 @@
 import { createHash } from 'node:crypto';
 import type { DecisionOutcome, ObjectRef, OperationReceipt, SandboxActor, TaskRecord } from '../../shared/operations-contract.ts';
 import {
-  expireStaleProposals,
+  getDb,
+  getOpsOperationByProposal,
   getOpsOperationByClientRequest,
   getOpsProposal,
   getOpsTask,
@@ -47,6 +48,7 @@ const ACTION_CAPABILITIES: Record<string, Capability[]> = {
 };
 
 export interface DecisionInput {
+  taskId?: string;
   proposalId: string;
   proposalVersion: number;
   decision: 'confirm' | 'reject';
@@ -59,9 +61,19 @@ function sha256(s: string): string {
 }
 
 export function decideOnProposal(input: DecisionInput): DecisionOutcome {
-  // 惰性清理：先把到期的待确认提案标掉，避免"过期提案仍可确认"
-  expireStaleProposals();
+  const db = getDb();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const outcome = decideInTransaction(input);
+    db.exec(outcome.ok ? 'COMMIT' : 'ROLLBACK');
+    return outcome;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    return {ok:false,code:'execution_failed',message:`办理未提交：${err instanceof Error ? err.message : String(err)}`};
+  }
+}
 
+function decideInTransaction(input: DecisionInput): DecisionOutcome {
   if (!Number.isInteger(input.proposalVersion) || input.proposalVersion < 1) {
     return { ok: false, code: 'bad_request', message: 'proposalVersion 必须是正整数' };
   }
@@ -69,22 +81,15 @@ export function decideOnProposal(input: DecisionInput): DecisionOutcome {
     return { ok: false, code: 'bad_request', message: 'clientRequestId 缺失或超长（≤128）' };
   }
 
-  // ---- 幂等预检：同 clientRequestId 已有回执 → 原样返回（T05）----
-  const existing = getOpsOperationByClientRequest(input.clientRequestId);
-  if (existing) {
-    if (existing.proposalId === input.proposalId) {
-      const t = getTaskOfProposal(input.proposalId);
-      if (t) return { ok: true, decision: 'confirm', receipt: existing, task: t };
-    }
-    // clientRequestId 被用于别的提案：按冲突处理，不允许键复用
-    return { ok: false, code: 'bad_request', message: 'clientRequestId 已被其他提案使用，请换新的幂等键' };
-  }
-
   const stored = getOpsProposal(input.proposalId);
   if (!stored) {
     return { ok: false, code: 'proposal_not_found', message: `提案 ${input.proposalId} 不存在` };
   }
   const { proposal, payload, payloadHash } = stored;
+  const task = getOpsTask(proposal.taskId);
+  if (!task || (input.taskId && input.taskId !== proposal.taskId)) return {ok:false, code:'bad_request', message:'提案与任务不匹配'};
+  if (task.actor.id !== input.actor.id) return {ok:false, code:'forbidden', message:'只能处理本人创建的提案'};
+  if (input.decision !== 'confirm' && input.decision !== 'reject') return {ok:false,code:'bad_request',message:'无效决定'};
 
   if (proposal.version !== input.proposalVersion) {
     return {
@@ -93,23 +98,10 @@ export function decideOnProposal(input: DecisionInput): DecisionOutcome {
       message: `提案版本不匹配：请求确认 v${input.proposalVersion}，当前有效版本为 v${proposal.version}（${proposal.state}）。请刷新后按最新提案操作。`
     };
   }
-  if (proposal.state !== 'awaiting_confirmation') {
-    // 过期是惰性清理产生的状态：语义上不是"已被决策"，单独给出明确错误码
-    if (proposal.state === 'expired') {
-      return { ok: false, code: 'proposal_expired', message: '提案已过期，不能确认。请重新发起业务办理。' };
-    }
-    // 已决定：确认过的回执随错误带回，便于前端幂等恢复（T11）
-    const op = getOpsOperationByClientRequest(input.clientRequestId);
-    return {
-      ok: false,
-      code: 'proposal_already_decided',
-      message: `提案已处于「${proposal.state}」状态，不能再次决策`,
-      ...(op ? { existingReceipt: op } : {})
-    };
-  }
-
   // ---- 能力校验（服务端实时重查，不信任提案生成时的快照）----
-  const caps = ACTION_CAPABILITIES[proposal.actionType] ?? [];
+  const caps = ACTION_CAPABILITIES[proposal.actionType];
+  if (!caps) return {ok:false, code:'bad_request', message:'动作未注册'};
+  if (payload['prepareNotice'] === true && !actorHasCapability(input.actor, 'notice:publish')) return {ok:false,code:'forbidden',message:'缺少通知发布权限'};
   const lacking = caps.filter((c) => !actorHasCapability(input.actor, c));
   if (lacking.length) {
     return {
@@ -118,6 +110,18 @@ export function decideOnProposal(input: DecisionInput): DecisionOutcome {
       message: `当前身份（${input.actor.label}）缺少所需能力：${lacking.join('、')}。请切换到有权限的演示身份或联系管理员。`
     };
   }
+
+  const d = getDb();
+  const prior = d.prepare('SELECT * FROM ops_decisions WHERE clientRequestId = ?').get(input.clientRequestId) as Record<string, unknown> | undefined;
+  if (prior && (prior['proposalId'] !== input.proposalId || prior['proposalVersion'] !== input.proposalVersion || prior['decision'] !== input.decision || prior['actorId'] !== input.actor.id)) {
+    return {ok:false,code:'bad_request',message:'幂等键与原始请求指纹不一致'};
+  }
+  const original = getOpsOperationByProposal(proposal.proposalId);
+  if (original && input.decision === 'confirm' && original.actor.id === input.actor.id && original.proposalVersion === input.proposalVersion) return {ok:true,decision:'confirm',receipt:original,task};
+  if (prior && input.decision === 'reject' && proposal.state === 'rejected') return {ok:true,decision:'reject',task};
+  if (proposal.state === 'expired' || (proposal.state === 'awaiting_confirmation' && Date.parse(proposal.expiresAt) <= Date.now())) return {ok:false,code:'proposal_expired',message:'提案已过期，请重新生成'};
+  if (proposal.state !== 'awaiting_confirmation') return {ok:false,code:'proposal_already_decided',message:'提案已处理'};
+  if (!proposal.canExecute && input.decision === 'confirm') return {ok:false,code:'forbidden',message:proposal.cannotExecuteReason || '提案不可执行'};
 
   // ---- 决策落库（唯一索引兜底并发重放）----
   const decided = insertOpsDecision({
@@ -154,9 +158,12 @@ export function decideOnProposal(input: DecisionInput): DecisionOutcome {
   }
 
   // ---- 确认：按 actionType 分派到沙盒网关 ----
-  const requestHash = requestHashOf({ proposalId: proposal.proposalId, version: proposal.version, payloadHash });
-  const operationId = `op-${sha256(`${input.clientRequestId}:${requestHash}`).slice(0, 24)}`;
+  const requestHash = requestHashOf({ actorId: input.actor.id, proposalId: proposal.proposalId, version: proposal.version, decision: input.decision, payloadHash });
+  const operationId = `op-${sha256(`${input.actor.id}:${requestHash}`).slice(0, 24)}`;
   const committedAt = new Date().toISOString();
+  const claimed = d.prepare("UPDATE ops_proposals SET state='executed' WHERE id=? AND version=? AND state='awaiting_confirmation'").run(proposal.proposalId,proposal.version);
+  if(Number(claimed.changes)!==1) return {ok:false,code:'proposal_already_decided',message:'提案已被处理'};
+  d.prepare('INSERT INTO ops_proposal_commits VALUES (?,?)').run(proposal.proposalId,operationId);
 
   try {
     let objects: ObjectRef[];
@@ -233,12 +240,12 @@ export function decideOnProposal(input: DecisionInput): DecisionOutcome {
 function deliveryOf(actionType: string, payload: Record<string, unknown>): { status: OperationReceipt['deliveryStatus']; note: string | null } {
   if (actionType === 'notification.publish') {
     return {
-      status: 'sent',
-      note: '站内通知已创建并入库（outbox 记录投递）；已读跟踪未接入，recipientCount 为空表示沙盒无人员名册。'
+      status: 'pending',
+      note: '通知已入库排队，尚无接收方送达凭据；已读跟踪未接入，recipientCount 为空表示沙盒无人员名册。'
     };
   }
   if (actionType === 'room_closure.create' && payload['prepareNotice'] === true) {
-    return { status: 'sent', note: '停用与联动单据已在沙盒内生效；联动通知已入库，已读跟踪未接入。' };
+    return { status: 'pending', note: '停用与联动单据已在沙盒内生效；联动通知已排队，送达与已读未验证。' };
   }
   return { status: 'not_applicable', note: null };
 }

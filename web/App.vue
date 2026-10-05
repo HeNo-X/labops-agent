@@ -18,6 +18,8 @@ import ChatMessage from './components/ChatMessage.vue';
 import NativeWorkPanel from './components/NativeWorkPanel.vue';
 import BusinessConnectionPanel from './components/BusinessConnectionPanel.vue';
 import {useBusinessStore} from './stores/business';
+import EvidencePanel from './components/EvidencePanel.vue';
+import ScheduledJobsPanel from './components/ScheduledJobsPanel.vue';
 import LoginView from './components/LoginView.vue';
 import SourceBadge from './components/SourceBadge.vue';
 import { ACTOR_ROLE_LABELS, actorHeaders, actorRole, setActorRole } from './actor';
@@ -50,11 +52,38 @@ watch(()=>business.scopeKey,(next,old)=>{
     if(session.currentId)void session.openConversation(session.currentId);
   }
 });
-// 登录门面（本地演示模式）：会话内记住登录；不做真实身份校验（R26 边界不变）
-const authed = ref(sessionStorage.getItem('labops.auth') !== null);
-function onLogin(account: string): void {
-  sessionStorage.setItem('labops.auth', account);
-  authed.value = true;
+const authMode = ref<'native'|'demo'>('native');
+const authed = ref(false), authLoading = ref(true), authError = ref('');
+async function loadWorkspace(conversationId?:string):Promise<void>{
+  await business.refresh();
+  if(authMode.value==='native'&&business.profile)actor.value=business.profile.identity as ActorRole;
+  await Promise.all([store.loadOverview(),loadTasks(),session.loadConversations()]);
+  await session.loadCurrentId();
+  const id=conversationId||session.currentId;
+  if(id&&session.conversations.some(c=>c.id===id))await session.openConversation(id);
+  else session.startDraft();
+}
+async function bootstrapAuth():Promise<void>{
+  authLoading.value=true;authError.value='';
+  try{
+    const fragment=new URLSearchParams(location.hash.slice(1)),ticket=fragment.get('labops-ticket');
+    if(ticket)history.replaceState(null,'',location.pathname+location.search);
+    const res=await fetch(ticket?'/api/auth/sso/exchange':'/api/auth/session',ticket?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket})}:{});
+    const data=await res.json();authMode.value=data.mode==='demo'?'demo':'native';
+    if(!res.ok)throw new Error(data.message||'登录状态无法验证');
+    authed.value=authMode.value==='demo'?sessionStorage.getItem('labops.auth')!==null:Boolean(data.authenticated);
+    if(authed.value)await loadWorkspace(data.conversationId||undefined);
+  }catch(e){authed.value=false;authError.value=(e as Error).message;}
+  finally{authLoading.value=false;}
+}
+async function onLogin(account: string):Promise<void>{
+  sessionStorage.setItem('labops.auth',account);
+  if(authMode.value==='demo'){authed.value=true;await loadWorkspace();}
+  else await bootstrapAuth();
+}
+async function logout():Promise<void>{
+  cancel();await fetch('/api/auth/logout',{method:'POST'}).catch(()=>undefined);
+  sessionStorage.removeItem('labops.auth');session.messages={};session.conversations=[];session.startDraft();store.resetRun();authed.value=false;
 }
 const { start, cancel } = useAgentStream();
 
@@ -148,12 +177,7 @@ onMounted(() => {
     /* 忽略 */
   }
   applyTheme(saved);
-  void store.loadOverview();
-  void loadTasks();
-  void session.loadCurrentId();
-  void session.loadConversations().then(() => {
-    if (session.currentId) void session.openConversation(session.currentId);
-  });
+  void bootstrapAuth();
 });
 
 // ---- ops.v1：任务中心 + 沙盒演示身份（仅沙盒可切换视角，服务端校验）----
@@ -280,6 +304,7 @@ async function onSubmit(q: string): Promise<void> {
   session.appendLocal(convId, {
     id: `live-${rid}`,
     role: 'assistant',
+    responseMode:session.currentMode(),
     text: '',
     status: 'streaming',
     toolCalls: [],
@@ -407,7 +432,8 @@ function onPickRoom(q: string): void {
 </script>
 
 <template>
-  <LoginView v-if="!authed" @done="onLogin" />
+  <p v-if="authLoading" class="auth-status" role="status">正在验证主系统登录状态…</p>
+  <template v-else-if="!authed"><p v-if="authError" class="auth-status" role="alert">{{authError}}</p><LoginView :mode="authMode" @done="onLogin" /></template>
   <div v-else class="app" :class="{ 'app--railclosed': !roomsOpen }">
     <!-- 左侧导航 -->
     <aside class="nav" :class="{ 'nav--open': navOpen }" aria-label="会话导航">
@@ -479,8 +505,17 @@ function onPickRoom(q: string): void {
         </ul>
       </div>
 
+      <!-- 业务工具（2026-10-06：原在工作区顶部的横排按钮，按负责人要求移到左侧栏，形态更接近常规 Agent） -->
+      <div class="nav__section">
+        <h2 class="nav__h">业务工具</h2>
+        <div class="nav__tools">
+          <ScheduledJobsPanel :readonly="(session.currentId?convMode:draftMode)==='chat'" />
+          <EvidencePanel :readonly="(session.currentId?convMode:draftMode)==='chat'" />
+        </div>
+      </div>
+
       <div class="nav__foot">
-        <div class="nav__actor" role="group" aria-label="沙盒演示身份">
+        <div v-if="authMode==='demo'" class="nav__actor" role="group" aria-label="沙盒演示身份">
           <button
             v-for="r in (['admin', 'volunteer', 'student'] as ActorRole[])"
             :key="r"
@@ -495,6 +530,7 @@ function onPickRoom(q: string): void {
             {{ ACTOR_ROLE_LABELS[r].replace('演示', '') }}
           </button>
         </div>
+        <button v-if="authMode==='native'" type="button" class="theme__btn" @click="logout">退出登录</button>
         <SourceBadge :source-type="store.sourceType ?? store.overviewSourceType" :engine="store.activeEngine" compact />
         <div class="nav__theme" role="group" aria-label="主题切换">
           <button
@@ -515,7 +551,7 @@ function onPickRoom(q: string): void {
 
     <!-- 主区：会话（有消息时列高锁定视口，输入框固定在底部） -->
     <main class="chat" :class="{ 'chat--conv': session.currentId && session.currentMessages.length > 0 }">
-      <BusinessConnectionPanel /><NativeWorkPanel />
+      <BusinessConnectionPanel :unified="authMode==='native'" /><div class="workspace-tools"><NativeWorkPanel v-if="(session.currentId?convMode:draftMode)!=='chat'" /></div>
       <!-- 空会话：欢迎页即输入（保持居中首屏形态） -->
       <div v-if="!session.currentId || session.currentMessages.length === 0" class="hero">
         <button type="button" class="chat__navtoggle hero__navtoggle" @click="navOpen = !navOpen">会话</button>
@@ -571,7 +607,7 @@ function onPickRoom(q: string): void {
             @cancel="onCancel"
           />
           <p class="hero__scope">
-            聊天模式不调用工具、不产生业务单据；具体数据查询与业务办理请使用「任务」模式。
+            聊天模式可以查询真实数据并保存聊天；办理业务请切换「任务」模式并人工确认。
           </p>
         </template>
       </div>
@@ -669,6 +705,15 @@ function onPickRoom(q: string): void {
   min-height: var(--app-height,100dvh);
 }
 
+.workspace-tools{display:flex;align-items:center;flex-wrap:wrap;gap:4px;flex-shrink:0;padding:4px 10px;border-bottom:1px solid var(--border)}
+.workspace-tools :deep(.native-work-entry),.workspace-tools :deep(.jobs-entry),.workspace-tools :deep(.evidence-entry){padding:2px;border:0;font-size:12px}
+.workspace-tools :deep(button){font-size:12px;padding:6px 8px}
+@media(max-width:600px){.workspace-tools :deep(.native-work-entry span),.workspace-tools :deep(.jobs-entry span){display:none}}
+/* 业务工具（已移入左侧栏）：去掉原有的整宽横排内边距，改为与侧栏一致的竖排按钮 */
+.nav__tools{display:flex;flex-direction:column;gap:6px}
+.nav__tools :deep(.jobs-entry),.nav__tools :deep(.evidence-entry){display:block;padding:0;border:0;font-size:12px}
+.nav__tools :deep(.jobs-entry span){display:block;margin-top:4px;font-size:11px;color:var(--text-dim)}
+.nav__tools :deep(button){width:100%;text-align:left;padding:8px 10px;border-radius:8px;font-size:12px}
 /* ---- 左侧导航 ---- */
 .nav {
   display: flex;

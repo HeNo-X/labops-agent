@@ -1,6 +1,6 @@
 import { isBusinessConnected, effectiveRole } from '../business/bridge.ts';
 import { runKnowledge } from './knowledge.ts';
-import { prepareSchedule, queryDuty, queryBusiness, prepareWorkflow, queryIncident, prepareIncident } from './business.ts';
+import { prepareSchedule, queryDuty, queryBusiness, prepareWorkflow, queryIncident, prepareIncident,queryScheduled,prepareScheduled } from './business.ts';
 import type { KnowledgeResult, BusinessPlanResult } from '../../shared/types.ts';
 /**
  * 工具注册表 —— JSON Schema + 白名单 + 参数类型校验 + 人话摘要
@@ -125,8 +125,9 @@ const QUERY_LAB_STATUS_SPEC: ToolSpec = {
   name: 'query_lab_status',
   description:
     '查询【某个实验室房间】的档案与状态：位置、容量、开放状态（开放/关闭/停用）、描述，以及指定日期的排课统计' +
-    '（当天几节课、哪些节次被占用、下一节课是什么）。用于回答：「E310 现在开放吗」「D515 容量多大」「那间房今天还有什么课」。' +
-    '注意：本工具不提供在室人数（没有签到/门禁数据），涉及"里面有多少人"的问题必须如实回答查不到。',
+    '（当天几节课、哪些节次被占用、下一节课是什么）。用于回答：「E310 现在开放吗」「D515 容量多大」「那间房今天还有什么课」「310 现在有多少人」。' +
+    '在室人数（occupancy）：**仅当主系统已授权实时通道时**返回真实值，口径=当日有效签到−有效签退（与主系统页面同源）；' +
+    '取不到时为 null，此时必须如实回答"查不到"，**不得估算或编造人数**。',
   parameters: {
     type: 'object',
     properties: {
@@ -411,10 +412,10 @@ function executeQuerySchedule(args: Record<string, unknown>, ctx: ToolContext): 
   }
 }
 
-function executeQueryLabStatus(args: Record<string, unknown>, ctx: ToolContext): ToolExecution {
+async function executeQueryLabStatus(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolExecution> {
   try {
     const normalized = coerceLabStatusArgs(args);
-    const result = runQueryLabStatus(normalized, ctx.dataset, ctx.now);
+    const result = await runQueryLabStatus(normalized, ctx.dataset, ctx.now);
     return { ok: true, resultKind: 'lab_status', result, summary: summarizeLabStatus(result) };
   } catch (err) {
     if (err instanceof ToolArgumentError) return fail(err);
@@ -438,6 +439,8 @@ export const REGISTRY: RegisteredTool[] = [
   {spec:{name:'prepare_incident_plan',description:'管理员保存用户明确声明的故障事件草稿，分析最多6项教学活动的联合候选，或准备处置/恢复方案。只能准备，实际提交必须由本人点击确认。缺失事实不得猜测。',parameters:{type:'object',properties:{action:{type:'string',enum:['draft','analyze','preview','restore','takeover']},incidentId:{type:'string'},expectedRevision:{type:'integer'},roomId:{type:'string'},date:{type:'string'},description:{type:'string'},device:{type:'string'},periodKeys:{type:'array',items:{type:'string',enum:[...PERIOD_KEYS]}},preference:{type:'string',enum:['keep_period','few_rooms','early']},candidateSetId:{type:'string'},optionId:{type:'string'},note:{type:'string'},undoMoves:{type:'boolean'}},required:['action'],additionalProperties:false},danger:false},execute:prepareIncident,effect:'draft'},
   {spec:{name:'query_business_context',description:'查询原系统当前账号可见的工单状态、通知已读、检查记录、临时停用或真实日报。不得拿沙盒统计冒充真实业务。',parameters:{type:'object',properties:{view:{type:'string',enum:['issues','notifications','closures','duty','report','tasks','incidents','health']},date:{type:'string'}},required:['view'],additionalProperties:false},danger:false},execute:queryBusiness,effect:'read'},
   {spec:{name:'prepare_business_workflow',description:'准备原系统工单创建或流转、检查补全/最终交接/接收、通知或停用方案。先查 query_business_context 获取真实对象与版本。未明确说明的检查保持 unchecked。只准备，实际提交需本人点击消息卡。',parameters:{type:'object',properties:{kind:{type:'string',enum:['resource.patch','issue.create','issue.action','duty.handover','duty.accept','duty.reassign','duty.item','notification.publish','closure.create','closure.revoke']},resourceKind:{type:'string',enum:['room','class','course']},resourceId:{type:'string'},field:{type:'string',enum:['capacity','size','equipment','requiredEquipment']},after:{},expectedResourceVersion:{type:'string'},evidence:{type:'string'},roomId:{type:'string'},description:{type:'string'},issueId:{type:'string'},expectedRevision:{type:'integer'},action:{type:'string',enum:['assign','start','submit','close','return','complete','carry']},assigneeId:{type:'string',description:'仅action=assign可填写；其他工单动作不得携带此字段'},itemId:{type:'string'},targetShiftId:{type:'string'},adoptItemIds:{type:'array',items:{type:'string'}},leftovers:{type:'array',items:{type:'object'}},taskId:{type:'string'},note:{type:'string'},shiftId:{type:'string'},checklist:{type:'array',items:{type:'object',properties:{key:{type:'string'},state:{type:'string',enum:['done','abnormal','unchecked']}},required:['key','state']}},finalize:{type:'boolean'},createIssue:{type:'boolean'},receiverId:{type:'string'},recordId:{type:'string'},title:{type:'string'},content:{type:'string'},audience:{type:'object'},startDate:{type:'string'},endDate:{type:'string'},periodKeys:{type:'array',items:{type:'string',enum:[...PERIOD_KEYS]}},reason:{type:'string'},closureId:{type:'string'}},required:['kind'],additionalProperties:false},danger:false},execute:prepareWorkflow,effect:'draft'},
+  {spec:{name:'query_scheduled_jobs',description:'读取当前账号的定时规则、已保存执行结果或明日准备包。',parameters:{type:'object',properties:{view:{type:'string',enum:['rules','results','preparation']}},additionalProperties:false},danger:false},execute:queryScheduled,effect:'read'},
+  {spec:{name:'prepare_scheduled_job',description:'仅预览固定模板定时规则，未来3次时间、样例、对象和效果必须让本人确认。不能调用确认接口；不能设置脚本、任意URL、自动调课或自动验收。普通用户仅能提醒自己。',parameters:{type:'object',properties:{action:{type:'string',enum:['create','change','pause','resume','archive','run_now']},jobId:{type:'string'},expectedVersion:{type:'integer'},reason:{type:'string'},spec:{type:'object',properties:{name:{type:'string'},kind:{type:'string',enum:['daily_report','tomorrow_courses','duty_reminder','due_followup','weekly_report','resource_risk','closure_expiry','notice_reminder']},timezone:{type:'string',enum:['Asia/Shanghai']},trigger:{type:'object',properties:{type:{type:'string',enum:['daily','weekly','once','duty','cron']},time:{type:'string'},weekdays:{type:'array',items:{type:'integer'}},at:{type:'string'},minutesBefore:{type:'integer'},expression:{type:'string'}},required:['type'],additionalProperties:false},calendarPolicy:{type:'string',enum:['all_days','teaching_days']},params:{type:'object'},recipients:{type:'array',items:{type:'object'}},approvedEffects:{type:'array',items:{type:'string',enum:['report','inbox']}}},required:['kind','trigger'],additionalProperties:false}},additionalProperties:false},danger:false},execute:prepareScheduled,effect:'draft'},
   {spec:{name:'query_knowledge',description:'检索当前软件操作说明，返回版本、生效日期与段落引用；未导入学校制度或厂家手册时明确缺依据。',parameters:{type:'object',properties:{query:{type:'string'}},required:['query'],additionalProperties:false},danger:false},execute:runKnowledge,effect:'read'},
   {spec:{name:'query_duty_context',description:'查询经原系统登录验证的本人正式排班，未连接或未配置时明确无法确定；不从历史签到猜测。',parameters:{type:'object',properties:{},additionalProperties:false},danger:false},execute:queryDuty,effect:'read'},
   {spec:{name:'prepare_schedule_adjustment',description:'为原系统管理员比较指定日期调课候选或保存待确认方案。先用 query_schedule 获取 timetableId。未给目标时返回候选；仅符合已核实约束才可保存。确认必须由用户在LabOps消息卡点击，本工具不执行调课。',parameters:{type:'object',properties:{date:{type:'string'},timetableId:{type:'string'},taskId:{type:'string'},candidateSetId:{type:'string'},supersedePlanId:{type:'string'},toLabId:{type:'string'},toPeriodKey:{type:'string',enum:[...PERIOD_KEYS]},reason:{type:'string'}},required:['date','timetableId'],additionalProperties:false},danger:false},execute:prepareSchedule,effect:'draft'},

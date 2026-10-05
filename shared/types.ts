@@ -247,8 +247,11 @@ export interface LabStatusResult {
      */
     nextLessonReason: 'no_more_today' | 'not_applicable' | 'unknown';
   };
-  /** 在室人数：永远 null —— 没有数据来源，绝不允许编造 */
-  occupancy: null;
+  /**
+   * 在室人数：经主系统授权的实时通道可用时给出真实值（口径=当日有效签到−有效签退，与主系统页面同源）；
+   * 无数据来源时为 null —— **任何情况下都不允许编造人数**。
+   */
+  occupancy: { present: number; source: 'authorized_api'; date: string; note: string } | null;
   /** 档案状态口径说明（F19）：active/closed 来自房间档案快照，不是实时门禁 */
   registryStatusNote: string;
   term: string;

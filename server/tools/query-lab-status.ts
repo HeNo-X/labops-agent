@@ -1,5 +1,6 @@
 import { effectiveSchedule } from '../data/calendar.ts';
 import { closuresFor } from '../data/closures.ts';
+import { isBusinessConnected, businessRequest } from '../business/bridge.ts';
 /**
  * 只读工具：query_lab_status —— 房间档案 + 该日排课统计（阶段 2A）
  * ============================================================================
@@ -22,11 +23,11 @@ const STATUS_LABELS: Record<string, string> = {
   inactive: '停用/修整'
 };
 
-export function runQueryLabStatus(
+export async function runQueryLabStatus(
   args: LabStatusArgs,
   ds: Dataset,
   now: ServerNow
-): LabStatusResult {
+): Promise<LabStatusResult> {
   const rawLabName = typeof args.labName === 'string' ? args.labName.trim() : '';
   if (!rawLabName) {
     throw new ToolArgumentError(
@@ -52,6 +53,7 @@ export function runQueryLabStatus(
     suggestions: [] as string[],
     provenance: {
       sourceType: ds.sourceType,
+      ...(ds.sourceRevision?{sourceRevision:ds.sourceRevision}:{}),
       sourceLabel: ds.sourceLabel,
       ...(ds.meta.snapshotAt ? { snapshotAt: ds.meta.snapshotAt } : {}),
       ...(ds.meta.sourceSha256Prefix ? { sourceSha256Prefix: ds.meta.sourceSha256Prefix } : {}),
@@ -90,6 +92,28 @@ export function runQueryLabStatus(
     };
   }
 
+  // 2026-10-05：接入主系统实时在室人数。
+  //   此前工具恒返回 null（当时确实没有签到数据来源）→ 问「某房间现在有多少人」会落到
+  //   evidence_missing 兜底失败。0.5.0 打通业务通道后主系统已有签到数据，这里取值。
+  //   ⚠️ 仅在**业务通道已连接**（经主系统授权）时取；取不到就保持 null 并如实说明 —— 绝不编造。
+  let occupancy: LabStatusResult['occupancy'] = null;
+  if (isBusinessConnected()) {
+    try {
+      const occ = await businessRequest('/occupancy', 'GET');
+      const rows = occ['rooms'] as Array<Record<string, unknown>> | undefined;
+      const key = normalizeLabName(lab.name);
+      const row = rows?.find((r) => normalizeLabName(String(r['roomName'])) === key || String(r['roomId']) === lab.id);
+      if (row && typeof row['present'] === 'number') {
+        occupancy = {
+          present: row['present'],
+          source: 'authorized_api',
+          date: String(occ['date'] ?? date),
+          note: String(occ['note'] ?? '')
+        };
+      }
+    } catch { /* 取不到 → 保持 null，由下面的 notes 如实说明 */ }
+  }
+
   const week = describeWeek(date, ds.term);
   const holiday = isHoliday(date, ds.term);
 
@@ -98,7 +122,9 @@ export function runQueryLabStatus(
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
   // F19：档案状态 ≠ 实时门禁。措辞必须避免把静态档案解释成"此刻能否进入"
   notes.push('开放状态来自房间档案（随数据快照更新），不是实时门禁——实际此刻能否进入以现场为准');
-  notes.push('在室人数没有数据来源（无签到/门禁数据），本工具无法提供，请勿据此回答人数问题');
+  notes.push(occupancy
+    ? `在室人数 ${occupancy.present} 人（${occupancy.date}，来源：主系统授权的实时签到数据；口径=当日有效签到−有效签退，与主系统页面同源）`
+    : '在室人数没有数据来源（业务通道未连接或未取得授权），本工具无法提供，请勿据此回答人数问题');
 
   const labKey = normalizeLabName(lab.name);
   const matched: TimetableRow[] = effectiveSchedule(ds,date).filter(row=>normalizeLabName(row.labName)===labKey);
@@ -158,7 +184,7 @@ export function runQueryLabStatus(
       nextLesson,
       nextLessonReason
     },
-    occupancy: null,
+    occupancy,
     registryStatusNote: `档案状态「${STATUS_LABELS[lab.status] ?? lab.status}」随数据快照更新，非实时门禁`,
     suggestions: [],
     notes

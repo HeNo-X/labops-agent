@@ -432,8 +432,8 @@ import { runQueryLabStatus } from '../server/tools/query-lab-status.ts';
 import { runQueryFreeRooms } from '../server/tools/query-free-rooms.ts';
 import { getSession, rememberSession, resetSessionsForTest } from '../server/agent/session.ts';
 
-test('query_lab_status：返回房间档案与该日排课统计，occupancy 永远为 null', () => {
-  const r = runQueryLabStatus({ labName: 'E310', date: '2026-09-30' }, dataset(), NOW);
+test('query_lab_status：返回房间档案与该日排课统计，occupancy 无授权通道时为 null', async () => {
+  const r = await runQueryLabStatus({ labName: 'E310', date: '2026-09-30' }, dataset(), NOW);
   assert.equal(r.labName, 'E310');
   assert.equal(r.status, 'active');
   assert.equal(r.capacity, 100);
@@ -442,14 +442,14 @@ test('query_lab_status：返回房间档案与该日排课统计，occupancy 永
   assert.ok(r.notes.some((n) => n.includes('在室人数')));
 });
 
-test('query_lab_status：房间不存在时给可选房号，不编造', () => {
-  const r = runQueryLabStatus({ labName: 'E999' }, dataset(), NOW);
+test('query_lab_status：房间不存在时给可选房号，不编造', async () => {
+  const r = await runQueryLabStatus({ labName: 'E999' }, dataset(), NOW);
   assert.equal(r.labName, null);
   assert.deepEqual(r.suggestions, ['D517', 'D526', 'E310']);
 });
 
-test('query_lab_status：缺 labName 抛参数错误', () => {
-  assert.throws(() => runQueryLabStatus({}, dataset(), NOW), (e: unknown) => e instanceof ToolArgumentError);
+test('query_lab_status：缺 labName 抛参数错误', async () => {
+  await assert.rejects(() => runQueryLabStatus({}, dataset(), NOW), (e: unknown) => e instanceof ToolArgumentError);
 });
 
 test('F11：空闲主名单只含档案开放房间，关闭/停用进 excluded 并给理由', () => {

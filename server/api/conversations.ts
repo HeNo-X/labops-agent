@@ -1,4 +1,5 @@
 import {businessScope,isBusinessConnected,businessRequest} from '../business/bridge.ts';
+import {nativeDelegation} from '../security/context.ts';
 /**
  * 会话 API —— 持久化会话/消息/运行的 REST 与 SSE（M0/M1 加固版）
  * ============================================================================
@@ -111,7 +112,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
   }
 
   if (pathname === '/api/conversations' && method === 'GET') {
-    json(res, 200, { conversations: listConversations() });
+    json(res, 200, { conversations: listConversations().filter(c=>!nativeDelegation.getStore()?.sharedChat||c.mode==='chat') });
     return true;
   }
   if (pathname === '/api/conversations' && method === 'POST') {
@@ -122,7 +123,8 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
     if (rawTitle !== undefined && typeof rawTitle !== 'string') {
       return json(res, 400, { error: 'bad_title', message: 'title 必须是字符串' }), true;
     }
-    const mode = parseMode(raw['mode']) ?? 'task';
+    if(nativeDelegation.getStore()?.sharedChat&&raw['mode']&&raw['mode']!=='chat')return json(res,403,{message:'悬浮窗只能使用聊天模式'}),true;
+    const mode = nativeDelegation.getStore()?.sharedChat?'chat':parseMode(raw['mode']) ?? 'task';
     return json(res, 200, createConversation(typeof rawTitle === 'string' ? rawTitle : '', mode)), true;
   }
 
@@ -131,6 +133,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
     const conversationId = decodeURIComponent(convMatch[1]!);
     const isMessages = Boolean(convMatch[2]);
     if (!getConversationMeta(conversationId)) return json(res, 404, {error:'conversation_not_found'}), true;
+    if(nativeDelegation.getStore()?.sharedChat&&getConversationMeta(conversationId)?.mode!=='chat')return json(res,403,{message:'悬浮窗不能读取或操作任务会话'}),true;
 
     if (!isMessages && method === 'GET') {
       const meta = getConversationMeta(conversationId);
@@ -150,6 +153,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
       const raw = (body.value as Record<string, unknown>) ?? {};
       const title = raw['title'];
       const mode = parseMode(raw['mode']);
+      if(nativeDelegation.getStore()?.sharedChat&&mode&&mode!=='chat')return json(res,403,{message:'悬浮窗不能切换到任务模式'}),true;
       if (title !== undefined && (typeof title !== 'string' || !title.trim())) {
         return json(res, 400, { error: 'missing_title', message: 'title 必须是非空字符串' }), true;
       }
@@ -399,6 +403,9 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
       finalizeAssistantMessage(assistant.id, runId, finalStatus, answerText, {
         conversationId,
         authorityScope,
+        responseMode:meta.mode,
+        queriedAt:new Date().toISOString(),
+        scope:authorityScope,
         runId,
         engine:completedPayload?.['engine']||engine,
         sourceType,

@@ -17,10 +17,11 @@ export async function prepareSchedule(args:Record<string,unknown>,ctx:ToolContex
   }catch(e){return fail(e);}
 }
 export async function queryBusiness(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{
-  try{const context=await businessRequest('/context','GET',undefined,ctx.signal) as unknown as NativeContext;const view=(['duty','issues','notifications','closures','report','tasks','incidents','health'].includes(String(args['view']))?args['view']:'issues') as BusinessResult['view'];
+  try{const context=await businessRequest('/context','GET',undefined,ctx.signal) as unknown as NativeContext;const view=(['schedule','duty','issues','notifications','closures','report','tasks','incidents','health'].includes(String(args['view']))?args['view']:'issues') as BusinessResult['view'];
+    if(view==='schedule'){const date=typeof args['date']==='string'?args['date']:context.date;if(!isValidDateString(date))throw new Error('查询日期无效');context.date=date;context.timetable=effectiveSchedule(ctx.dataset,date) as unknown as NativeContext['timetable'];}
     const tasks=view==='tasks'?await businessRequest('/tasks','GET',undefined,ctx.signal) as unknown as BusinessResult['tasks']:undefined;
     const incidents=view==='incidents'?(await businessRequest('/incidents','GET',undefined,ctx.signal))['incidents'] as BusinessResult['incidents']:undefined;
-    const resourceHealth=view==='health'?await businessRequest('/health','GET',undefined,ctx.signal):undefined;
+    const resourceHealth=view==='health'?await businessRequest('/resource-health','GET',undefined,ctx.signal):undefined;
     let report:BusinessResult['report'];
     if(view==='report'){
       const date=typeof args['date']==='string'?args['date']:context.date;
@@ -47,10 +48,32 @@ export async function prepareIncident(args:Record<string,unknown>,ctx:ToolContex
  return result({view:'incidents',plan,incident:r['incident'] as BusinessResult['incident'],task:r['task'] as BusinessResult['task'],taskId:plan?.taskId||(r['incident'] as BusinessResult['incident'])?.taskId,incidentSet:r['candidateSet'] as BusinessResult['incidentSet'],impact:r['impact'] as BusinessResult['impact'],summary:plan?'故障事件方案已准备，等待本人核对全部对象并点击确认。':'故障事件草稿或联合候选已准备，教学安排尚未变更。'},ctx);
  }catch(e){return fail(e);}
 }
+export async function queryScheduled(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{
+ try{const p=args['view']==='results'?'/scheduled-results':args['view']==='preparation'?'/preparation-pack':'/scheduled-jobs';const data=await businessRequest(p,'GET',undefined,ctx.signal);return result({view:'jobs',scheduledData:data,summary:'定时规则或事实结果已按当前账号读取。'},ctx);}catch(e){return fail(e);}
+}
+export async function prepareScheduled(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{
+ if(ctx.mode==='chat')return fail(new Error('聊天模式不能设置规则，请切换任务模式'));
+ try{const data=await businessRequest('/scheduled-jobs/preview','POST',{...args,conversationId:ctx.conversationId||undefined},ctx.signal);return result({view:'jobs',scheduledRule:data['plan'] as BusinessResult['scheduledRule'],summary:'定时规则已预览，未来时间、样例与效果待本人核对确认；尚未激活规则。'},ctx);}catch(e){return fail(e);}
+}
 /** Deterministic routing is an honest fallback. Explicit buttons still own all commit authority. */
 export function planNativeDialogue(q:string,ctx:ToolContext):{tool:string;args:Record<string,unknown>;execute:()=>Promise<ToolExecution>}|null{
   const query=(args:Record<string,unknown>)=>({tool:'query_business_context',args,execute:()=>queryBusiness(args,ctx)});
+  const writes=/创建.*(?:规则|定时)|发布通知|调课|换教室|关闭工单|执行|自动.*(?:关闭|验收)|登记故障/.test(q);
+  if(ctx.mode==='chat'&&writes){if(/查询|查看|课表|有哪些|日报|排班/.test(q))return {tool:'query_business_context',args:{view:/日报/.test(q)?'report':/排班/.test(q)?'duty':'schedule'},execute:async()=>{const out=await queryBusiness({view:/日报/.test(q)?'report':/排班/.test(q)?'duty':'schedule',date:parseIntent(q,ctx.now).date?.date||ctx.now.date},ctx);if(out.ok&&out.resultKind==='business_plan')out.result.summary+='；执行部分请切换任务模式并人工确认。';return out;}};return {tool:'chat_mode_guard',args:{},execute:async()=>result({summary:'聊天模式仅查询；请切换任务模式准备方案并人工确认。'},ctx)};}
   const prepare=(args:Record<string,unknown>)=>({tool:'prepare_schedule_adjustment',args,execute:()=>prepareSchedule(args,ctx)});
+  if(/定时|订阅|每日.*提醒|每天.*日报|提醒.*规则/.test(q)){
+    if(ctx.mode==='chat'&&/创建|设置|新增|暂停|恢复|执行|修改/.test(q))return {tool:'chat_mode_guard',args:{},execute:async()=>result({summary:'请切换任务模式设置定时规则并人工确认。'},ctx)};
+    if(ctx.mode!=='chat'&&/创建|设置|新增/.test(q)){
+      const tm=/(\d{1,2})[:：](\d{2})/.exec(q),daily=/每天|每日|每个教学日/.test(q);
+      // Incomplete recurrence/recipient parsing must not silently become a daily self rule.
+      const unsupported=/每周|每月|每年|星期|周[一二三四五六日天]|班.*前|班.*开始|Cron|cron|\d{4}-\d{2}-\d{2}|给(?!我|本人|自己)|全校|全体|班级|角色|\d+\s*小时|仅|只保存|不要.*(?:发|提醒)|上午|下午|晚上|中午|早上|夜间|早晨|AM|PM|节假日|工作日|周末|除外|排除|不提醒|为(?!我|本人|自己).*?(?:设置|创建|订阅)|帮(?!我).*?(?:设置|创建|订阅)/i.test(q);
+      const kind=/未读.*通知/.test(q)?'notice_reminder':/停用.*到期/.test(q)?'closure_expiry':/资源.*风险|风险.*巡检/.test(q)?'resource_risk':/周报/.test(q)?'weekly_report':/值班/.test(q)?'duty_reminder':/明日|明天/.test(q)?'tomorrow_courses':/工单|催办/.test(q)?'due_followup':/日报/.test(q)?'daily_report':null;
+      if(!tm||!daily||unsupported||!kind||Number(tm[1])>23||Number(tm[2])>59)return {tool:'query_scheduled_jobs',args:{},execute:async()=>result({summary:'请在“定时任务与提醒”面板核对模板、每天/每周/正式班次前、时间与接收对象，预览后本人确认。本轮未创建规则方案。'},ctx)};
+      const args={action:'create',spec:{kind,calendarPolicy:/教学日/.test(q)?'teaching_days':'all_days',trigger:{type:'daily',time:tm[1]!.padStart(2,'0')+':'+tm[2]},recipients:[{kind:'user',userId:businessScope().principal?.username}],approvedEffects:['report','inbox']}};return {tool:'prepare_scheduled_job',args,execute:()=>prepareScheduled(args,ctx)};
+    }
+    return {tool:'query_scheduled_jobs',args:{view:/结果|执行记录/.test(q)?'results':'rules'},execute:()=>queryScheduled({view:/结果|执行记录/.test(q)?'results':'rules'},ctx)};
+  }
+  if(/准备包/.test(q))return {tool:'query_scheduled_jobs',args:{view:'preparation'},execute:()=>queryScheduled({view:'preparation'},ctx)};
   if(/我的工作|任务中心|未完成任务|恢复任务/.test(q))return query({view:'tasks'});
   if(/资源数据健康|资源健康|数据健康清单/.test(q))return query({view:'health'});
   if(/故障事件|联合方案|联合处置|多门课|几门课|登记故障/.test(q)){const incidentId=/incident-[a-f0-9-]+/.exec(q)?.[0];return {tool:'query_incident',args:{incidentId},execute:()=>queryIncident({incidentId},ctx)};}

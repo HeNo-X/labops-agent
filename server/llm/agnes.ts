@@ -88,6 +88,11 @@ export interface StreamOptions {
   messages: ChatMessage[];
   tools?: ToolSpec[];
   signal?: AbortSignal;
+  /**
+   * 可选：覆盖默认（Agnes）的调用目标 —— 由 server/llm/router.ts 按会话模式注入。
+   * 其余参数（超时/重试/maxTokens/温度）仍沿用 AGNES_* 的统一配置，避免两套口径。
+   */
+  provider?: { name: string; apiKey: string; baseUrl: string; model: string };
 }
 
 export function isAgnesConfigured(): boolean {
@@ -105,9 +110,14 @@ export function agnesStatus(): { configured: boolean; model: string; baseUrl: st
  * 抛出的 AgnesError 的 code 会被上层直接映射成 run_failed.code，不做二次包装。
  */
 export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGenerator<AgnesStreamEvent> {
-  const c = getConfig().agnes;
+  const base = getConfig().agnes;
+  // provider 由 router 按会话模式注入（聊天模式=DashScope / 任务模式=Agnes）；
+  // 未注入时行为与改造前完全一致（默认 Agnes），保证任务模式零变化。
+  const c = opts.provider
+    ? { ...base, apiKey: opts.provider.apiKey, baseUrl: opts.provider.baseUrl, model: opts.provider.model }
+    : base;
   if (!c.apiKey) {
-    throw new AgnesError('agnes_not_configured', '未配置 AGNES_API_KEY，无法调用 Agnes。', null, false);
+    throw new AgnesError('agnes_not_configured', '未配置大模型 API Key，无法调用。', null, false);
   }
 
   const url = `${c.baseUrl}/chat/completions`;

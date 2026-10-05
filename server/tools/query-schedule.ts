@@ -96,6 +96,7 @@ export function runQuerySchedule(
 
   const provenance: ScheduleQueryResult['provenance'] = {
     sourceType: ds.sourceType,
+      ...(ds.sourceRevision?{sourceRevision:ds.sourceRevision}:{}),
     sourceLabel: ds.sourceLabel,
     ...(ds.meta.snapshotAt ? { snapshotAt: ds.meta.snapshotAt } : {}),
     ...(ds.meta.sourceSha256Prefix ? { sourceSha256Prefix: ds.meta.sourceSha256Prefix } : {}),

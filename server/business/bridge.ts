@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { getDb } from '../persistence/db.ts';
-import { currentActor } from '../security/context.ts';
+import { currentActor,nativeDelegation,requestTrace } from '../security/context.ts';
 import { forgetOwnerSessions } from '../agent/session.ts';
 import { readJsonBody } from '../api/agent-chat.ts';
 import { buildFromSnapshotLike, loadDataset, type Dataset } from '../data/store.ts';
@@ -12,6 +12,8 @@ import { PROJECT_ROOT } from '../config.ts';
 type Profile={username?:string;account?:string;identity?:string;className?:string;mustChangePassword?:boolean};
 type Connection = {token:string;profile:string};
 const ownerId=()=>currentActor()?.id??'';
+const requestHealth=new Map<string,{lastSuccessfulRequest?:{at:string;route:string};lastError?:{at:string;status:number;code:string}}>();
+function recordRequest(route:string,e?:unknown){const key=ownerId();if(!key)return;if(requestHealth.size>1000)requestHealth.delete(requestHealth.keys().next().value!);const h=requestHealth.get(key)||{};if(e){const x=e as {status?:number;code?:string};h.lastError={at:new Date().toISOString(),status:x.status||502,code:x.code||'upstream_unavailable'};}else h.lastSuccessfulRequest={at:new Date().toISOString(),route};requestHealth.set(key,h);}
 function tables(){getDb().exec(`CREATE TABLE IF NOT EXISTS business_connections(ownerId TEXT PRIMARY KEY, token TEXT NOT NULL, profile TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS business_generations(ownerId TEXT PRIMARY KEY, generation INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'disconnected');`);}
 function credentialKey():Buffer{
@@ -24,6 +26,7 @@ function credentialKey():Buffer{
 function encrypt(token:string):string{const iv=crypto.randomBytes(12),cipher=crypto.createCipheriv('aes-256-gcm',credentialKey(),iv);const data=Buffer.concat([cipher.update(token,'utf8'),cipher.final()]);return 'enc:v1:'+Buffer.concat([iv,cipher.getAuthTag(),data]).toString('base64');}
 function decrypt(token:string):string{if(!token.startsWith('enc:v1:'))return token;const data=Buffer.from(token.slice(7),'base64'),dec=crypto.createDecipheriv('aes-256-gcm',credentialKey(),data.subarray(0,12));dec.setAuthTag(data.subarray(12,28));return Buffer.concat([dec.update(data.subarray(28)),dec.final()]).toString('utf8');}
 function connection(owner=ownerId()):Connection|null{
+  const delegated=nativeDelegation.getStore();if(delegated&&owner===ownerId())return {token:delegated.token,profile:JSON.stringify(delegated.profile)};
   tables();const c=getDb().prepare('SELECT token,profile FROM business_connections WHERE ownerId=?').get(owner) as Connection|undefined;
   if(c&&!c.token.startsWith('enc:v1:'))getDb().prepare('UPDATE business_connections SET token=? WHERE ownerId=?').run(encrypt(c.token),owner);
   return c?{...c,token:decrypt(c.token)}:null;
@@ -50,10 +53,17 @@ function baseUrl():string{
   if(u.protocol!=='https:'&&!(u.protocol==='http:'&&['localhost','127.0.0.1','lab'].includes(u.hostname)))throw new Error('原系统地址必须使用 HTTPS（本地与 Docker lab 服务例外）');
   if(u.username||u.password||u.search||u.hash)throw new Error('原系统连接地址无效');return u.origin;
 }
+export {encrypt as encryptCredential,decrypt as decryptCredential,baseUrl as nativeBaseUrl,remote as nativeRemote};
+export function rememberNativePrincipal(profile:NativeDelegationProfile,token:string){
+ tables();const old=getDb().prepare('SELECT profile FROM business_connections WHERE ownerId=?').get(ownerId()) as {profile:string}|undefined;
+ if(!old)resetAuthority(ownerId(),'connected');
+ getDb().prepare('INSERT INTO business_connections VALUES (?,?,?) ON CONFLICT(ownerId) DO UPDATE SET token=excluded.token,profile=excluded.profile').run(ownerId(),encrypt(token),JSON.stringify(profile));
+}
+type NativeDelegationProfile=NonNullable<ReturnType<typeof nativeDelegation.getStore>>['profile'];
 async function remote(p:string,method:string,token?:string,body?:unknown,signal?:AbortSignal):Promise<Record<string,unknown>>{
   const timeout=AbortSignal.timeout(10000);
-  const res=await fetch(baseUrl()+p,{method,headers:{'Content-Type':'application/json',...(token?{Authorization:`Bearer ${token}`}:{})},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:signal?AbortSignal.any([signal,timeout]):timeout,redirect:'error'});
-  const result=await res.json() as Record<string,unknown>;
+  const res=await fetch(baseUrl()+p,{method,headers:{'Content-Type':'application/json',...(requestTrace.getStore()?{'X-Request-ID':requestTrace.getStore()!}:{}),...(token?{Authorization:`Bearer ${token}`}:{})},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:signal?AbortSignal.any([signal,timeout]):timeout,redirect:'error'});
+  let result:Record<string,unknown>;try{result=await res.json() as Record<string,unknown>;}catch{throw Object.assign(new Error('原系统返回非JSON响应，请检查反向代理与服务地址'),{status:502,code:'upstream_invalid_response'});}
   if(!res.ok)throw Object.assign(new Error(String(result['message']||result['error']||'原系统请求失败')),{status:res.status,code:result['error']});return result;
 }
 function checkPrincipal(raw:Record<string,unknown>,c:Connection){
@@ -65,8 +75,8 @@ function checkPrincipal(raw:Record<string,unknown>,c:Connection){
 }
 export async function businessRequest(p:string,method='GET',body?:unknown,signal?:AbortSignal):Promise<Record<string,unknown>>{
   const c=connection();if(!c)throw Object.assign(new Error('请先连接原系统账号'),{status:401});
-  try{const r=await remote('/api/integration'+p,method,c.token,body,signal);if(connection()?.token!==c.token)throw Object.assign(new Error('业务连接已变化，请重新查询'),{status:409,code:'scope_changed'});checkPrincipal(r,c);return r;}
-  catch(e){if([401,403].includes((e as {status?:number}).status||0)&& (p==='/context'||p==='/snapshot')){getDb().prepare('DELETE FROM business_connections WHERE ownerId=?').run(ownerId());resetAuthority(ownerId(),'expired');}throw e;}
+  try{const r=await remote('/api/integration'+p,method,c.token,body,signal);if(connection()?.token!==c.token)throw Object.assign(new Error('业务连接已变化，请重新查询'),{status:409,code:'scope_changed'});checkPrincipal(r,c);recordRequest(p);return r;}
+  catch(e){recordRequest(p,e);if([401,403].includes((e as {status?:number}).status||0)&& (p==='/context'||p==='/snapshot')){getDb().prepare('DELETE FROM business_connections WHERE ownerId=?').run(ownerId());resetAuthority(ownerId(),'expired');}throw e;}
 }
 export async function loadAuthorizedDataset(signal?:AbortSignal):Promise<Dataset>{
   if(!connection()){tables();const r=getDb().prepare('SELECT state FROM business_generations WHERE ownerId=?').get(ownerId()) as {state:string}|undefined;if(r?.state==='expired')throw new Error('原系统授权已失效，请重新连接账号或明确断开后使用演示数据');return loadDataset();}const raw=await businessRequest('/snapshot','GET',undefined,signal);return buildFromSnapshotLike(raw,'live','',[]);
@@ -79,6 +89,7 @@ export async function handleBusinessApi(req:IncomingMessage,res:ServerResponse,p
   const send=(status:number,data:unknown)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));};
   try{
     const method=req.method||'GET';
+    if(nativeDelegation.getStore()&&['/api/business/connect','/api/business/disconnect'].includes(p))return send(409,{message:'当前使用主系统统一身份，请通过退出登录切换账号',code:'unified_login'});
     if(p==='/api/business/status'&&method==='GET'){
       const c=connection();let profile=c?JSON.parse(c.profile):null;let state='disconnected';
       if(c){try{const r=await businessRequest('/context');profile=r['actor'];state='connected';}catch(e){state=isBusinessConnected()?'unavailable':'expired';return send(200,{configured:Boolean(process.env.LABOPS_BUSINESS_URL),connected:false,state,profile:null,message:(e as Error).message});}}
@@ -98,19 +109,36 @@ export async function handleBusinessApi(req:IncomingMessage,res:ServerResponse,p
       resetAuthority(ownerId(),'connected');getDb().prepare('INSERT INTO business_connections VALUES (?,?,?) ON CONFLICT(ownerId) DO UPDATE SET token=excluded.token,profile=excluded.profile').run(ownerId(),encrypt(token),JSON.stringify(profile));
       return send(200,{connected:true,profile,scopeKey:businessScope().scopeKey});
     }
-    const endpoint=p.slice('/api/business/proxy'.length);
-    const allowedGet=endpoint==='/context'||endpoint==='/resource-health'||endpoint==='/tasks'||endpoint==='/incidents'||/^\/incidents\/incident-[a-f0-9-]+$/.test(endpoint)||/^\/tasks\/task-[a-f0-9-]+$/.test(endpoint)||/^\/report\/\d{4}-\d{2}-\d{2}$/.test(endpoint)||/^\/(operations\/business-plan-|plans\/plan-)[a-f0-9-]+$/.test(endpoint);
-    const allowedPost=endpoint==='/incidents/draft'||/^\/incidents\/incident-[a-f0-9-]+\/(analyze|preview|restore|takeover)$/.test(endpoint)||['/schedule/preview','/handover/preview','/workflow/preview','/plans/commit','/plans/reject','/shifts','/resources','/calendar','/notifications','/notifications/read'].includes(endpoint);
+    let endpoint=p.slice('/api/business/proxy'.length);
+    const cleanEndpoint=endpoint.split('?')[0];
+    if(method==='GET'&&endpoint.startsWith('/evidence/')){const q=new URL(req.url||'/', 'http://localhost').searchParams;if([...q].some(([k,v])=>!['q','device','targetKind','targetId'].includes(k)||v.length>200))return send(400,{message:'证据查询参数无效'});const search=q.toString();if(search)endpoint+='?'+search;}
+
+    const allowedGet=endpoint==='/diagnostics'||['/evidence/attachments','/evidence/manuals'].includes(cleanEndpoint)||/^\/evidence\/attachments\/attachment-[a-f0-9-]+$/.test(cleanEndpoint)||['/scheduled-jobs','/scheduled-results','/reminder-preferences','/preparation-pack'].includes(endpoint)||(/^\/scheduled-jobs\/job-[a-f0-9-]+$/.test(endpoint)||/^\/scheduled-jobs\/plans\/jobplan-[a-f0-9-]+$/.test(endpoint))||endpoint==='/context'||endpoint==='/resource-health'||endpoint==='/tasks'||endpoint==='/incidents'||/^\/incidents\/incident-[a-f0-9-]+$/.test(endpoint)||/^\/tasks\/task-[a-f0-9-]+$/.test(endpoint)||/^\/report\/\d{4}-\d{2}-\d{2}$/.test(endpoint)||/^\/(operations\/business-plan-|plans\/plan-)[a-f0-9-]+$/.test(endpoint);
+    const allowedPost=['/evidence/attachments','/evidence/manuals','/scheduled-jobs/preview','/scheduled-jobs/confirm','/reminder-preferences'].includes(endpoint)||endpoint==='/incidents/draft'||/^\/incidents\/incident-[a-f0-9-]+\/(analyze|preview|restore|takeover)$/.test(endpoint)||['/schedule/preview','/handover/preview','/workflow/preview','/plans/commit','/plans/reject','/shifts','/resources','/calendar','/notifications','/notifications/read'].includes(endpoint);
     if(!p.startsWith('/api/business/proxy/')||method==='GET'&&!allowedGet||method==='POST'&&!allowedPost||!['GET','POST'].includes(method))return send(404,{message:'业务入口不存在'});
     let body:unknown;
-    if(method==='POST'){const input=await readJsonBody(req);if(!input.ok)return send(input.status,{message:input.message});body=input.value;}
+    if(method==='POST'){const input=await readJsonBody(req,endpoint.startsWith('/evidence/')?5*1024*1024:16*1024);if(!input.ok)return send(input.status,{message:input.message});body=input.value;}
     // Every browser decision is bound to the currently validated delegated principal.
     if(endpoint!=='/context')await businessRequest('/context');
     const record=body as Record<string,unknown>|undefined;
     if(method==='POST'&&(typeof record?.['scopeKey']!=='string'||!record['scopeKey']))return send(409,{message:'业务操作缺少当前授权范围，请重新查询',code:'scope_required'});
     if(record?.['scopeKey']&&record['scopeKey']!==businessScope().scopeKey)return send(409,{message:'业务账号或授权范围已变化，请重新查询和确认',code:'scope_changed'});
     if(record?.['conversationId']&&!(getDb().prepare('SELECT id FROM conversations WHERE id=? AND ownerId=?').get(record['conversationId'] as string,ownerId())))return send(403,{message:'会话不属于当前工作区',code:'conversation_forbidden'});
+    if(method==='POST'&&!['/notifications/read','/reminder-preferences'].includes(endpoint)){
+      const conversations=new Set<string>();if(typeof record?.['conversationId']==='string')conversations.add(record['conversationId']);
+      if(endpoint==='/scheduled-jobs/confirm'&&typeof record?.['planId']==='string'){const linked=await businessRequest('/scheduled-jobs/plans/'+record['planId']);const id=String((linked['plan'] as {conversationId?:string}).conversationId||'');if(id)conversations.add(id);}
+      if(typeof record?.['planId']==='string'&&endpoint.startsWith('/plans/')){
+        const linked=await businessRequest('/plans/'+record['planId']);const p=linked['plan'] as {taskId?:string;clientCardId?:string};
+        if(p.taskId){const t=await businessRequest('/tasks/'+p.taskId);const id=String((t['task'] as {conversationId?:string}).conversationId||'');if(id)conversations.add(id);}
+        if(p.clientCardId){const m=getDb().prepare('SELECT conversationId FROM messages WHERE id=?').get(p.clientCardId.split(':')[0]!) as {conversationId:string}|undefined;if(m)conversations.add(m.conversationId);}
+      }
+      for(const id of conversations){const c=getDb().prepare('SELECT mode FROM conversations WHERE id=? AND ownerId=? AND deletedAt IS NULL').get(id,ownerId()) as {mode:string}|undefined;if(!c||c.mode!=='task')return send(403,{message:'方案所属会话为聊天模式或不在当前工作区，请在任务模式重新准备',code:'mode_forbidden'});}
+    }
     const out=await businessRequest(endpoint,method,body);
+    if(endpoint==='/diagnostics'&&effectiveRole()==='admin'){
+      let writable=true;try{getDb().prepare('UPDATE business_connections SET profile=profile WHERE 0').run();}catch{writable=false;}
+      out['agentDatabaseWritable']=writable;out['credentialKeyReady']=credentialKey().length===32;out['authMode']=process.env.LABOPS_AUTH_MODE||'native';out['allowedOrigins']=(process.env.LABOPS_ALLOWED_ORIGINS||'').split(',').filter(Boolean);out['requestHealth']=requestHealth.get(ownerId())||{};
+    }
     if(record?.['conversationId']&&out['task']){
       const task=out['task'] as {id:string;kind:string},plan=out['plan'] as {id:string}|undefined;
       rememberBusinessTask(record['conversationId'] as string,{task,taskId:task.id,plan,planId:plan?.id||null,view:task.kind==='schedule.move'?'schedule':task.kind.startsWith('incident.')?'incidents':task.kind.startsWith('duty.')?'duty':task.kind.startsWith('issue.')?'issues':'notifications',date:record['date'],sourceLesson:out['source'],candidates:out['candidates']||[],candidateSetId:out['candidateSetId'],scopeKey:businessScope().scopeKey,sourceRevision:out['revision']});

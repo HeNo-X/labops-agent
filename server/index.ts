@@ -13,6 +13,8 @@
 import http from 'node:http';
 import { documents } from './tools/knowledge.ts';
 import { currentActor } from './security/context.ts';
+import {importHistory} from './api/history-import.ts';
+import {handleNativeAuth,authMode} from './security/native-auth.ts';
 import { effectiveRole, handleBusinessApi, loadAuthorizedDataset } from './business/bridge.ts';
 import { withHttpIdentity } from './security/http.ts';
 import fs from 'node:fs';
@@ -24,7 +26,7 @@ import { handleConversations } from './api/conversations.ts';
 import { handleTasksApi } from './api/tasks.ts';
 import { loadDataset, verifySnapshotIntegrity } from './data/store.ts';
 import { runtimeCapabilities } from './agent/run.ts';
-import { isAgnesConfigured } from './llm/agnes.ts';
+import { engineForMode } from './llm/router.ts';
 import { loggerFor } from './obs/trace.ts';
 import { PROMPT_VERSION } from './agent/prompts.ts';
 
@@ -139,20 +141,24 @@ function serveStatic(res: http.ServerResponse, urlPath: string): void {
 async function route(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   const p = url.pathname;
+  if(await handleNativeAuth(req,res,p))return;
+  if(p==='/api/shared-chat/history-import'||p==='/api/chat/history-import'){await importHistory(req,res);return;}
+  if(p.startsWith('/api/shared-chat/conversations')){await handleConversations(req,res,p.replace('/api/shared-chat/','/api/'));return;}
 
   if (p.startsWith('/api/knowledge/') && req.method === 'GET') { const doc=documents().find(d=>d.id===p.slice('/api/knowledge/'.length)&&d.roles.includes(effectiveRole(currentActor()?.role||'student'))); json(res,doc?200:404,doc||{error:'document_not_found'}); return; }
   if (p.startsWith('/api/business/')) { await handleBusinessApi(req,res,p); return; }
 
   // 健康检查：给运行状态一个可机读的入口，也方便部署后验证
   if (req.method === 'GET' && (p === '/api/agent/health' || p === '/api/health')) {
-    const ds = loadDataset();
+    const ds = authMode()==='native'?null:loadDataset();
     json(res, 200, {
       ok: true,
       service: 'labops-agent',
-      version: '0.4.0',
-      stage: 'reliable-native-workflows',
+      version:'0.5.0',build:process.env.BUILD_ID||'20261005-unified-chat-scheduler',contractVersion:3,
+      stage:'unified-chat-persistent-scheduler',
       capability: runtimeCapabilities(),
-      data: {
+      authMode:authMode(),
+      data: ds?{
         sourceType: ds.sourceType,
         sourceLabel: ds.sourceLabel,
         snapshotAt: ds.meta.snapshotAt ?? null,
@@ -161,8 +167,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
         term: ds.term,
         loadedAt: ds.loadedAt,
         warnings: ds.warnings
-      },
-      snapshotIntegrity: verifySnapshotIntegrity(),
+      }:{sourceType:'authorized_api',sourceLabel:'登录后按实际账号查询主系统',authorized:false,connected:null},
+      snapshotIntegrity: ds?verifySnapshotIntegrity():null,
       promptVersion: PROMPT_VERSION
     });
     return;
@@ -176,7 +182,8 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       sourceLabel: ds.sourceLabel,
       // 引擎必须在第一次任务之前就能告诉前端 —— 否则页面会默认声称"在用 Agnes"，
       // 而服务端其实处于演示引擎模式（界面上的机制说明就成了假话）。
-      engine: isAgnesConfigured() ? 'agnes' : 'demo',
+      engine: engineForMode('task'),
+      engineByMode: { chat: engineForMode('chat'), task: engineForMode('task') },
       provenance: {
         snapshotAt: ds.meta.snapshotAt ?? null,
         sourceSha256Prefix: ds.meta.sourceSha256Prefix ?? null,
@@ -239,7 +246,7 @@ function main(): void {
   const cfg = getConfig();
   let ds;
   try {
-    ds = loadDataset(true);
+    ds = authMode()==='native'?null:loadDataset(true);
   } catch (err) {
     console.error('[启动失败] 数据层无法初始化：', (err as Error).message);
     process.exit(1);
@@ -264,21 +271,23 @@ function main(): void {
     console.log(' LabOps Agent · 可靠任务助手与业务工作台 服务端已启动');
     console.log('────────────────────────────────────────────────────────────');
     for (const line of describeConfig(cfg)) console.log(' ' + line);
-    console.log(' 数据来源        : ' + ds!.sourceLabel + '（' + ds!.sourceType + '）');
-    console.log(' 规模            : labs ' + ds!.labs.length + ' / openLabs ' + ds!.openLabs.length + ' / timetable ' + ds!.timetable.length);
-    console.log(' 学期            : ' + ds!.term.term + '，起始日 ' + (ds!.term.termStart ?? '未配置'));
-    console.log(' 快照完整性      : ' + verifySnapshotIntegrity());
+    if(ds){
+      console.log(' 数据来源        : ' + ds.sourceLabel + '（' + ds.sourceType + '）');
+      console.log(' 规模            : labs ' + ds.labs.length + ' / openLabs ' + ds.openLabs.length + ' / timetable ' + ds.timetable.length);
+      console.log(' 学期            : ' + ds.term.term + '，起始日 ' + (ds.term.termStart ?? '未配置'));
+      console.log(' 快照完整性      : ' + verifySnapshotIntegrity());
+    }else console.log(' 数据来源        : 登录后按实际主系统账号授权实时查询；健康检查不代表用户已授权');
     console.log(' Prompt 版本     : ' + PROMPT_VERSION);
     console.log(' 监听            : http://' + cfg.host + ':' + cfg.port);
     console.log(' API             : GET  /api/agent/health   GET /api/state   POST /api/agent/chat (SSE)');
     console.log('                   GET /api/capabilities  GET /api/tasks  POST /api/tasks/:id/decisions');
-    if (ds!.warnings.length) {
+    if (ds?.warnings.length) {
       console.log(' 载入告警:');
-      for (const w of ds!.warnings) console.log('   - ' + w);
+      for (const w of ds.warnings) console.log('   - ' + w);
     }
     if (!cfg.agnes.apiKey) {
       console.log(' ');
-      console.log(' ⚠️  未配置 AGNES_API_KEY → 当前运行在【演示引擎】模式（服务端规则解析）。');
+      console.log(authMode()==='native'?' 未配置 AGNES_API_KEY → 使用确定性事实与固定规则引擎，未调用大模型。':' 未配置 AGNES_API_KEY → 使用隔离演示引擎。');
       console.log('    界面与回答都会明确标注；数据来源不受影响。');
       console.log('    配置 .env 后重启即可切换到 Agnes 3.0 Flash。');
     }

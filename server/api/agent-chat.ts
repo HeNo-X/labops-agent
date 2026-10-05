@@ -24,7 +24,7 @@ import { resolveActor } from '../operations/identity.ts';
 
 const MAX_BODY_BYTES = 16 * 1024;
 
-export async function readJsonBody(req: IncomingMessage): Promise<{ ok: true; value: unknown } | { ok: false; code: string; message: string; status: number }> {
+export async function readJsonBody(req: IncomingMessage,maxBytes=MAX_BODY_BYTES): Promise<{ ok: true; value: unknown } | { ok: false; code: string; message: string; status: number }> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -36,8 +36,8 @@ export async function readJsonBody(req: IncomingMessage): Promise<{ ok: true; va
     };
     req.on('data', (c: Buffer) => {
       size += c.length;
-      if (size > MAX_BODY_BYTES) {
-        fail('body_too_large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`, 413);
+      if (size > maxBytes) {
+        fail('body_too_large', `请求体超过 ${maxBytes} 字节上限`, 413);
         req.destroy();
         return;
       }

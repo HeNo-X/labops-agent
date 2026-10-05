@@ -141,6 +141,7 @@ export function runQueryFreeRooms(
   const provenance: ScheduleQueryResult['provenance'] = {
     sourceRevision: ds.sourceRevision,
     sourceType: ds.sourceType,
+      ...(ds.sourceRevision?{sourceRevision:ds.sourceRevision}:{}),
     sourceLabel: ds.sourceLabel,
     ...(ds.meta.snapshotAt ? { snapshotAt: ds.meta.snapshotAt } : {}),
     ...(ds.meta.sourceSha256Prefix ? { sourceSha256Prefix: ds.meta.sourceSha256Prefix } : {}),

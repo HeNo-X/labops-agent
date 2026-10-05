@@ -1,3 +1,4 @@
+import {renderBusinessFacts} from '../business/fact-text.ts';
 import type { KnowledgeResult, BusinessPlanResult } from '../../shared/types.ts';
 /**
  * 演示引擎 —— 不依赖大模型的确定性兜底（无 AGNES_API_KEY 时启用）
@@ -432,11 +433,20 @@ export async function runDemoTool(tool: string, args: Record<string, unknown>, c
 /** 把结构化结果渲染成可读回答（不调用模型）。**结论式短文案**：明细指向结构化结果卡，不逐条重复 */
 export function renderDemoAnswer(
   result: ScheduleQueryResult | { kind: ToolResultKind; payload: unknown },
-  extras: { dateWasDefaulted: boolean; periodFiltered: boolean }
+  extras: { dateWasDefaulted: boolean; periodFiltered: boolean; textOnly?:boolean; scopeLabel?:string }
 ): string {
+  if(extras.textOnly){
+    const kind='kind' in result?result.kind:'schedule',raw=('kind' in result?result.payload:result) as {provenance?:{queryTime?:string;sourceRevision?:string;sourceSha256Prefix?:string;coverage?:string}};
+    const base=renderDemoAnswer(result,{...extras,textOnly:false}).replace(/；逐节明细见下方课表卡。/g,'。').replace(/明细见下方结果卡。/g,'');
+    if(kind==='business_plan')return base;
+    const lines=[base];
+    if(kind==='schedule')for(const r of (raw as ScheduleQueryResult).lessons)lines.push(`• ${r.startTime}—${r.endTime} ${r.periodLabel}｜${r.courseName}｜${r.labName}｜班级 ${(r.classNames?.length?r.classNames:[r.className]).join('、')||'未知'}｜教师 ${r.teacher||'未录入'}｜编号 ${r.timetableId}`);
+    lines.push(`查询时间：${raw.provenance?.queryTime||'未提供'}；范围：${extras.scopeLabel||'当前账号授权范围'}；数据版本：${raw.provenance?.sourceRevision||raw.provenance?.sourceSha256Prefix||'未提供'}；覆盖：${raw.provenance?.coverage||'见上述查询说明'}。`);
+    return lines.join('\n');
+  }
   if ('kind' in result) {
     if (result.kind === 'knowledge') { const r=result.payload as KnowledgeResult; return r.summary+'\n'+r.scope+'\n'+r.hits.map(h=>h.title+'（v'+h.version+'）\n'+h.paragraphs.map(p=>p.locator+' '+p.text).join('\n')).join('\n\n'); }
-    if (result.kind === 'business_plan') return (result.payload as BusinessPlanResult).summary+'\n请在消息内核对方案，确认后提交并回查。';
+    if (result.kind === 'business_plan') return renderBusinessFacts(result.payload as BusinessPlanResult);
     if (result.kind === 'lab_status') return renderLabStatusAnswer(result.payload as LabStatusResult);
     if (result.kind === 'free_rooms') return renderFreeRoomsAnswer(result.payload as FreeRoomsResult);
     if (result.kind === 'operation_proposal') return renderProposalAnswer(result.payload as Proposal);

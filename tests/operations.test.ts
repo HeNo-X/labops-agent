@@ -360,7 +360,9 @@ test('能力协商：capabilities 描述沙盒环境与当前身份', async () =
   const caps = typeRegistry.toolNames();
   assert.ok(caps.includes('prepare_issue_ticket'));
   assert.ok(caps.includes('create_operations_report'));
-  assert.equal(caps.length, 15, '7 个只读 + 8 个准备/草稿工具');
+  assert.equal(caps.length,17,'8 个只读 + 9 个准备/草稿工具（含定时规则）');
+  assert.ok(caps.includes('query_scheduled_jobs'));
+  assert.ok(caps.includes('prepare_scheduled_job'));
 });
 
 after(async () => {

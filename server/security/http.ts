@@ -1,14 +1,16 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { getDb } from '../persistence/db.ts';
-import { requestIdentity } from './context.ts';
+import { requestIdentity,requestTrace } from './context.ts';
 import { isSandboxRole } from '../operations/identity.ts';
 import { SANDBOX_ROLE_LABELS } from '../../shared/operations-contract.ts';
+import {authMode,authenticateNative,withNativeDelegation} from './native-auth.ts';
 
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
 function reject(res: ServerResponse, status: number, message: string): void {
+  if(status===429)res.setHeader('Retry-After','60');
   res.writeHead(status, {'Content-Type':'application/json; charset=utf-8'});
-  res.end(JSON.stringify({error: status === 429 ? 'rate_limited' : 'identity_unavailable', message}));
+  res.end(JSON.stringify({error:status===429?'rate_limited':status===403?'forbidden':status===401?'authentication_required':'identity_unavailable', message,requestId:res.getHeader('X-Request-ID')}));
 }
 function allowance(bucket: string, limit: number, duration: number): boolean {
   const db = getDb();
@@ -22,13 +24,26 @@ const limit = (name: string, fallback: number) => Math.max(1, Number(process.env
 
 /** Demo identity is a random server-issued browser session, never a public shared role ID. */
 export async function withHttpIdentity(req: IncomingMessage, res: ServerResponse, next: () => Promise<void>): Promise<void> {
+  const requestId=typeof req.headers['x-request-id']==='string'&&/^[A-Za-z0-9_-]{8,100}$/.test(req.headers['x-request-id'])?req.headers['x-request-id']:randomBytes(12).toString('hex');res.setHeader('X-Request-ID',requestId);
+  return requestTrace.run(requestId,()=>authenticateRequest(req,res,next));
+}
+async function authenticateRequest(req:IncomingMessage,res:ServerResponse,next:()=>Promise<void>):Promise<void>{
   if (!req.url?.startsWith('/api/') || req.url.startsWith('/api/health') || req.url.startsWith('/api/agent/health')) return next();
-  if (process.env.LABOPS_AUTH_MODE && process.env.LABOPS_AUTH_MODE !== 'demo') {
-    return reject(res, 503, '当前构建仅允许隔离演示身份；生产身份适配尚未启用。');
-  }
   const origin = req.headers.origin;
   const allowed = (process.env.LABOPS_ALLOWED_ORIGINS || '').split(',').filter(Boolean);
-  if(origin){let host='';try{host=new URL(origin).host;}catch{return reject(res,403,'请求来源无效');}if(host!==req.headers.host&&!allowed.includes(origin))return reject(res,403,'请求来源不受信任');}
+  if(origin){let host='';try{host=new URL(origin).host;}catch{return reject(res,403,'请求来源无效');}if((host!==req.headers.host||!origin.startsWith((process.env.LABOPS_SECURE_COOKIE==='1'?'https:':'http:')+'//'))&&!allowed.includes(origin))return reject(res,403,'请求来源不受信任');}
+  const mode=authMode();
+  if(!['demo','native'].includes(mode))return reject(res,503,'认证模式无效，请配置native（主系统统一登录）或明确的隔离demo');
+  if(req.url.startsWith('/api/auth/'))return next();
+  if(mode==='native'||req.url.startsWith('/api/shared-chat/')){
+    try{const delegated=await authenticateNative(req);await withNativeDelegation(delegated,async()=>{
+      const actor=requestIdentity.getStore()!;
+      if(req.method==='POST'&&/\/messages(?:\?|$)|\/agent\/chat(?:\?|$)/.test(req.url||'')){
+        if(!allowance(`minute:${actor.id}`,limit('LABOPS_RUNS_PER_MINUTE',12),60000)||!allowance(`day:${actor.id}`,limit('LABOPS_RUNS_PER_DAY',100),86400000)||!allowance('global-day',limit('LABOPS_GLOBAL_RUNS_PER_DAY',1000),86400000))return reject(res,429,'已达到模型调用限额，请稍后再试');
+      }
+      await next();
+    });}catch(e){if(!res.headersSent)reject(res,(e as {status?:number}).status||502,(e as Error).message);}return;
+  }
   const db = getDb();
   const now = Date.now();
   db.prepare('DELETE FROM demo_sessions WHERE expiresAt < ?').run(now);

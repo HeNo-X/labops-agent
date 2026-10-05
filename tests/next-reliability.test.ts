@@ -1,3 +1,5 @@
+// Legacy regression fixture explicitly uses the isolated demo workspaces.
+process.env.LABOPS_AUTH_MODE='demo';
 import {registerHooks} from 'node:module';
 registerHooks({resolve(specifier,context,next){if(specifier.startsWith('@shared/'))return next(new URL('../shared/'+specifier.slice(8)+'.ts',import.meta.url).href,context);if(specifier.startsWith('.')&&!/\.[a-z]+$/i.test(specifier)&&context.parentURL?.includes('/web/'))return next(new URL(specifier+'.ts',context.parentURL).href,context);return next(specifier,context);}});
 import {test,after} from 'node:test';

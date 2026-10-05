@@ -1,3 +1,4 @@
+import {renderBusinessFacts} from '../business/fact-text.ts';
 import { planNativeDialogue, verifiedRecommendation } from '../tools/business.ts';
 import type { BusinessResult } from '../../shared/business.ts';
 /**
@@ -35,7 +36,8 @@ import { loggerFor, newTraceId, Stopwatch } from '../obs/trace.ts';
 import type { Logger } from '../obs/trace.ts';
 import { describeWeek, serverNow } from '../time/term.ts';
 import type { ServerNow } from '../time/term.ts';
-import { isAgnesConfigured, AgnesError, streamChat } from '../llm/agnes.ts';
+import { AgnesError } from '../llm/agnes.ts';
+import { engineForMode, streamChatWithFallback } from '../llm/router.ts';
 import type { ChatMessage, TokenUsage } from '../llm/agnes.ts';
 import { executeTool, toolSpecs, toolsForMode } from '../tools/registry.ts';
 import { availableRoomNames } from '../tools/query-schedule.ts';
@@ -134,7 +136,8 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   }
 
   const sourceType: DataSourceType = ds.sourceType;
-  const engine: EngineType = isAgnesConfigured() ? 'agnes' : 'demo';
+  const runMode: 'chat' | 'task' = input.mode === 'chat' ? 'chat' : 'task';
+  const engine: EngineType = engineForMode(runMode);
   const intent: Intent = parseIntent(question, now);
 
   // ---- 会话承接（阶段 2A）：缺房间/日期时显式沿用上一问，且必须留痕 ----
@@ -244,7 +247,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
       intent.labName=String(transformation.args['labName']);intent.date={date:String(transformation.args['date']),raw:'本轮变更查询',source:'重新取得对应范围的课表'};commitContext();yield* streamText(answer,emit,input.signal);yield emit('run_completed',{answer,steps:1,toolCalls:1,ms:watch.ms,sourceType,engine:'facts',strategy:'verified_query_transform'} satisfies RunCompletedPayload);return;
     }
     commitContext();
-    if (engine === 'demo') {
+    if (engine === 'demo'||(convMode==='chat'&&isBusinessConnected()&&planNativeDialogue(question,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode}))) {
       yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode });
     } else {
       yield* runAgnesEngine({
@@ -310,7 +313,7 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
     const native=await nativePlan.execute();
     if(a.mode==='chat'&&native.ok&&native.resultKind==='business_plan'&&native.result.plan){yield a.emit('run_failed',{code:'mode_forbidden',message:'聊天模式仅可查询，准备办理单请切换任务模式'});return;}
     yield a.emit('tool_result',{step:1,toolCallId:'native-dialogue',tool:nativePlan.tool,ok:native.ok,ms:Date.now()-startedAt,sourceType:a.sourceType,summary:native.summary,...(native.ok?{resultKind:native.resultKind,result:native.result}:{error:{code:native.code,message:native.message}})});
-    const answer=native.ok?native.summary+renderDisclosure([],false):native.message;yield* streamText(answer,a.emit,a.signal);yield a.emit('run_completed',{answer,steps:1,toolCalls:1,ms:a.watch.ms,sourceType:a.sourceType,engine:'demo',...(native.ok&&native.resultKind==='business_plan'&&native.result.plan?{taskStatus:'awaiting_confirmation'}:{})});return;
+    const answer=native.ok?native.resultKind==='business_plan'?renderBusinessFacts(native.result):native.summary:native.message;yield* streamText(answer,a.emit,a.signal);yield a.emit('run_completed',{answer,steps:1,toolCalls:1,ms:a.watch.ms,sourceType:a.sourceType,engine:'demo',...(native.ok&&native.resultKind==='business_plan'&&native.result.plan?{taskStatus:'awaiting_confirmation'}:{})});return;
   }
   const plan = planDemo(a.question, a.intent, a.ds);
   a.log.info('demo_plan', { callTool: plan.callTool, args: plan.args, disclosures: plan.needsDisclosure, mode: a.mode });
@@ -410,11 +413,11 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
   const answer = exec.ok
     ? renderDemoAnswer({ kind: exec.resultKind, payload: exec.result }, {
         dateWasDefaulted: !a.intent.date,
-        periodFiltered: Boolean(a.intent.periodKey)
+        periodFiltered: Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label
       })
     : `${exec.message}${exec.suggestions.length ? `\n可选：${exec.suggestions.join('、')}` : ''}`;
 
-  const full = answer + renderDisclosure(plan.needsDisclosure, false);
+  const full = answer + renderDisclosure(plan.needsDisclosure, false,a.sourceType==='live');
   yield* streamText(full, a.emit, a.signal);
 
   yield a.emit('run_completed', {
@@ -429,8 +432,8 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
 }
 
 /** 演示引擎的披露话术 —— 必须让用户一眼看出"这段文字不是大模型生成的" */
-function renderDisclosure(extra: string[], short: boolean): string {
-  const base = short
+function renderDisclosure(extra: string[], short: boolean,live=false): string {
+  const base = live?'\n\n（确定性事实引擎：本条回答由服务端规则生成，未调用大模型。）':short
     ? '\n\n（演示引擎：本条回答由服务端规则生成，未调用大模型。）'
     : '\n\n（演示引擎：本条回答由服务端规则解析并渲染，未调用大模型；数据仍来自上方的数据来源。）';
   const tail = extra.length ? '\n' + extra.map((e) => `· ${e}`).join('\n') : '';
@@ -507,7 +510,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     let roundText = '';
     let calls: ChatMessage['tool_calls'] = undefined;
 
-    for await (const ev of streamChat({ messages, tools: toolsForMode(a.mode ?? 'task'), signal: a.signal }, a.log)) {
+    for await (const ev of streamChatWithFallback({ messages, tools: toolsForMode(a.mode ?? 'task'), signal: a.signal }, a.mode ?? 'task', a.log)) {
       if (ev.type === 'text') {
         roundText += ev.text;
         answer += ev.text;
@@ -605,7 +608,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
 
       if (exec.ok) {
         if(exec.resultKind==='business_plan')businessFacts.push(exec.result);
-        verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey)}));
+        verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label}));
         lastToolSummary = exec.summary;
         yield a.emit('tool_result', {
           step: steps,
@@ -681,7 +684,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
 
   if (a.signal?.aborted) return; // N06/B10：取消后不再补发完成终态
   a.log.info('run_completed', {
-    engine: 'agnes',
+    engine: engineForMode(a.mode ?? 'task'),
     steps,
     toolCalls,
     ms: a.watch.ms,
@@ -695,7 +698,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     toolCalls,
     ms: a.watch.ms,
     sourceType: a.sourceType,
-    engine: 'agnes',
+    engine: engineForMode(a.mode ?? 'task'),
     ...(runTaskStatus ? { taskStatus: runTaskStatus } : {}),
     ...(usage ? { usage } : {})
   } satisfies RunCompletedPayload);
@@ -738,14 +741,15 @@ function toRunFailed(err: unknown, wallClockMs: number): RunFailedPayload {
 
 /** 供 /api/agent/health 使用 */
 export function runtimeCapabilities(): Record<string, unknown> {
-  const ds = loadDataset();
+  getConfig();const ds = (process.env.LABOPS_AUTH_MODE||'native')==='native'?null:loadDataset();
   return {
-    engine: isAgnesConfigured() ? 'agnes' : 'demo',
-    dataSource: ds.sourceType,
-    dataSourceLabel: ds.sourceLabel,
+    engine: engineForMode('task'),
+    engineByMode: { chat: engineForMode('chat'), task: engineForMode('task') },
+    dataSource: ds?.sourceType||'authorized_api',
+    dataSourceLabel: ds?.sourceLabel||'登录后按实际账号查询主系统',
     promptVersion: PROMPT_VERSION,
     tools: toolSpecs().map((t) => t.name),
-    rooms: availableRoomNames(ds),
-    warnings: ds.warnings
+    rooms: ds?availableRoomNames(ds):[],
+    warnings: ds?.warnings||[]
   };
 }

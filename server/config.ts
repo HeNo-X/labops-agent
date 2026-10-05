@@ -59,7 +59,13 @@ export interface AppConfig {
    *    要在手机上调试时，显式设 HOST=0.0.0.0，并在用完后改回来。
    */
   host: string;
-  /** Agnes 3.0 Flash —— 产品运行时模型 */
+  /** DashScope（阿里云百炼）—— 仅聊天模式；models 按 fallback 顺序排列 */
+  dashscope: {
+    apiKey: string;
+    baseUrl: string;
+    models: string[];
+  };
+  /** Agnes 3.0 Flash —— 仅任务模式（工作模式） */
   agnes: {
     apiKey: string;
     model: string;
@@ -112,6 +118,19 @@ export function getConfig(): AppConfig {
       temperature: Number(str('AGNES_TEMPERATURE', '0.3')),
       enableThinking: bool('AGNES_ENABLE_THINKING', false)
     },
+    /**
+     * DashScope（阿里云百炼）OpenAI 兼容端点 —— 2026-10-05 按负责人要求新增。
+     * 用途：**仅聊天模式**使用，按 models 顺序依次 fallback（前面的不可用就换下一个）。
+     * 顺序口径：负责人给的是界面自上而下的列表，要求**从下往上**依次调用 →
+     * 故默认值按"最下面那个最先调用"排列。
+     * 说明：这些模型名已用真实 Key 调 GET /models 逐一核对存在，不是猜的。
+     */
+    dashscope: {
+      apiKey: str('DASHSCOPE_API_KEY'),
+      baseUrl: str('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/+$/, ''),
+      models: str('DASHSCOPE_MODELS', 'deepseek-v4-flash-0731,qwen3.8-max,qwen3.8-2.4t-a95b,deepseek-v4-pro-0813,kimi-k3,qwen3.8-27b,glm-5.3')
+        .split(',').map((s) => s.trim()).filter(Boolean)
+    },
     agent: {
       maxSteps: int('AGENT_MAX_STEPS', 6, 1, 12),
       wallClockMs: int('AGENT_WALL_CLOCK_MS', 60000, 5000, 600000)
@@ -139,10 +158,15 @@ export function describeConfig(c: AppConfig): string[] {
   return [
     `监听地址        : http://${c.host}:${c.port}${c.host === '0.0.0.0' ? '  ⚠️ 已开放到局域网' : ''}`,
     `Agnes 模型      : ${c.agnes.model} @ ${c.agnes.baseUrl}`,
-    `Agnes API Key   : ${c.agnes.apiKey ? '已配置 ✓（仅服务端持有）' : '未配置 → 进入演示引擎模式'}`,
+    `Agnes API Key   : ${c.agnes.apiKey ? '已配置 ✓（仅服务端持有）' : '未配置 → 使用确定性规则引擎'}`,
+    `模型分流        : 任务模式→Agnes${c.agnes.apiKey ? '' : '（未配置，回落规则引擎）'}；聊天模式→DashScope`,
+    `DashScope 聊天链: ${c.dashscope.apiKey ? c.dashscope.models.join(' → ') + '（按序 fallback）' : '未配置 → 聊天模式回落规则引擎'}`,
     `步数/墙钟上限   : ${c.agent.maxSteps} 步 / ${c.agent.wallClockMs} ms`,
-    `实时数据开关    : ${c.data.live ? '开（LIVE_DATA=1，直接读真实 state.json）' : '关（默认用脱敏快照）'}`,
-    `沙盒演示身份    : ${c.sandbox.defaultRole}（未连接时办理卡写沙盒；连接原账号后可在对话内办理真实业务）`,
+    `认证模式        : ${process.env.LABOPS_AUTH_MODE||'native'}`,
+    ...((process.env.LABOPS_AUTH_MODE||'native')==='native'?['业务身份        : 主系统登录验证并自动委托，每次请求核验实际角色与班级']: [
+      `实时数据开关    : ${c.data.live ? '开（LIVE_DATA=1，直接读 state.json）' : '关（脱敏快照）'}`,
+      `沙盒演示身份    : ${c.sandbox.defaultRole}（仅明确开启的隔离demo）`
+    ]),
     `日志级别        : ${c.logLevel}`
   ];
 }

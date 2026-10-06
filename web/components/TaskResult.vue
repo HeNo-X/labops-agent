@@ -326,7 +326,11 @@ const freeList = computed(() => {
           </div>
           <div class="prov__row">
             <dt>在室人数</dt>
-            <dd class="alert__hint">未知 —— 无签到/门禁数据来源，系统无法提供，请勿据此判断</dd>
+            <dd v-if="(extra.payload as LabStatusResult).occupancy">
+              {{ (extra.payload as LabStatusResult).occupancy!.present }} 人（{{ (extra.payload as LabStatusResult).occupancy!.date }}）
+              —— 当日有效签到−有效签退，与主系统页面同源；逐人明细未开放，记录数口径不等于"此刻屋里一定有人"
+            </dd>
+            <dd v-else class="alert__hint">未知 —— 当前没有取到签到数据（业务通道未连接或未取得授权），请勿据此判断</dd>
           </div>
         </dl>
       </div>

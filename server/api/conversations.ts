@@ -30,6 +30,7 @@ import {
   getMessages,
   renameConversation,
   updateConversationMode,
+  countMessages,
   deleteConversation,
   createMessageWithRun,
   RunConflictError,
@@ -235,7 +236,21 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
       if (title !== undefined && (typeof title !== 'string' || !title.trim())) {
         return json(res, 400, { error: 'missing_title', message: 'title 必须是非空字符串' }), true;
       }
-      if (mode) updateConversationMode(conversationId, mode);
+      if (mode) {
+        // 模式锁定（2026-10-06 用户要求）：会话一旦开始对话，模式即确定，不可再改。
+        //   理由：模式决定消息路由与业务办理权限（bridge 按 mode 拒单），
+        //   允许中途切换等于让同一条历史在两种语义之间漂移；要换模式就新建会话。
+        //   尚未发过消息的空会话不算"已确定"，仍可改（前端建会话与首条消息之间就是这一瞬）。
+        const current = getConversationMeta(conversationId)!;
+        if (mode !== current.mode && countMessages(conversationId) > 0) {
+          return json(res, 409, {
+            error: 'mode_locked',
+            mode: current.mode,
+            message: `该会话已确定为${current.mode === 'chat' ? '聊天' : '工作'}模式，开始对话后不可更改；需要其他模式请新建会话`
+          }), true;
+        }
+        updateConversationMode(conversationId, mode);
+      }
       if (typeof title === 'string') renameConversation(conversationId, title.trim());
       const meta = getConversationMeta(conversationId);
       if (!meta) {

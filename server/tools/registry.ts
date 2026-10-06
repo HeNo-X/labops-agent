@@ -524,7 +524,9 @@ export function summarizeLabStatus(r: LabStatusResult): string {
     return `${src}系统里查不到房间号；可选：${r.suggestions.slice(0, 6).join('、')}${r.suggestions.length > 6 ? ' 等' : ''}`;
   }
   const next = r.schedule.nextLesson ? `，下一节 ${r.schedule.nextLesson.startTime} ${r.schedule.nextLesson.courseName}` : '';
-  return `${src}${r.labName}：${r.statusLabel}，容量 ${r.capacity ?? '未知'}，${r.date}（${r.weekdayLabel}）${r.schedule.lessonCount} 条排课${next}；在室人数未知（无数据来源）`;
+  // 在室人数：有授权实时值就报值，取不到才说"无数据来源"（2026-10-06 修正：此前恒报未知）
+  const occupancy = r.occupancy ? `；在室人数 ${r.occupancy.present} 人（${r.occupancy.date}，当日有效签到−有效签退）` : '；在室人数未知（当前无签到数据来源）';
+  return `${src}${r.labName}：${r.statusLabel}，容量 ${r.capacity ?? '未知'}，${r.date}（${r.weekdayLabel}）${r.schedule.lessonCount} 条排课${next}${occupancy}`;
 }
 
 export function summarizeFreeRooms(r: FreeRoomsResult): string {

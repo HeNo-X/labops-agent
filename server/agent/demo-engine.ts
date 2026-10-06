@@ -22,6 +22,7 @@ import { weekdayOf } from '../time/term.ts';
 import type { Intent } from './intent.ts';
 import { executeTool } from '../tools/registry.ts';
 import type { ToolContext, ToolExecution } from '../tools/registry.ts';
+import { isBusinessConnected } from '../business/bridge.ts';
 
 export interface DemoPlan {
   /** 本次要调的工具名 */
@@ -36,10 +37,6 @@ export interface DemoPlan {
 
 const OUT_OF_SCOPE_PATTERNS: Array<[RegExp, string]> = [
   [/爬虫|爬取|抓取网页|批量注册|绕过|破解|刷量|外挂/, '这类需求超出本系统的能力与合规边界，我不能协助。'],
-  [
-    /几个人|多少人|在室|签到|签退|谁在|补签/,
-    '在室人数、签到记录属于记录类数据，签到办理（含异常申诉）尚未接入（没有数据来源），我无法提供，也不能估计。'
-  ],
   [/换班|排班|排值班|值班表|排岗/, '值班编排与换班（F05）尚未接入：沙盒只有"开始值班/收尾交接"。'],
   [/课表导入|导入课表|调课|代课|换教室/, '指定日期调课已在原系统业务工作台提供：先连接原系统账号，再比较候选并人工确认。对话演示引擎不会直接修改课表。'],
   [/预约|借用|申请用房|订房间|包场/, '临时用房申请与审批（F09）尚未接入，"课表空闲"不等于"可以预约"。'],
@@ -50,10 +47,27 @@ const OUT_OF_SCOPE_PATTERNS: Array<[RegExp, string]> = [
   [/去年|历史|平均使用率|趋势|统计[^。]{0,4}报表/, '本系统只覆盖当前学期的课表数据，不含历史统计，我无法给出这类数字。']
 ];
 
+// ---- 在室人数 vs 签到明细：两者数据可得性完全不同，不能混成一条拒绝文案（2026-10-06 修正）----
+//  在室人数：主系统 /occupancy 提供"当日有效签到−有效签退"的房间级计数（与主系统页面同源），
+//           业务通道连通时**可以给真实数字**；此前被这条兜底规则一律拦成"无法提供"，是错的。
+//  签到明细：逐人签到/签退/补签记录没有对 LabOps 开放的接口，仍然如实说不可得。
+const OCCUPANCY_RE = /在室|几个人|多少人|谁在|签到(人数|情况|统计)|签退(人数|情况|统计)/;
+const CHECKIN_DETAIL_RE = /签到|签退|补签/;
+
+/** 「在室人数」类问题的兜底回答：只有在取不到房间号或未连通业务通道时才说"无法提供" */
+function occupancyFallback(reason: 'no_room' | 'no_channel', ds: Dataset): string {
+  if (reason === 'no_room') {
+    return '请告诉我是哪个房间，例如「E310 现在有多少人？」。在室人数按原系统当日有效签到−有效签退统计，与主系统页面同源；' +
+      `逐人签到明细没有开放接口，仍然查不到。当前收录的房间号有：${[...ds.labs, ...ds.openLabs].map((l) => l.name).join('、')}。`;
+  }
+  return '现在没有连接原系统账号，取不到签到数据，所以我给不出在室人数，也不会估计。' +
+    '连接原系统账号后可以按「当日有效签到−有效签退」给出房间人数（与主系统页面同源）；逐人签到明细没有开放接口。';
+}
+
 /** 「哪些房间空着/找空教室」类问题：不需要房间号（导出供 run.ts 做继承判定） */
 export const FREE_ROOMS_RE = /哪些.{0,6}(空|闲)|空(着|的|教室|实验室|房间)|空闲|没(有)?被占用|可以(用|借)/;
-/** 房间档案/状态类问题：需要房间号，且在问开放/容量/状态等 */
-export const LAB_STATUS_RE = /开放吗|开(着|放)吗|还开|状态|容量|多大|能坐|位置|在哪|什么情况|简介|介绍|下一?节/;
+/** 房间档案/状态类问题：需要房间号，且在问开放/容量/状态/在室人数等 */
+export const LAB_STATUS_RE = /开放吗|开(着|放)吗|还开|状态|容量|多大|能坐|位置|在哪|什么情况|简介|介绍|下一?节|在室|几个人|多少人|谁在/;
 /** 纯寒暄/致谢（导出供 run.ts 做继承判定） */
 export const SMALLTALK_RE = /^(谢谢|多谢|感谢|辛苦了|辛苦|好的|好|嗯+|噢|哦|ok|OK|Ok|收到|明白|了解了|你好|您好|嗨|hi|hello|哈喽)[！!。.~，,～\s]*$/;
 
@@ -81,6 +95,37 @@ export function planDemo(question: string, intent: Intent, ds: Dataset): DemoPla
       args: {},
       directReply: `日期输入有误：${intent.dateInvalid.reason}。合法示例：2026-09-30、9月30日、下周三。`,
       needsDisclosure: ['未查询任何数据（日期非法）']
+    };
+  }
+
+  // 在室人数 / 签到明细：先于通用越界规则判断（两者数据可得性不同，见上方常量注释）
+  const wantsOccupancy = OCCUPANCY_RE.test(q);
+  if (wantsOccupancy || CHECKIN_DETAIL_RE.test(q)) {
+    const disclosure = ['本回答由服务端规则引擎给出，未调用大模型'];
+    if (!wantsOccupancy) {
+      return {
+        tool: '',
+        callTool: false,
+        args: {},
+        directReply:
+          '逐人签到/签退/补签明细没有对 LabOps 开放的接口，我查不到（签到办理与异常申诉也尚未接入）。' +
+          '房间在室人数可以查，例如「E310 现在有多少人？」——口径是当日有效签到−有效签退，与主系统页面同源。',
+        needsDisclosure: disclosure
+      };
+    }
+    if (!isBusinessConnected()) {
+      return { tool: '', callTool: false, args: {}, directReply: occupancyFallback('no_channel', ds), needsDisclosure: [...disclosure, '未查询任何数据（业务通道未连接）'] };
+    }
+    if (!intent.labName) {
+      return { tool: '', callTool: false, args: {}, directReply: occupancyFallback('no_room', ds), needsDisclosure: [...disclosure, '未查询任何数据（缺少房间号）'] };
+    }
+    // 有房间号且已连通：照常查房间状态，在室人数取自主系统 /occupancy
+    return {
+      tool: 'query_lab_status',
+      callTool: true,
+      args: { labName: intent.labName, ...(intent.date ? { date: intent.date.date } : {}) },
+      directReply: null,
+      needsDisclosure: intent.date ? [] : ['你没有说明日期，我按服务端当天处理']
     };
   }
 
@@ -549,7 +594,14 @@ function renderLabStatusAnswer(r: LabStatusResult): string {
   } else if (r.schedule.nextLessonReason === 'no_more_today') {
     lines.push('当天剩余时间没有更多排课。');
   }
-  lines.push('在室人数：未知 —— 系统没有签到/门禁数据来源，无法提供，请勿据此判断房间内是否有人。');
+  // 2026-10-06 修正：此前这里恒输出"未知 —— 没有签到/门禁数据来源"，
+  // 但工具自 2026-10-05 起已能在业务通道连通时取到主系统 /occupancy 的真实值 ——
+  // 渲染层漏改会让真实数字被自己抹掉。有值就说值，没值才说为什么没有。
+  lines.push(
+    r.occupancy
+      ? `在室人数：${r.occupancy.present} 人（${r.occupancy.date}，来源：主系统授权的实时签到数据，口径=当日有效签到−有效签退，与主系统页面同源；逐人明细未开放）。这是记录数口径，不等于"此刻屋里一定有人"。`
+      : '在室人数：未知 —— 当前没有取到签到数据来源（业务通道未连接或未取得授权），无法提供，请勿据此判断房间内是否有人。'
+  );
   return lines.join('\n');
 }
 

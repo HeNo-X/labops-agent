@@ -66,8 +66,13 @@ test('A11 历史业务计划切换为聊天后，即使省略会话字段也不�
 test('A12/27 自然语言只准备定时草案，历史规则不能借其他任务会话越过聊天限制',async()=>{
  const a=await login(),c=await a.call('/api/conversations',{mode:'task'}),before=(await a.call('/api/business/proxy/scheduled-jobs')).data.jobs.length;
  const out=await a.call('/api/conversations/'+c.data.id+'/messages',{message:'设置每天20:30的日报定时规则',clientRequestId:crypto.randomUUID()});const done=out.data.events.find((e:any)=>e.type==='run_completed');assert.ok(done);assert.equal((await a.call('/api/business/proxy/scheduled-jobs')).data.jobs.length,before);
- const preview=await a.call('/api/business/proxy/scheduled-jobs/preview',{conversationId:c.data.id,spec:{kind:'daily_report',trigger:{type:'daily',time:'20:30'}}});assert.equal(preview.status,200);assert.equal(preview.data.plan.futureOccurrences.length,3);
- await a.call('/api/conversations/'+c.data.id,{mode:'chat'},'PATCH');assert.equal((await a.call('/api/business/proxy/scheduled-jobs/confirm',{planId:preview.data.plan.id})).status,403);
+ // 2026-10-06 模式锁定：已经对话过的会话不允许再改模式（同一条历史不能在两种语义间漂移）
+ const denied=await a.call('/api/conversations/'+c.data.id,{mode:'chat'},'PATCH');assert.equal(denied.status,409);assert.equal(denied.data.error,'mode_locked');
+ // 方案所属会话仍是 task —— 但用一个"还没开始对话"的会话准备方案后把它改成 chat，该方案必须不可提交
+ const flip=await a.call('/api/conversations',{mode:'task'});
+ const preview=await a.call('/api/business/proxy/scheduled-jobs/preview',{conversationId:flip.data.id,spec:{kind:'daily_report',trigger:{type:'daily',time:'20:30'}}});assert.equal(preview.status,200);assert.equal(preview.data.plan.futureOccurrences.length,3);
+ assert.equal((await a.call('/api/conversations/'+flip.data.id,{mode:'chat'},'PATCH')).status,200);
+ assert.equal((await a.call('/api/business/proxy/scheduled-jobs/confirm',{planId:preview.data.plan.id})).status,403);
  const other=await a.call('/api/conversations',{mode:'task'});assert.equal((await a.call('/api/business/proxy/scheduled-jobs/confirm',{planId:preview.data.plan.id,conversationId:other.data.id})).status,403);assert.equal((await a.call('/api/business/proxy/scheduled-jobs')).data.jobs.length,before);
 });
 test('U09 旧demo会话绑定的原系统任务，真实账号重新准备后可安全接续',async()=>{

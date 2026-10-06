@@ -304,6 +304,12 @@ export function updateConversationMode(id: string, mode: 'chat' | 'task'): boole
   return Number(r.changes) > 0;
 }
 
+/** 会话已有多少条消息 —— 模式锁定判定用（≤0 表示还没开始对话） */
+export function countMessages(conversationId: string): number {
+  const row = getDb().prepare(`SELECT COUNT(*) AS n FROM messages WHERE conversationId = ?`).get(conversationId) as Record<string, unknown>;
+  return Number(row['n'] ?? 0);
+}
+
 export function deleteConversation(id: string): boolean {
   const now = new Date().toISOString();
   const r = getDb().prepare(`UPDATE conversations SET deletedAt = ? WHERE id = ? AND deletedAt IS NULL`).run(now, id);

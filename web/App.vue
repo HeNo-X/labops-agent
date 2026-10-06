@@ -128,18 +128,17 @@ onMounted(() => window.addEventListener('resize', collapseRailOnMobile));
 onUnmounted(() => window.removeEventListener('resize', collapseRailOnMobile));
 
 // ---- 会话类型（聊天 / 任务）----
-// hero（未创建会话）用 draftMode 选择；已创建的会话以服务端存储为准（session.convModes）
+// hero（还没有会话）用 draftMode 选择；**会话一旦开始对话，模式即确定**：
+// 2026-10-06 用户要求 —— 会话内部不再提供切换入口，服务端同样以 409 拒绝改模式，
+// 否则同一条历史会在"只查询"和"可办理"两种语义之间漂移。
 type ConvMode = 'chat' | 'task';
 const draftMode = ref<ConvMode>('task');
 const convMode = computed<ConvMode>(() => session.currentMode());
-async function onSwitchMode(m: ConvMode): Promise<void> {
-  if (!session.currentId || m === convMode.value) return;
-  try {
-    await session.setConversationMode(session.currentId, m);
-  } catch (e) {
-    window.alert(`切换模式失败：${(e as Error).message}`);
-  }
-}
+const modeLabel = (m: ConvMode): string => (m === 'chat' ? '聊天会话' : '工作会话');
+const modeLockTip = computed(
+  () => `本会话已确定为${modeLabel(convMode.value)}：${convMode.value === 'chat' ? '只查询数据，不准备办理单' : '可查询、可准备办理单并执行'}。开始对话后模式不可更改，需要另一种模式请新建会话。`
+);
+
 /** 活跃轮的助手占位消息（直接写入会话消息数组，流式更新同一对象） */
 let liveTarget: ChatMessageData | null = null;
 
@@ -833,7 +832,8 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
           <p class="hero__scope">
             查课表、看房间开放状态、找空闲实验室；也可以直接交办事务：报修、临时停用、站内通知、值班收尾、运营日报
             （连接原系统后，按实际账号权限办理；未连接时为沙盒演示）。
-            连接账号后可在消息中比较调课、补全检查、处理工单、发布通知并回查；在室人数、钥匙台账和预约尚未接入。历史会话在左侧导航找回。
+            连接账号后可在消息中比较调课、补全检查、处理工单、发布通知并回查；在室人数按原系统当日有效签到−有效签退给出，
+            钥匙台账和预约尚未接入。历史会话在左侧导航找回。
           </p>
         </template>
         <template v-else>
@@ -863,28 +863,10 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
           <button type="button" class="chat__navtoggle" @click="navOpen = !navOpen">会话</button>
           <h1 class="chat__title">{{ currentTitle }}</h1>
           <span class="chat__count">{{ session.currentMessages.length }} 条消息</span>
-          <div class="mode-seg mode-seg--head" role="group" aria-label="切换会话模式">
-            <button
-              type="button"
-              class="mode-seg__btn"
-              :class="{ 'mode-seg__btn--on': convMode === 'chat' }"
-              :aria-pressed="convMode === 'chat'"
-              title="纯聊天：不能执行任务操作"
-              @click="onSwitchMode('chat')"
-            >
-              聊天
-            </button>
-            <button
-              type="button"
-              class="mode-seg__btn"
-              :class="{ 'mode-seg__btn--on': convMode === 'task' }"
-              :aria-pressed="convMode === 'task'"
-              title="任务工作台：查询数据、生成办理单并执行"
-              @click="onSwitchMode('task')"
-            >
-              任务
-            </button>
-          </div>
+          <!-- 模式一旦确定就只读展示：不再提供会话内切换入口 -->
+          <span class="chat__mode" :class="`chat__mode--${convMode}`" :title="modeLockTip" :aria-label="modeLockTip">
+            {{ modeLabel(convMode) }} · 模式已确定
+          </span>
         </header>
         <p v-if="session.currentMessagesError" class="chat__err" role="alert">{{ session.currentMessagesError }}</p>
 
@@ -1195,6 +1177,11 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   gap: var(--sp-3);
   min-width: 0;
   min-height: 60vh;
+  /* 会话显示区最大宽度：超宽屏上给两侧留白（导航侧与房间侧各让一点），
+     一行文字过长会显著降低可读性，卡片也会被拉成难读的横条 */
+  width: 100%;
+  max-width: var(--chat-max, 1040px);
+  margin-inline: auto;
 }
 /* 会话视图：列高锁定视口（顶部留出 app 的 padding-top），
    消息区内部滚动，composer 恒在视口底部（不随内容下移） */
@@ -1253,6 +1240,24 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   font-size: 12px;
   color: var(--text-faint);
   flex: 0 0 auto;
+}
+/* 已确定的会话模式：只读徽标（不是开关，所以不做成按钮外观） */
+.chat__mode {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 10px;
+  cursor: help;
+  white-space: nowrap;
+}
+.chat__mode--chat {
+  color: var(--info, var(--primary));
+  border-color: currentColor;
 }
 .chat__err {
   margin: 0;
@@ -1361,10 +1366,6 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 }
 .mode-seg--hero {
   margin-bottom: var(--sp-4);
-}
-.mode-seg--head {
-  margin-left: auto;
-  flex: 0 0 auto;
 }
 
 /* ---- 右侧房间清单：停靠式侧边栏（可收起为窄轨） ---- */

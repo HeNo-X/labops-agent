@@ -360,3 +360,35 @@ test('提案状态新增 superseded 是既有契约的增量，不影响原有�
   assert.equal(new Set(states).size, 5);
   assert.equal(typeOps.TASK_STATUS_LABELS.cancelled, '已取消');
 });
+
+test('模式锁定：会话开始对话后不可再改模式，改名不受影响', async () => {
+  const request = await demoClient();
+
+  // 还没发过消息的空会话：模式尚未"确定"，仍可改（前端建会话与首条消息之间就是这一瞬）
+  const fresh = await newConversation(request, 'task');
+  assert.equal((await request(`/api/conversations/${fresh}`, { mode: 'chat' }, 'PATCH')).status, 200);
+  assert.equal((await request(`/api/conversations/${fresh}`)).data.mode, 'chat');
+
+  // 一旦产生对话，模式即锁定
+  const locked = await newConversation(request, 'chat');
+  seedRound(locked, '随便聊聊', '聊完了', { labName: null, date: null, task: null });
+  const denied = await request(`/api/conversations/${locked}`, { mode: 'task' }, 'PATCH');
+  assert.equal(denied.status, 409, JSON.stringify(denied.data));
+  assert.equal(denied.data.error, 'mode_locked');
+  assert.equal(denied.data.mode, 'chat');
+  assert.match(String(denied.data.message), /新建会话/);
+  assert.equal((await request(`/api/conversations/${locked}`)).data.mode, 'chat', '被拒绝后模式不得变化');
+
+  // 同模式重复提交是幂等的，不算"修改"
+  assert.equal((await request(`/api/conversations/${locked}`, { mode: 'chat' }, 'PATCH')).status, 200);
+  // 改名与锁定无关，必须照常可用
+  const renamed = await request(`/api/conversations/${locked}`, { title: '换个名字' }, 'PATCH');
+  assert.equal(renamed.status, 200, JSON.stringify(renamed.data));
+  assert.equal(renamed.data.title, '换个名字');
+
+  // 工作会话同样锁：从 task 改 chat 也要 409（业务办理权限不能靠改模式绕开）
+  const work = await newConversation(request, 'task');
+  seedRound(work, '第一问', '第一答', { labName: null, date: null, task: null });
+  assert.equal((await request(`/api/conversations/${work}`, { mode: 'chat' }, 'PATCH')).status, 409);
+  assert.equal((await request(`/api/conversations/${work}`)).data.mode, 'task');
+});

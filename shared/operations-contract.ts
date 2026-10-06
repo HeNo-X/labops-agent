@@ -41,8 +41,8 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   expired: '已过期'
 };
 
-/** 提案状态 */
-export type ProposalState = 'awaiting_confirmation' | 'executed' | 'rejected' | 'expired';
+/** 提案状态。superseded=被用户「回档/删除本轮」作废（不是自然过期，也不是用户拒绝执行） */
+export type ProposalState = 'awaiting_confirmation' | 'executed' | 'rejected' | 'expired' | 'superseded';
 
 /** 业务对象种类（回执 objects[].kind） */
 export type ObjectKind = 'issue' | 'notification' | 'closure' | 'duty_session' | 'report';
@@ -237,7 +237,8 @@ export interface SandboxIssue {
   category: string;
   description: string;
   reporter: SandboxActor;
-  status: 'open' | 'closed';
+  /** reverted=随会话轮次回档被撤回（不再计为未结工单） */
+  status: 'open' | 'closed' | 'reverted';
   attachmentRefs: string[];
   createdAt: string;
   revision: number;
@@ -251,6 +252,8 @@ export interface SandboxNotification {
   audienceSummary: string;
   recipientCount: number | null;
   readTracking: 'not_connected';
+  /** reverted=随会话轮次回档撤回（已送达的告知无法收回，仅本系统内作废） */
+  status: 'published' | 'reverted';
   publishedBy: SandboxActor;
   publishedAt: string;
   revision: number;
@@ -275,7 +278,8 @@ export interface SandboxDutySession {
   roomId: string;
   startedBy: SandboxActor;
   startedAt: string;
-  status: 'open' | 'handed_over';
+  /** reverted=开班随会话轮次回档被撤销 */
+  status: 'open' | 'handed_over' | 'reverted';
   checklist: Array<{ key: string; label: string; state: 'done' | 'abnormal' | 'unchecked' }> | null;
   handoverNote: string | null;
   linkedIssueIds: string[];

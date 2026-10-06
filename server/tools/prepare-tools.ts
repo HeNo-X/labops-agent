@@ -740,7 +740,8 @@ function findLatestOpenDutySession(actorId:string): (SandboxDutySession & { star
 // ---------------------------------------------------------------------------
 
 function listBizNotifications(actorId:string): Array<{ publishedAt: string }> {
-  const rows = getDb().prepare(`SELECT publishedAt FROM biz_notifications WHERE publishedById = ?`).all(actorId) as Array<Record<string, unknown>>;
+  // 被轮次回档撤回的通知不再计入日报（status='reverted'）；已送达的告知无法收回，但统计上不该再算发布量
+  const rows = getDb().prepare(`SELECT publishedAt FROM biz_notifications WHERE publishedById = ? AND status <> 'reverted'`).all(actorId) as Array<Record<string, unknown>>;
   return rows.map((r) => ({ publishedAt: String(r['publishedAt']) }));
 }
 

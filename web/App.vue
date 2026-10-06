@@ -2,19 +2,23 @@
 /**
  * 会话工作台 —— 应用外壳（M2：左侧导航 + 连续消息流，F01/F23/F25）
  * ============================================================================
- *  · 左侧导航：新聊天 / 最近会话（真实持久化列表）/ 实验室房间（折叠区）/ 状态与主题
- *  · 中央：连续消息流（每轮追加，绝不覆盖上一轮），吸底输入栏独立于滚动区
+ *  · 左侧导航：新聊天 / 工作会话 / 聊天会话（按模式分区，各自可折叠、可新建）/
+ *    我的任务 / 业务工具（折叠区）/ 状态与主题
+ *  · 中央：按「轮」渲染的连续消息流（每轮 = 一条提问 + 其回答），
+ *    每轮带 hover 操作条：删除本轮（两种模式）/ 回档 + 修改（仅工作模式，0.6.0）
  *  · 房间点击只回填草稿，不自动发请求（F29）；发送后草稿清空（F27）
  *  · 主题：跟随系统 = 显式解析 prefers-color-scheme 并实时响应（F28 已修，保持）
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRunStore } from './stores/run';
 import { useSessionStore } from './stores/session';
-import type { ChatMessage as ChatMessageData } from './stores/session';
+import type { ChatMessage as ChatMessageData, Round, RoundEffects } from './stores/session';
 import { useAgentStream } from './composables/useAgentStream';
 import LabMatrix from './components/LabMatrix.vue';
 import CommandBar from './components/CommandBar.vue';
 import ChatMessage from './components/ChatMessage.vue';
+import RoundToolbar from './components/RoundToolbar.vue';
+import RoundActionDialog from './components/RoundActionDialog.vue';
 import NativeWorkPanel from './components/NativeWorkPanel.vue';
 import BusinessConnectionPanel from './components/BusinessConnectionPanel.vue';
 import {useBusinessStore} from './stores/business';
@@ -391,8 +395,9 @@ async function onCancel(): Promise<void> {
   cancel();
 }
 
-function onNewChat(): void {
+function onNewChat(mode?: ConvMode): void {
   if (store.inputLocked) return;
+  if (mode) draftMode.value = mode;
   session.startDraft();
   navOpen.value = false;
 }
@@ -429,6 +434,149 @@ function onPickRoom(q: string): void {
   draft.value = q;
 }
 
+// ---- 侧栏分区：工作会话 / 聊天会话（0.6.0）----
+// 折叠态持久化：用户希望"我不关心聊天会话"这件事被记住，而不是每次重新折一遍
+const navFolded = ref<{ work: boolean; chat: boolean }>({ work: false, chat: false });
+try {
+  const raw = localStorage.getItem('labops.nav.folded');
+  if (raw) {
+    const j = JSON.parse(raw) as Partial<{ work: boolean; chat: boolean }>;
+    navFolded.value = { work: j?.work === true, chat: j?.chat === true };
+  }
+} catch {
+  /* 忽略损坏的本地偏好 */
+}
+function toggleSection(key: 'work' | 'chat'): void {
+  navFolded.value = { ...navFolded.value, [key]: !navFolded.value[key] };
+  try {
+    localStorage.setItem('labops.nav.folded', JSON.stringify(navFolded.value));
+  } catch {
+    /* 忽略 */
+  }
+}
+
+// ---- 轮次操作：删除本轮 / 回档 / 修改（0.6.0）----
+const rounds = computed<Round[]>(() => session.currentRounds);
+const roundDialog = ref<{
+  open: boolean;
+  kind: 'rollback' | 'edit';
+  userMessageId: string;
+  index: number;
+  question: string;
+  business: boolean;
+}>({ open: false, kind: 'rollback', userMessageId: '', index: 0, question: '', business: false });
+const roundDialogBusy = ref(false);
+const roundDialogError = ref('');
+/** 操作结果横幅：回档/删除之后必须让用户看到"到底发生了什么"，而不是只弹一个"成功" */
+const roundNotice = ref<{ tone: 'ok' | 'warn' | 'danger'; lines: string[] } | null>(null);
+
+/**
+ * 该轮是否牵涉业务办理 —— 决定弹窗提示强度。
+ * ⚠️ 只看"这一轮有没有产出业务单/原系统方案"，不看结果里的 state：
+ * 提案卡是在准备那一刻写进消息 meta 的，用户随后点确认执行并不会回写这里，
+ * 拿旧 state 判断会把"已执行的轮次"误判成"没牵涉业务"，正是最危险的方向。
+ */
+function roundTouchesBusiness(r: Round): boolean {
+  return r.messages.some(
+    (m) =>
+      m.role === 'assistant' &&
+      m.toolCalls.some((t) => {
+        if (t.resultKind === 'operation_proposal') return Boolean(t.result);
+        if (t.resultKind === 'business_plan') {
+          const res = t.result as { planId?: string | null; plan?: { state?: string } | null; receipt?: unknown } | null;
+          return Boolean(res) && Boolean(res!.planId || res!.receipt || res!.plan);
+        }
+        return false;
+      })
+  );
+}
+
+/** 把服务端的业务写入报告翻成人话；没有内容就返回空数组（界面不显示空横幅行） */
+function effectsLines(effects: RoundEffects | undefined): string[] {
+  if (!effects) return [];
+  const lines: string[] = [];
+  if (effects.reverted.length) {
+    lines.push(`已回退沙盒写入 ${effects.reverted.length} 项：${effects.reverted.map((r) => `${r.objectKind} ${r.objectId}`).join('、')}`);
+  }
+  if (effects.rejectedPlans.length) {
+    lines.push(`已作废原系统待确认方案 ${effects.rejectedPlans.length} 个：${effects.rejectedPlans.join('、')}`);
+  }
+  if (effects.supersededProposals.length) lines.push(`已作废待确认提案 ${effects.supersededProposals.length} 个`);
+  if (effects.cancelledTasks.length) lines.push(`已取消任务 ${effects.cancelledTasks.length} 个`);
+  if (effects.notReverted.length) {
+    lines.push(`未回退的写入 ${effects.notReverted.length} 项：${effects.notReverted.map((r) => `${r.objectKind} ${r.objectId}（${r.reason}）`).join('；')}`);
+  }
+  if (effects.blocked.length) {
+    lines.push(
+      `原系统已提交、无法自动撤回 ${effects.blocked.length} 项：${effects.blocked
+        .map((b) => `${b.planId}${b.objects.length ? `（${b.objects.map((o) => `${o.kind} ${o.id}`).join('、')}）` : ''}`)
+        .join('；')}——需要人工在原系统处理`
+    );
+  }
+  for (const n of effects.notes) lines.push(n);
+  return lines;
+}
+
+function closeRoundDialog(): void {
+  if (roundDialogBusy.value) return;
+  roundDialog.value = { ...roundDialog.value, open: false };
+  roundDialogError.value = '';
+}
+
+function openRoundDialog(kind: 'rollback' | 'edit', r: Round): void {
+  if (store.inputLocked || !r.userMessage) return;
+  roundDialogError.value = '';
+  roundDialog.value = {
+    open: true,
+    kind,
+    userMessageId: r.userMessage.id,
+    index: rounds.value.indexOf(r) + 1,
+    question: r.userMessage.text,
+    business: roundTouchesBusiness(r)
+  };
+}
+
+function onDeleteRound(r: Round): void {
+  const id = session.currentId;
+  if (store.inputLocked || !r.userMessage || !id) return;
+  const index = rounds.value.indexOf(r) + 1;
+  if (!window.confirm(`删除第 ${index} 轮？该轮提问与回答都会移除；已执行的业务写入不会因此回退（需要回退请用「回档」）。`)) return;
+  void (async () => {
+    const res = await session.deleteRound(id, r.userMessage!.id);
+    roundNotice.value = res.ok
+      ? { tone: 'ok', lines: [`已删除第 ${index} 轮（移除 ${res.removedCount ?? 0} 条消息）。`, ...effectsLines(res.effects)] }
+      : { tone: 'danger', lines: [res.message ?? '删除失败'] };
+    if (res.ok) void loadTasks();
+  })();
+}
+
+/**
+ * 回档 / 修改的确认入口。两者共用同一次服务端调用，区别只在"要不要把新内容重新发出去"：
+ *   · 回档：截断即结束；
+ *   · 修改：截断**成功之后**才重发 —— 顺序反了会让旧轮与新轮并存。
+ */
+async function onConfirmRoundDialog(payload: { text: string; revertEffects: boolean }): Promise<void> {
+  const id = session.currentId;
+  if (!id || roundDialogBusy.value) return;
+  const { kind, userMessageId, index } = roundDialog.value;
+  roundDialogBusy.value = true;
+  roundDialogError.value = '';
+  roundNotice.value = null;
+  try {
+    const res = await session.rollbackRound(id, userMessageId, payload.revertEffects);
+    if (!res.ok) {
+      roundDialogError.value = res.message ?? '回档失败';
+      return;
+    }
+    roundDialog.value = { ...roundDialog.value, open: false };
+    roundNotice.value = { tone: 'ok', lines: [`已回档到第 ${index} 轮发起前（移除 ${res.removedCount ?? 0} 条消息）。`, ...effectsLines(res.effects)] };
+    void loadTasks();
+    if (kind === 'edit') await onSubmit(payload.text);
+  } finally {
+    roundDialogBusy.value = false;
+  }
+}
+
 </script>
 
 <template>
@@ -441,47 +589,134 @@ function onPickRoom(q: string): void {
         <span class="nav__mark" aria-hidden="true">▤</span>
         <b>启真 LabOps</b>
       </div>
-      <button type="button" class="nav__new" @click="onNewChat">＋ 新聊天</button>
+      <button type="button" class="nav__new" @click="onNewChat()">＋ 新聊天</button>
 
+      <!-- 工作会话：能查询、能准备办理单并执行（mode=task） -->
       <div class="nav__section">
-        <h2 class="nav__h">最近会话</h2>
-        <p v-if="session.listError" class="nav__err" role="alert">{{ session.listError }}</p>
-        <p v-else-if="session.listLoading && !session.conversations.length" class="nav__hint">载入中…</p>
-        <p v-else-if="!session.conversations.length" class="nav__hint">还没有会话，发第一条消息开始。</p>
-        <ul v-else class="nav__convs">
-          <li v-for="c in session.conversations" :key="c.id">
-            <button
-              type="button"
-              class="conv"
-              :class="{ 'conv--on': c.id === session.currentId }"
-              :title="`${c.title}（${c.messageCount} 条消息${c.mode === 'chat' ? ' · 聊天' : ''}）`"
-              @click="session.openConversation(c.id); navOpen = false"
-            >
-              <span class="conv__title">
-                <span v-if="c.mode === 'chat'" class="conv__mode" title="聊天会话">聊</span>{{ c.title }}
-              </span>
-              <span class="conv__time">{{ session.timeLabel(c.lastActivityAt) }}</span>
-            </button>
-            <button
-              type="button"
-              class="conv__del"
-              :aria-label="`重命名会话：${c.title}`"
-              title="重命名"
-              @click="onRename(c.id, c.title)"
-            >
-              ✎
-            </button>
-            <button
-              type="button"
-              class="conv__del"
-              :aria-label="`删除会话：${c.title}`"
-              title="删除会话"
-              @click="onDelete(c.id, c.title)"
-            >
-              ✕
-            </button>
-          </li>
-        </ul>
+        <h2 class="nav__h">
+          <button
+            type="button"
+            class="nav__fold"
+            :aria-expanded="!navFolded.work"
+            aria-controls="nav-work-list"
+            title="工作会话可以查询数据、准备办理单并执行"
+            @click="toggleSection('work')"
+          >
+            <span class="nav__chev" aria-hidden="true">{{ navFolded.work ? '▸' : '▾' }}</span>工作会话
+          </button>
+          <span class="nav__count">{{ session.workConversations.length }}</span>
+          <button
+            type="button"
+            class="nav__add"
+            aria-label="新建工作会话"
+            title="新建工作会话（可查询、可办理）"
+            :disabled="store.inputLocked"
+            @click="onNewChat('task')"
+          >
+            ＋
+          </button>
+        </h2>
+        <template v-if="!navFolded.work">
+          <p v-if="session.listError" class="nav__err" role="alert">{{ session.listError }}</p>
+          <p v-else-if="session.listLoading && !session.conversations.length" class="nav__hint">载入中…</p>
+          <p v-else-if="!session.workConversations.length" class="nav__hint">
+            还没有工作会话。发第一条消息即可开始办理事务。
+          </p>
+          <ul v-else id="nav-work-list" class="nav__convs">
+            <li v-for="c in session.workConversations" :key="c.id">
+              <button
+                type="button"
+                class="conv"
+                :class="{ 'conv--on': c.id === session.currentId }"
+                :title="`${c.title}（${c.messageCount} 条消息 · 工作会话）`"
+                @click="session.openConversation(c.id); navOpen = false"
+              >
+                <span class="conv__title">{{ c.title }}</span>
+                <span class="conv__time">{{ session.timeLabel(c.lastActivityAt) }}</span>
+              </button>
+              <button
+                type="button"
+                class="conv__del"
+                :aria-label="`重命名会话：${c.title}`"
+                title="重命名"
+                @click="onRename(c.id, c.title)"
+              >
+                ✎
+              </button>
+              <button
+                type="button"
+                class="conv__del"
+                :aria-label="`删除会话：${c.title}`"
+                title="删除会话"
+                @click="onDelete(c.id, c.title)"
+              >
+                ✕
+              </button>
+            </li>
+          </ul>
+        </template>
+      </div>
+
+      <!-- 聊天会话：只查询、不办理（mode=chat） -->
+      <div class="nav__section">
+        <h2 class="nav__h">
+          <button
+            type="button"
+            class="nav__fold"
+            :aria-expanded="!navFolded.chat"
+            aria-controls="nav-chat-list"
+            title="聊天会话只查询数据，不准备办理单"
+            @click="toggleSection('chat')"
+          >
+            <span class="nav__chev" aria-hidden="true">{{ navFolded.chat ? '▸' : '▾' }}</span>聊天会话
+          </button>
+          <span class="nav__count">{{ session.chatConversations.length }}</span>
+          <button
+            type="button"
+            class="nav__add"
+            aria-label="新建聊天会话"
+            title="新建聊天会话（只查询，不办理）"
+            :disabled="store.inputLocked"
+            @click="onNewChat('chat')"
+          >
+            ＋
+          </button>
+        </h2>
+        <template v-if="!navFolded.chat">
+          <p v-if="!session.chatConversations.length" class="nav__hint">还没有聊天会话。聊天只查询，不办理事务。</p>
+          <ul v-else id="nav-chat-list" class="nav__convs">
+            <li v-for="c in session.chatConversations" :key="c.id">
+              <button
+                type="button"
+                class="conv"
+                :class="{ 'conv--on': c.id === session.currentId }"
+                :title="`${c.title}（${c.messageCount} 条消息 · 聊天会话）`"
+                @click="session.openConversation(c.id); navOpen = false"
+              >
+                <span class="conv__title">{{ c.title }}</span>
+                <span class="conv__time">{{ session.timeLabel(c.lastActivityAt) }}</span>
+              </button>
+              <button
+                type="button"
+                class="conv__del"
+                :aria-label="`重命名会话：${c.title}`"
+                title="重命名"
+                @click="onRename(c.id, c.title)"
+              >
+                ✎
+              </button>
+              <button
+                type="button"
+                class="conv__del"
+                :aria-label="`删除会话：${c.title}`"
+                title="删除会话"
+                @click="onDelete(c.id, c.title)"
+              >
+                ✕
+              </button>
+            </li>
+          </ul>
+        </template>
       </div>
 
       <div class="nav__section">
@@ -552,6 +787,16 @@ function onPickRoom(q: string): void {
     <!-- 主区：会话（有消息时列高锁定视口，输入框固定在底部） -->
     <main class="chat" :class="{ 'chat--conv': session.currentId && session.currentMessages.length > 0 }">
       <BusinessConnectionPanel :unified="authMode==='native'" /><div class="workspace-tools"><NativeWorkPanel v-if="(session.currentId?convMode:draftMode)!=='chat'" /></div>
+
+      <!-- 轮次操作结果：回档/删除之后必须让用户看到真实后果（含撤不回来的写入）。
+           放在 hero/会话两个分支之前 —— 回档到第一轮会让会话变空，那时更需要这条说明。 -->
+      <div v-if="roundNotice" class="chat__notice" :class="`chat__notice--${roundNotice.tone}`" role="status">
+        <ul class="chat__noticelist">
+          <li v-for="(line, i) in roundNotice.lines" :key="i">{{ line }}</li>
+        </ul>
+        <button type="button" class="chat__noticedismiss" aria-label="关闭提示" title="关闭" @click="roundNotice = null">✕</button>
+      </div>
+
       <!-- 空会话：欢迎页即输入（保持居中首屏形态） -->
       <div v-if="!session.currentId || session.currentMessages.length === 0" class="hero">
         <button type="button" class="chat__navtoggle hero__navtoggle" @click="navOpen = !navOpen">会话</button>
@@ -644,7 +889,18 @@ function onPickRoom(q: string): void {
         <p v-if="session.currentMessagesError" class="chat__err" role="alert">{{ session.currentMessagesError }}</p>
 
         <div ref="msgsEl" class="chat__msgs">
-          <ChatMessage v-for="m in session.currentMessages" :key="m.id" :msg="m" @retry="onRetry(m)" @decided="loadTasks" />
+          <div v-for="(r, i) in rounds" :key="r.key" class="round" :data-round="i + 1">
+            <RoundToolbar
+              :index="i + 1"
+              :can-rewind="convMode === 'task'"
+              :busy="store.inputLocked"
+              :actionable="Boolean(r.userMessage)"
+              @remove="onDeleteRound(r)"
+              @rollback="openRoundDialog('rollback', r)"
+              @edit="openRoundDialog('edit', r)"
+            />
+            <ChatMessage v-for="m in r.messages" :key="m.id" :msg="m" @retry="onRetry(m)" @decided="loadTasks" />
+          </div>
         </div>
 
         <div class="chat__composer">
@@ -692,6 +948,19 @@ function onPickRoom(q: string): void {
         <button type="button" class="side__rail-label" @click="toggleRooms(true)">房间清单</button>
       </template>
     </aside>
+
+    <!-- 回档 / 修改：原理相同（截断到本轮发起前），共用一个弹窗 -->
+    <RoundActionDialog
+      :open="roundDialog.open"
+      :kind="roundDialog.kind"
+      :round-index="roundDialog.index"
+      :question="roundDialog.question"
+      :busy="roundDialogBusy"
+      :error="roundDialogError"
+      :has-business-writes="roundDialog.business"
+      @cancel="closeRoundDialog"
+      @confirm="onConfirmRoundDialog"
+    />
   </div>
 </template>
 
@@ -765,6 +1034,59 @@ function onPickRoom(q: string): void {
   font-weight: 600;
   color: var(--text-faint);
   letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* 分区标题本身是折叠开关：点标题折/展，符合侧栏区块的通用预期 */
+.nav__fold {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: inherit;
+  padding: 2px 0;
+  cursor: pointer;
+  text-align: left;
+}
+.nav__fold:hover {
+  color: var(--text-muted);
+}
+.nav__chev {
+  font-size: 9px;
+  width: 9px;
+}
+.nav__count {
+  font-size: 10px;
+  color: var(--text-faint);
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 15px;
+}
+.nav__add {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  cursor: pointer;
+}
+.nav__add:hover:not(:disabled) {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.nav__add:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 .nav__hint,
 .nav__err {
@@ -821,17 +1143,6 @@ function onPickRoom(q: string): void {
 .conv__time {
   font-size: 11px;
   color: var(--text-faint);
-}
-.conv__mode {
-  display: inline-block;
-  font-size: 10px;
-  line-height: 1;
-  color: var(--info, var(--primary));
-  border: 1px solid currentColor;
-  border-radius: 4px;
-  padding: 1px 3px;
-  margin-right: 4px;
-  vertical-align: 1px;
 }
 .conv__del {
   border: none;
@@ -957,6 +1268,65 @@ function onPickRoom(q: string): void {
   gap: var(--sp-5);
   padding: var(--sp-2) 2px var(--sp-4);
   min-height: 0;
+}
+/* 轮次容器：一轮 = 一条提问 + 其回答；操作条默认隐形，hover/聚焦浮现。
+   触摸设备没有 hover —— 常显（否则功能等于不存在）。 */
+.round {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.round .roundtool {
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+}
+.round:hover .roundtool,
+.round:focus-within .roundtool {
+  opacity: 1;
+}
+@media (hover: none) {
+  .round .roundtool {
+    opacity: 1;
+  }
+}
+.chat__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  border: 1px solid var(--border-strong);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.chat__notice--ok {
+  border-left-color: var(--primary);
+}
+.chat__notice--warn {
+  border-left-color: var(--warning, #b8860b);
+}
+.chat__notice--danger {
+  border-left-color: var(--danger);
+  color: var(--danger);
+}
+.chat__noticelist {
+  margin: 0;
+  padding-left: 16px;
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+.chat__noticedismiss {
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0 2px;
+  flex: 0 0 auto;
 }
 .chat__composer {
   border-top: 1px solid var(--border);

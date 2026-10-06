@@ -38,8 +38,16 @@ import {
   requestCancel,
   updateAssistantPartial,
   finalizeAssistantMessage,
-  hasActiveRunForConversation
+  hasActiveRunForConversation,
+  selectRound,
+  deleteMessagesAndRuns,
+  recomputeConversationContext,
+  supersedePendingProposals,
+  cancelOpsTasks
 } from '../persistence/db.ts';
+import { collectRoundRefs, revertRoundEffects } from '../operations/revert.ts';
+import type { EffectsReport } from '../operations/revert.ts';
+import { forgetSession } from '../agent/session.ts';
 
 /** 会话类型白名单：task=任务工作台；chat=纯聊天（不执行任务操作） */
 function parseMode(v: unknown): 'chat' | 'task' | null {
@@ -126,6 +134,76 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
     if(nativeDelegation.getStore()?.sharedChat&&raw['mode']&&raw['mode']!=='chat')return json(res,403,{message:'悬浮窗只能使用聊天模式'}),true;
     const mode = nativeDelegation.getStore()?.sharedChat?'chat':parseMode(raw['mode']) ?? 'task';
     return json(res, 200, createConversation(typeof rawTitle === 'string' ? rawTitle : '', mode)), true;
+  }
+
+  // ---- 轮次（round）：删除本轮 / 回档到本轮发起前（0.6.0）----
+  //  一轮 = 一条 user 消息 + 紧随其后直到下一条 user 之前的全部 assistant 消息。
+  //  守卫与既有删除一致：活跃 run 一律 409（不能一边执行一边截断历史）。
+  const roundMatch = /^\/api\/conversations\/([^/]+)\/rounds\/([^/]+)$/.exec(pathname);
+  const rollbackMatch = /^\/api\/conversations\/([^/]+)\/rollback$/.exec(pathname);
+  if ((roundMatch && method === 'DELETE') || (rollbackMatch && method === 'POST')) {
+    const target = roundMatch ?? rollbackMatch!;
+    const conversationId = decodeURIComponent(target[1]!);
+    const meta = getConversationMeta(conversationId);
+    if (!meta) return json(res, 404, { error: 'conversation_not_found' }), true;
+    if (nativeDelegation.getStore()?.sharedChat && meta.mode !== 'chat') {
+      return json(res, 403, { message: '悬浮窗不能读取或操作任务会话' }), true;
+    }
+    if (hasActiveRunForConversation(conversationId)) {
+      return json(res, 409, { error: 'conversation_busy', message: '该会话正在执行任务，请先停止再操作轮次' }), true;
+    }
+    let userMessageId = '';
+    let revertEffects = false;
+    if (rollbackMatch) {
+      const body = await readJsonBody(req);
+      if (!body.ok) return json(res, body.status, { error: body.code, message: body.message }), true;
+      const raw = (body.value as Record<string, unknown>) ?? {};
+      userMessageId = typeof raw['userMessageId'] === 'string' ? raw['userMessageId'].trim() : '';
+      revertEffects = raw['revertEffects'] === true;
+      if (!userMessageId) return json(res, 400, { error: 'missing_user_message', message: '需要 { "userMessageId": "..." }' }), true;
+    } else {
+      userMessageId = decodeURIComponent(target[2]!);
+    }
+    const slice = selectRound(conversationId, userMessageId);
+    if (!slice) {
+      return json(res, 404, { error: 'message_not_found', message: '该轮次不存在，或目标不是本会话的用户消息' }), true;
+    }
+    // refs 必须在删除前解析 —— 删除后就再也读不到该轮的 toolCalls 了
+    const refs = collectRoundRefs(rollbackMatch ? slice.fromHere : slice.round);
+    const doomed = rollbackMatch ? slice.fromHere : slice.round;
+    const removed = deleteMessagesAndRuns(conversationId, doomed.map((m) => m.id));
+    const context = recomputeConversationContext(conversationId);
+    // 内存意图与服务端历史必须一致：否则下一轮会拿着已回档的上下文继续答
+    forgetSession(conversationId);
+
+    let effects: EffectsReport;
+    if (rollbackMatch) {
+      effects = await revertRoundEffects({ conversationId, userMessageId, actorId: resolveActor(undefined).id, refs, includeExecuted: revertEffects });
+    } else {
+      // 删除本轮只作废该轮的待确认方案，**不回退**已执行写入（删除≠回档）
+      effects = {
+        reverted: [],
+        notReverted: [],
+        blocked: [],
+        rejectedPlans: [],
+        supersededProposals: supersedePendingProposals(refs.proposals.map((p) => p.proposalId)),
+        cancelledTasks: cancelOpsTasks(refs.proposals.map((p) => p.taskId ?? '').filter(Boolean)),
+        notes: ['「删除本轮」只移除对话记录并作废该轮待确认方案；已执行到业务系统的写入不会因此回退。需要回退请使用「回档」。']
+      };
+    }
+    if (!removed.removedMessageIds.length) {
+      return json(res, 404, { error: 'message_not_found', message: '目标消息不存在或已被删除' }), true;
+    }
+    json(res, 200, {
+      ok: true,
+      mode: rollbackMatch ? 'rollback' : 'delete_round',
+      removedMessageIds: removed.removedMessageIds,
+      removedRunIds: removed.removedRunIds,
+      context,
+      conversation: getConversationMeta(conversationId),
+      effects
+    });
+    return true;
   }
 
   const convMatch = /^\/api\/conversations\/([^/]+)(\/messages)?$/.exec(pathname);

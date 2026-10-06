@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ScheduledRuleCard from './business/ScheduledRuleCard.vue';
 import {provide} from 'vue';
 import type {BusinessResult} from '@shared/business';
 import {createNativeBusinessCard,nativeCardKey} from '../business/controller';
@@ -27,6 +28,7 @@ const {business,sameScope,stage,error,busy,perform,refresh,task,report,draftWarn
    <NativeIncidentCard v-if="result.view==='incidents'&&result.scopeKey" :scope-key="result.scopeKey" :incident-id="result.incident?.id" :task-id="result.taskId" :readonly="readonly"/>
    <div v-if="result.tasks"><p>原系统任务 {{result.tasks.tasks.length}} 项 · 请从页面“我的工作”继续办理。</p><p v-for="t in result.tasks.tasks" :key="t.id">{{t.id}} · {{t.kind}} · {{t.status}}</p></div>
    <NativeResourceHealthCard v-if="result.view==='health'&&result.scopeKey" :scope-key="result.scopeKey" :task-id="result.taskId" :readonly="readonly"/>
+   <ScheduledRuleCard v-if="result.scheduledRule&&result.scopeKey" :plan="result.scheduledRule" :scope-key="result.scopeKey" :readonly="readonly"/>
    <NativeReportCard v-if="report" :report="report"/>
    <NativeConfirmation/>
    <button class="quiet" :disabled="busy" @click="perform(refresh)">刷新原系统业务数据</button>

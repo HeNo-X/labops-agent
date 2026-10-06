@@ -1,10 +1,13 @@
 import {defineStore} from 'pinia';
 import {ref} from 'vue';
+import {responseError} from '../http';
+import {useSessionStore} from './session';
 import {actorHeaders} from '../actor';
 import type {NativeActor} from '@shared/business';
 export async function businessApi<T>(path:string,body?:unknown):Promise<T>{
+  if(body&&path.startsWith('proxy/')&&path!=='proxy/notifications/read'){const id=useSessionStore().currentId;if(id)body={...(body as Record<string,unknown>),conversationId:id};}
   const res=await fetch('/api/business/'+path,{method:body===undefined?'GET':'POST',headers:{...actorHeaders(),'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.timeout(15000)});
-  const data=await res.json();if(!res.ok)throw new Error(data.message||data.error||'原系统请求失败');return data as T;
+  if(!res.ok)throw await responseError(res);const data=await res.json();return data as T;
 }
 export const useBusinessStore=defineStore('business',()=>{
  const connected=ref(false),scopeKey=ref(''),profile=ref<NativeActor|null>(null),state=ref('disconnected'),error=ref(''),busy=ref(false);

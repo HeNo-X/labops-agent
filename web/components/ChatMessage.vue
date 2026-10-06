@@ -28,6 +28,7 @@ const emit = defineEmits<{ retry: []; decided: [] }>();
 const run = useRunStore();
 const session=useSessionStore();
 const copied = ref(false);
+const textOnly=computed(()=>session.currentMode()==='chat'||props.msg.responseMode==='chat');
 
 /** N03：每条消息拥有自己的结果卡（toolCalls[].result → 对应渲染器） */
 const queryArtifacts = computed(() =>
@@ -113,7 +114,7 @@ async function copyAnswer(): Promise<void> {
 }
 
 const engineLabel = computed(() =>
-  props.msg.engine === 'agnes' ? 'Agnes 3.0 Flash' : props.msg.engine === 'demo' ? '演示引擎' : props.msg.engine === 'facts' ? '可靠事实转换' : ''
+  props.msg.engine === 'agnes' ? 'Agnes 3.0 Flash' : props.msg.engine === 'demo' ? props.msg.sourceType==='live'?'确定性事实引擎':'演示引擎' : props.msg.engine === 'facts' ? '可靠事实转换' : ''
 );
 </script>
 
@@ -133,7 +134,7 @@ const engineLabel = computed(() =>
       </div>
 
       <!-- 活跃轮：任务轨迹来自实时事件流 -->
-      <details v-if="run.runStatus === 'running' && msg.status === 'streaming'" class="msg__trace">
+      <details v-if="!textOnly && run.runStatus === 'running' && msg.status === 'streaming'" class="msg__trace">
         <summary>执行过程</summary>
         <ol class="msg__steps">
           <li v-for="s in run.trace" :key="s.id">{{ s.title }} —— {{ s.detail }}</li>
@@ -141,7 +142,7 @@ const engineLabel = computed(() =>
       </details>
 
       <!-- 工具调用卡（F34：参数在完成后仍可查） -->
-      <details v-if="msg.toolCalls.length" class="msg__tools">
+      <details v-if="!textOnly && msg.toolCalls.length" class="msg__tools">
         <summary>已执行 {{ msg.toolCalls.length }} 次工具调用（点击看参数与依据）</summary>
         <div v-for="t in msg.toolCalls" :key="t.toolCallId" class="msg__tool">
           <div class="msg__toolhead">
@@ -164,7 +165,7 @@ const engineLabel = computed(() =>
       <p v-else-if="msg.status === 'failed'" class="msg__pending">本轮执行失败，未生成回答。</p>
       <p v-else-if="msg.status === 'interrupted'" class="msg__pending">本轮执行被中断，部分内容可能未生成。</p>
       <div v-for="(k,i) in knowledgeArtifacts" :key="'knowledge-'+i"><p v-for="h in k.hits" :key="h.id"><a :href="h.url" target="_blank" rel="noopener">{{h.title}} · v{{h.version}} · 段落依据</a></p></div>
-      <BusinessPlanCard v-for="b in businessArtifacts" :key="b.key" :result="b.result" :card-id="msg.id+':'+b.key" :readonly="session.currentMode()==='chat'" />
+      <template v-if="!textOnly"><BusinessPlanCard v-for="b in businessArtifacts" :key="b.key" :result="b.result" :card-id="msg.id+':'+b.key" :readonly="session.currentMode()==='chat'" />
       <!-- N03：本条消息自己的结构化结果卡（实时与历史同一渲染器） -->
       <OperationCard
         v-for="a in proposalArtifacts"
@@ -174,7 +175,7 @@ const engineLabel = computed(() =>
       />
       <ReportCard v-for="a in reportArtifacts" :key="a.key" :report="a.report" />
       <TaskResult v-for="a in queryArtifacts" :key="a.key" :artifact="{ kind: a.kind, result: a.result }" :engine="(msg.engine as EngineType | null | undefined)" />
-      <p v-if="msg.error" class="msg__err" role="alert">失败原因：{{ msg.error.code }} {{ msg.error.message }}</p>
+      </template><p v-if="msg.error" class="msg__err" role="alert">失败原因：{{ msg.error.code }} {{ msg.error.message }}</p>
       <div v-if="(msg.status === 'failed' || msg.status === 'interrupted') && !run.inputLocked" class="msg__retryrow">
         <button type="button" class="msg__retry" @click="emit('retry')">重新执行上一问</button>
       </div>

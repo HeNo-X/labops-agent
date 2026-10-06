@@ -1,3 +1,4 @@
+import {responseError} from '../http';
 import { actorHeaders } from '../actor';
 /**
  * 会话 store —— 持久化会话与连续消息（M1/M2，F01·F08·F23）
@@ -44,7 +45,62 @@ export interface ChatMessage {
   sourceType?: string | null;
   ms?: number;
   error?: { code: string; message: string } | null;
+  responseMode?: 'chat'|'task';
+  queriedAt?:string;
+  scope?:string;
   createdAt: string;
+}
+
+/**
+ * 一轮对话：一条 user 消息 + 紧随其后直到下一条 user 之前的全部 assistant 消息。
+ * 删除/回档/修改都以「轮」为最小单位 —— 单删 assistant 会留下无主的回答。
+ */
+export interface Round {
+  key: string;
+  /** 起始 user 消息；历史上不应出现"首个消息就是 assistant"，真出现时给 null 并禁用操作 */
+  userMessage: ChatMessage | null;
+  /** 本轮全部消息（含起始 user），按会话顺序 */
+  messages: ChatMessage[];
+  /** 本轮中是否还有正在生成的回答 */
+  streaming: boolean;
+}
+
+/** 把扁平消息流切成轮次。纯函数，便于单测与复用。 */
+export function roundsOf(list: ChatMessage[]): Round[] {
+  const out: Round[] = [];
+  let cur: Round | null = null;
+  for (const m of list) {
+    if (m.role === 'user') {
+      cur = { key: m.id, userMessage: m, messages: [m], streaming: false };
+      out.push(cur);
+    } else if (cur) {
+      cur.messages.push(m);
+      if (m.status === 'streaming') cur.streaming = true;
+    } else {
+      // 防御：没有起始 user 的孤儿回答单独成轮，但不提供任何破坏性操作
+      cur = { key: `orphan-${m.id}`, userMessage: null, messages: [m], streaming: m.status === 'streaming' };
+      out.push(cur);
+    }
+  }
+  return out;
+}
+
+/** 服务端回档/删除返回的业务写入报告 —— 界面必须原样展示，不允许只显示"成功" */
+export interface RoundEffects {
+  reverted: Array<{ operationId: string; objectKind: string; objectId: string; action: string; detail: string }>;
+  notReverted: Array<{ operationId: string; objectKind: string; objectId: string; reason: string }>;
+  blocked: Array<{ planId: string; reason: string; objects: Array<{ kind: string; id: string }> }>;
+  rejectedPlans: string[];
+  supersededProposals: string[];
+  cancelledTasks: string[];
+  notes: string[];
+}
+
+export interface RoundActionResult {
+  ok: boolean;
+  message?: string;
+  effects?: RoundEffects;
+  removedCount?: number;
 }
 
 function uid(prefix: string): string {
@@ -79,6 +135,16 @@ export const useSessionStore = defineStore('session', () => {
   );
 
   const currentMessages = computed<ChatMessage[]>(() => (currentId.value ? messages.value[currentId.value] ?? [] : []));
+
+  /** 当前会话的轮次切分（删除/回档/修改的作用单位） */
+  const currentRounds = computed<Round[]>(() => roundsOf(currentMessages.value));
+
+  /**
+   * 侧栏按模式分区：工作会话（task，默认）与聊天会话（chat）。
+   * 服务端的 listConversations 保证 mode 必有值，这里只做防御性兜底。
+   */
+  const workConversations = computed<ConvSummary[]>(() => conversations.value.filter((c) => c.mode !== 'chat'));
+  const chatConversations = computed<ConvSummary[]>(() => conversations.value.filter((c) => c.mode === 'chat'));
 
   // ---- 会话类型（聊天/任务）：服务端存储为权威，这里缓存供界面切换与展示 ----
   const convModes = ref<Record<string, 'chat' | 'task'>>({});
@@ -177,6 +243,9 @@ export const useSessionStore = defineStore('session', () => {
             sourceType: (m['meta'] as Record<string, unknown> | null)?.['sourceType'] != null ? String((m['meta'] as Record<string, unknown>)['sourceType']) : null,
             ms: Number((m['meta'] as Record<string, unknown> | null)?.['ms'] ?? 0) || undefined,
             error: ((m['meta'] as Record<string, unknown> | null)?.['error'] as ChatMessage['error']) ?? null,
+            responseMode:(m['meta'] as Record<string,unknown>)?.['responseMode'] as 'chat'|'task'|undefined,
+            queriedAt:(m['meta'] as Record<string,unknown>)?.['queriedAt'] as string|undefined,
+            scope:(m['meta'] as Record<string,unknown>)?.['scope'] as string|undefined,
             createdAt: String(m['createdAt'] ?? '')
           });
         }
@@ -206,7 +275,7 @@ export const useSessionStore = defineStore('session', () => {
   async function ensureConversation(question: string, existingId: string | null, clientRequestId: string, mode: 'chat' | 'task' = 'task'): Promise<string> {
     if (existingId) return existingId;
     const res = await fetch('/api/conversations', { method: 'POST', headers: { ...actorHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
-    if (!res.ok) throw new Error(`创建会话失败：HTTP ${res.status}`);
+    if (!res.ok) throw await responseError(res);
     const { id } = (await res.json()) as { id: string };
     saveCurrentId(id);
     setCurrentMode(id, mode);
@@ -257,6 +326,51 @@ export const useSessionStore = defineStore('session', () => {
     await loadConversations();
   }
 
+  /**
+   * 删除本轮 / 回档 —— 两者共用一条"服务端权威 → 本地缓存整体重建"的收敛路径。
+   * ⚠️ 不能只调 openConversation：R04 的合并策略是"本地已有优先"，
+   * 服务端删掉的消息会被本地缓存原样保留，界面看起来"删了又回来"。
+   * 所以先把该会话的本地缓存清空，再以服务端结果重建。
+   */
+  async function applyRoundAction(id: string, path: string, init: RequestInit): Promise<RoundActionResult> {
+    let payload: Record<string, unknown>;
+    try {
+      const res = await fetch(path, init);
+      payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        return { ok: false, message: String(payload['message'] ?? `HTTP ${res.status}`) };
+      }
+    } catch (e) {
+      return { ok: false, message: `网络请求失败：${(e as Error).message}` };
+    }
+    messages.value[id] = [];
+    delete messagesErrors.value[id];
+    await openConversation(id);
+    await loadConversations();
+    return {
+      ok: true,
+      effects: payload['effects'] as RoundEffects | undefined,
+      removedCount: Array.isArray(payload['removedMessageIds']) ? (payload['removedMessageIds'] as unknown[]).length : 0
+    };
+  }
+
+  /** 删除本轮：只移除这一轮的提问与回答，其余轮次保持不动 */
+  async function deleteRound(conversationId: string, userMessageId: string): Promise<RoundActionResult> {
+    return applyRoundAction(conversationId, `/api/conversations/${encodeURIComponent(conversationId)}/rounds/${encodeURIComponent(userMessageId)}`, {
+      method: 'DELETE',
+      headers: actorHeaders()
+    });
+  }
+
+  /** 回档：截断到本轮发起前；revertEffects=true 时同时回退本轮产生的业务写入 */
+  async function rollbackRound(conversationId: string, userMessageId: string, revertEffects: boolean): Promise<RoundActionResult> {
+    return applyRoundAction(conversationId, `/api/conversations/${encodeURIComponent(conversationId)}/rollback`, {
+      method: 'POST',
+      headers: { ...actorHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userMessageId, revertEffects })
+    });
+  }
+
   /** 切换会话类型（聊天 ⇄ 任务）：服务端 PATCH 为权威，本地缓存同步更新 */
   async function setConversationMode(id: string, mode: 'chat' | 'task'): Promise<void> {
     const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
@@ -281,6 +395,9 @@ export const useSessionStore = defineStore('session', () => {
     conversations,
     currentId,
     currentMessages,
+    currentRounds,
+    workConversations,
+    chatConversations,
     messages,
     listLoading,
     listError,
@@ -301,9 +418,12 @@ export const useSessionStore = defineStore('session', () => {
     appendLocal,
     commitRun,
     removeConversation,
+    deleteRound,
+    rollbackRound,
     renameConversation,
     setConversationMode,
     timeLabel,
-    uid
+    uid,
+    roundsOf
   };
 });

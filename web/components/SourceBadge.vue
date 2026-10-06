@@ -29,7 +29,7 @@ const GLYPH: Record<DataSourceType, string> = {
 };
 
 const CAVEAT: Record<DataSourceType, string> = {
-  live: '实时数据：服务端直接读当前真实 state.json',
+  live: '当前业务数据：取证时间与授权范围见查询结果',
   snapshot: '脱敏快照：从真实数据导出后已脱敏，非实时',
   demo: '模拟演示：内置构造的示例数据，与真实实验室无关'
 };
@@ -49,7 +49,7 @@ const caveat = computed(() =>
       v-if="engine !== null && engine !== undefined"
       :tone="engine === 'agnes' ? 'ok' : 'warn'"
       :glyph="engine === 'agnes' ? '★' : '⚙'"
-      :label="engine === 'agnes' ? '引擎：Agnes 3.0 Flash' : '引擎：演示（规则）'"
+      :label="engine === 'agnes' ? '引擎：Agnes 3.0 Flash' : sourceType==='live' ? '引擎：确定性事实' : '引擎：演示（规则）'"
       :title="
         engine === 'agnes'
           ? '由 Agnes 3.0 Flash 做工具选择与回答生成'

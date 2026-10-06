@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {responseError} from '../http';
 /**
  * LabOps 专用登录页 —— 移植自心灵共鸣舱 LogIn.html 的成熟角色动画实现
  * ============================================================================
@@ -6,7 +7,7 @@
  *    含状态机/眨眼/偷瞄/捂眼/惊呆节拍/成功转场，与演示录屏逐帧一致）
  *  · 接线：登录组件挂载后动态加载 js（脚本在加载时绑定 #username/#password/#pwdToggle
  *    并自启）；对外只调 triggerSadState / playSuccessTransition 两个接口
- *  · 边界：本地演示门面（任意账号 + ≥4 位密码），无真实身份校验；会话内记住登录
+ *  · 正常部署复用主系统认证；仅显式 demo 模式使用演示门面
  */
 import { onMounted, ref } from 'vue';
 
@@ -22,6 +23,7 @@ declare global {
 }
 
 const emit = defineEmits<{ done: [account: string] }>();
+const props=defineProps<{mode?:'native'|'demo'}>();
 const account = ref('');
 const password = ref('');
 const errMsg = ref('');
@@ -50,11 +52,15 @@ function fail(msg: string): void {
     [u, p].forEach((el) => el && el.classList.remove('shake'));
   }, 320);
 }
-function submit(): void {
+async function submit(): Promise<void> {
   if (submitting.value) return;
-  if (!account.value.trim()) return fail('请输入账号（演示模式任意账号即可）');
-  if (password.value.length < 4) return fail('密码至少 4 位（本地演示，无身份校验）');
+  if (!account.value.trim()) return fail('请输入主系统账号');
+  if (!password.value) return fail('请输入密码');
   submitting.value = true;
+  if(props.mode!=='demo'){
+    try{const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account:account.value.trim(),password:password.value})});if(!r.ok)throw await responseError(r);await r.json();password.value='';}
+    catch(e){submitting.value=false;return fail((e as Error).message);}
+  }
   let entered = false;
   const finish = () => {
     if (entered) return;
@@ -125,12 +131,12 @@ function submit(): void {
 
         <div class="form-group">
           <label class="field-label" for="username">账号</label>
-          <input type="text" id="username" v-model="account" placeholder="请输入账号（演示模式任意账号）">
+          <input type="text" id="username" v-model="account" :placeholder="mode==='demo'?'演示账号':'请输入主系统账号'" autocomplete="username" @keyup.enter="submit">
         </div>
         <div class="form-group pwd-field" id="pwdGroup">
           <label class="field-label" for="password">密码</label>
           <div class="pwd-field-inner">
-            <input type="password" id="password" v-model="password" placeholder="输入您的密码（≥4 位）">
+            <input type="password" id="password" v-model="password" :placeholder="mode==='demo'?'演示密码':'请输入主系统密码'" autocomplete="current-password" @keyup.enter="submit">
             <button type="button" class="pwd-toggle" id="pwdToggle" aria-label="显示或隐藏密码" aria-pressed="false">
               <span class="t-show">显示</span><span class="t-hide">隐藏</span>
             </button>
@@ -138,8 +144,8 @@ function submit(): void {
         </div>
         <div v-if="errMsg" id="pwdError" class="error-msg" role="alert">{{ errMsg }}</div>
 
-        <button class="login-btn" @click="submit">登录</button>
-        <p class="gate-note">本地演示模式 · 登录为产品门面，无身份校验</p>
+        <button class="login-btn" :disabled="submitting" @click="submit">{{submitting?'正在登录…':'登录'}}</button>
+        <p class="gate-note">{{mode==='demo'?'本地隔离演示模式':'使用主系统账号和密码 · 自动识别身份并连接业务数据'}}</p>
       </section>
     </main>
   </div>

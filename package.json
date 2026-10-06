@@ -1,9 +1,9 @@
 {
   "name": "labops-agent",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
-  "description": "启真 LabOps：持久任务、故障事件联合办理与交接接续",
+  "description": "主系统统一身份、共享聊天与持久定时提醒",
   "engines": {
     "node": ">=22.18.0"
   },
@@ -16,10 +16,10 @@
     "start": "node server/index.ts",
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "seed": "node seed/make-snapshot.ts",
-    "test": "node --test tests/*.test.ts",
+    "test": "node --test --test-concurrency=1 tests/*.test.ts",
     "test:acceptance": "node --test tests/bridge-http.test.ts tests/stream-facts.test.ts",
     "test:browser": "node tests/review-browser.mjs",
-    "test:all": "npm run check:rules && npm run build && npm test && npm run test:review-browser && npm run test:next-browser && npm run test:v4-browser",
+    "test:all": "npm run check:rules && npm run build && npm test && npm run test:review-browser && npm run test:next-browser && npm run test:v4-browser && npm run test:v5-browser && npm run test:rounds-browser",
     "sync:rules": "node scripts/sync-rules.mjs",
     "check:rules": "node scripts/sync-rules.mjs --check",
     "demo": "node scripts/run-review.mjs",
@@ -29,7 +29,10 @@
     "test:legacy:browser": "node tests/browser.ts",
     "test:next-browser": "node tests/next-browser.mjs",
     "eval:model": "node scripts/evaluate-model.ts",
-    "test:v4-browser": "node tests/v4-browser.mjs"
+    "test:v4-browser": "node tests/v4-browser.mjs",
+    "test:v5-browser": "node tests/v5-browser.mjs",
+    "test:rounds-browser": "node tests/rounds-browser.mjs",
+    "eval:release": "node scripts/evaluate-release.mjs"
   },
   "dependencies": {
     "@vue/devtools-api": "8.2.1",

@@ -1,0 +1,7 @@
+<script setup lang="ts">
+import {ref} from 'vue';import {useBusinessStore,businessApi} from '../../stores/business';import type {ScheduledRulePlan} from '@shared/business';
+const props=defineProps<{plan:ScheduledRulePlan;scopeKey:string;readonly?:boolean}>(),business=useBusinessStore(),busy=ref(false),confirmed=ref(''),error=ref('');
+async function confirm(){if(props.readonly||props.scopeKey!==business.scopeKey)return;busy.value=true;error.value='';try{const r=await businessApi<{job:{id:string;status:string;version:number}}>('proxy/scheduled-jobs/confirm',{scopeKey:props.scopeKey,planId:props.plan.id});confirmed.value=r.job.id+' · '+r.job.status+' · v'+r.job.version;}catch(e){error.value=(e as Error).message;}finally{busy.value=false;}}
+</script>
+<template><section aria-label="定时规则待确认方案"><b>{{plan.spec.name}} · {{plan.action}}</b><p>时区 {{plan.spec.timezone}} · 接收对象 {{JSON.stringify(plan.spec.recipients)}} · 效果 {{plan.spec.approvedEffects.join('、')}}</p><ol><li v-for="o in plan.futureOccurrences" :key="o.at">{{o.local}}（UTC {{o.at}}）</li></ol><details><summary>到点内容样例</summary><pre>{{plan.sample.text}}</pre></details><p v-if="confirmed">已确认规则：{{confirmed}}。结果与审计可从「定时任务与提醒」回查。</p><button v-else :disabled="busy||readonly||business.scopeKey!==scopeKey" @click="confirm">本人核对后确认此规则操作</button><p v-if="error" role="alert">{{error}}</p></section></template>
+<style scoped>pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}section{padding:10px;border:1px solid var(--border);border-radius:8px}</style>

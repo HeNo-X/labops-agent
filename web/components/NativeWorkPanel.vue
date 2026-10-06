@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import {useSessionStore} from '../stores/session';
 import {ref,watch} from 'vue';
 import {useBusinessStore,businessApi} from '../stores/business';
 import type {NativeTaskList,NativeTaskDetail,NativeContext,BusinessResult,NativeIncident} from '@shared/business';
 import BusinessPlanCard from './BusinessPlanCard.vue';
 import NativeIncidentCard from './business/NativeIncidentCard.vue';
 const business=useBusinessStore(),open=ref(false),busy=ref(false),error=ref(''),data=ref<NativeTaskList>(),selected=ref<BusinessResult>(),selectedCard=ref(''),incidentId=ref(''),incidentTask=ref(''),showIncident=ref(false),incidents=ref<NativeIncident[]>([]);
+const session=useSessionStore();
 const labels:Record<string,string>={'schedule.move':'调课','duty.handover':'检查交接','duty.accept':'接收交接','duty.reassign':'指定接收人','duty.item':'遗留事项','resource.patch':'资源数据修正','issue.create':'报修','issue.action':'工单处理','notification.publish':'通知','closure.create':'停用','closure.revoke':'恢复开放','incident.bundle':'故障联合办理','incident.restore':'故障恢复','incident.takeover':'事件接续'};
 const statuses:Record<string,string>={draft:'草稿 / 待准备',awaiting_confirmation:'待本人确认',executed:'已提交 · 可回查',stale:'依据变化 · 可重算',expired:'方案过期 · 可重算',resolved:'事件已完成 · 可回查',in_progress:'事件办理中 · 可回查',delegated:'由其他管理员接续',rejected:'已拒绝',permission_changed:'权限变化 · 暂不可办理'};
 async function work(fn:(scope:string)=>Promise<void>){busy.value=true;error.value='';const scope=business.scopeKey;try{await fn(scope);}catch(e){error.value=(e as Error).message;}finally{busy.value=false;}}
@@ -20,13 +22,13 @@ async function queue(view:'duty'|'issues'|'health'){await work(async scope=>{con
 function newIncident(){showIncident.value=true;incidentId.value='';incidentTask.value='';selected.value=undefined;}
 watch(()=>business.scopeKey,()=>{data.value=undefined;selected.value=undefined;incidents.value=[];showIncident.value=false;incidentId.value='';if(open.value&&business.connected)void refresh();});
 </script>
-<template><div v-if="business.connected" class="native-work-entry"><button type="button" @click="show" :disabled="busy">我的工作</button><button v-if="business.profile?.identity==='admin'" type="button" @click="open=true;newIncident()">登记故障事件</button><span>按原账号恢复任务、待接收交接与工单</span></div>
+<template><div v-if="business.connected" class="native-work-entry"><button type="button" @click="show" :disabled="busy">我的工作</button><button v-if="business.profile?.identity==='admin'&&session.currentMode()!=='chat'" type="button" @click="open=true;newIncident()">登记故障事件</button><span>按原账号恢复任务、待接收交接与工单</span></div>
  <div v-if="open&&business.connected" class="native-work-mask" @click.self="open=false"><section class="native-work-panel" role="dialog" aria-modal="true" aria-label="我的工作"><header><b>我的工作 · {{business.profile?.username}}</b><button @click="refresh" :disabled="busy">刷新工作队列</button><button aria-label="关闭我的工作" @click="open=false">关闭</button></header><p v-if="error" role="alert">{{error}}</p>
   <div v-if="data" class="native-work-queues"><span>待本人确认 {{data.queues.confirmation.length}}</span><button @click="queue('duty')">待接收交接 {{data.queues.receive.length}}</button><button @click="queue('issues')">待处理工单 {{data.queues.processing.length}} · 待验收 {{data.queues.acceptance.length}}</button><button v-if="business.profile?.identity==='admin'" @click="queue('health')">资源数据健康</button><span>可恢复草稿 {{data.queues.recovery.length}}</span></div>
   <details v-if="data" open><summary>原系统任务 {{data.tasks.length}} 项</summary><div v-for="t in data.tasks" :key="t.id" class="native-work-row"><div><b>{{labels[t.kind]||t.kind}} · {{statuses[t.status]||t.status}}</b><p>{{t.id}} · {{t.entityId||'独立任务'}} · 修订 {{t.revision}} · {{t.updatedAt}}</p></div><button :data-task-id="t.id" :disabled="busy" @click="resume(t.id)">继续 / 回查</button></div><p v-if="!data.tasks.length">尚无原系统任务。可在对话中查询或准备业务方案。</p></details>
   <details v-if="incidents.length"><summary>故障事件 {{incidents.length}} 项</summary><button v-for="i in incidents" :key="i.id" @click="showIncident=true;selected=undefined;incidentId=i.id;incidentTask=(i.coordinatorId||i.actorId)===business.profile?.username?i.taskId:''">{{i.roomName}} · {{i.date}} · {{i.description}} · {{i.id}}</button></details>
-  <NativeIncidentCard v-if="showIncident" :key="incidentId||'new'" :scope-key="business.scopeKey" :incident-id="incidentId||undefined" :task-id="incidentTask||undefined"/>
-  <BusinessPlanCard v-if="selected" :key="selected.taskId||selectedCard" :result="selected" :card-id="selectedCard"/>
+  <NativeIncidentCard v-if="showIncident" :key="incidentId||'new'" :scope-key="business.scopeKey" :incident-id="incidentId||undefined" :task-id="incidentTask||undefined" :readonly="session.currentMode()==='chat'"/>
+  <BusinessPlanCard v-if="selected" :key="selected.taskId||selectedCard" :result="selected" :card-id="selectedCard" :readonly="session.currentMode()==='chat'"/>
  </section></div>
 </template>
 <style scoped>

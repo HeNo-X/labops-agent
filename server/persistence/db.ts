@@ -175,7 +175,28 @@ function initDatabase(): DatabaseSync {
     // 全部 IF NOT EXISTS —— 旧库直接补建，新库一次到位。
     conn.exec(OPS_SCHEMA_V2);
     conn.exec('CREATE TABLE IF NOT EXISTS ops_proposal_commits(proposalId TEXT PRIMARY KEY, operationId TEXT UNIQUE NOT NULL)');
-    conn.exec('PRAGMA user_version = 4');
+    // 0.6.0 轮次回档：沙盒写入补偿的独立台账。与 ops_audit 并列，不覆盖原始回执 ——
+    // 回执记录"发生过什么"，本表记录"后来又撤回了什么"，两者都不改历史。
+    conn.exec(`CREATE TABLE IF NOT EXISTS ops_reverts (
+      id TEXT PRIMARY KEY,
+      conversationId TEXT NOT NULL,
+      userMessageId TEXT NOT NULL,
+      operationId TEXT NOT NULL,
+      objectKind TEXT NOT NULL,
+      objectId TEXT NOT NULL,
+      action TEXT NOT NULL,
+      status TEXT NOT NULL,
+      detail TEXT,
+      actorId TEXT NOT NULL,
+      createdAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_ops_reverts_conv ON ops_reverts(conversationId, createdAt);`);
+    // 旧库补 biz_notifications.status（检查 schema 后再 ALTER，缺哪补哪）
+    const ntfCols = (conn.prepare(`PRAGMA table_info(biz_notifications)`).all() as Array<Record<string, unknown>>).map((r) => String(r['name']));
+    if (ntfCols.length && !ntfCols.includes('status')) {
+      conn.exec(`ALTER TABLE biz_notifications ADD COLUMN status TEXT NOT NULL DEFAULT 'published'`);
+    }
+    conn.exec('PRAGMA user_version = 5');
     if (migrated) console.log('[persistence] 旧库升级完成（含遗留运行恢复）');
     return conn;
   } catch (err) {
@@ -706,6 +727,7 @@ CREATE TABLE IF NOT EXISTS biz_notifications (
   publishedById TEXT NOT NULL,
   publishedByRole TEXT NOT NULL,
   publishedAt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'published',
   revision INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS biz_closures (
@@ -1143,6 +1165,7 @@ export function insertBizNotification(input: {
     audienceSummary: input.audienceSummary,
     recipientCount: input.recipientCount,
     readTracking: 'not_connected',
+    status: 'published',
     publishedBy: input.actor,
     publishedAt: now,
     revision: 1
@@ -1280,4 +1303,213 @@ export function finalizeAssistantMessage(
     d.exec('ROLLBACK');
     throw err;
   }
+}
+
+// ===========================================================================
+//  轮次（round）—— 删除本轮 / 回档到本轮发起前（0.6.0）
+// ============================================================================
+//  一轮 = 一条 user 消息 + 紧随其后、直到下一条 user 之前的全部 assistant 消息。
+//  纪律：
+//   · 删除与回档都只动本会话的消息与 runs，绝不触碰 ops_* 历史与 biz_* 业务表
+//     （业务写入的撤销是独立的一步，见 operations/revert.ts，且必须在审计里留痕）。
+//   · 上下文快照按**与 finalizeAssistantMessage 完全一致**的语义重算：
+//     该函数用 COALESCE 写入 contextLab/Date/Task，所以"最后一个非空值"才是当时的真实值，
+//     直接取最后一条消息的 context 会把仍有效的上下文误清空。
+// ============================================================================
+
+export interface RoundSlice {
+  /** 本轮全部消息（含 user，按 ordinal 升序） */
+  round: MessageRow[];
+  /** 从本轮起、到会话末尾的全部消息（回档范围） */
+  fromHere: MessageRow[];
+  /** 本轮之后的消息（删除本轮时保持不动） */
+  following: MessageRow[];
+}
+
+/** 定位 userMessageId 所属轮次；非本会话 / 非 user 消息返回 null */
+export function selectRound(conversationId: string, userMessageId: string): RoundSlice | null {
+  const all = getMessages(conversationId);
+  const idx = all.findIndex((m) => m.id === userMessageId);
+  if (idx < 0) return null;
+  if (all[idx]!.role !== 'user') return null;
+  let end = idx + 1;
+  while (end < all.length && all[end]!.role !== 'user') end += 1;
+  return { round: all.slice(idx, end), fromHere: all.slice(idx), following: all.slice(end) };
+}
+
+export interface RemovalResult {
+  removedMessageIds: string[];
+  removedRunIds: string[];
+}
+
+/**
+ * 删除指定消息及引用它们的 runs（单事务）。runs 以 assistantMessageId 反查 ——
+ * 不删的话会留下悬空的 running 记录，把会话永久锁死（createMessageWithRun 的活跃互斥）。
+ */
+export function deleteMessagesAndRuns(conversationId: string, messageIds: string[]): RemovalResult {
+  const ids = [...new Set(messageIds.filter(Boolean))];
+  if (!ids.length) return { removedMessageIds: [], removedRunIds: [] };
+  const d = getDb();
+  const marks = ids.map(() => '?').join(',');
+  d.exec('BEGIN');
+  try {
+    const runRows = d
+      .prepare(`SELECT id FROM runs WHERE conversationId = ? AND assistantMessageId IN (${marks})`)
+      .all(conversationId, ...ids) as Array<Record<string, unknown>>;
+    const removedRunIds = runRows.map((r) => String(r['id']));
+    for (const rid of removedRunIds) {
+      activeRunMap.delete(rid);
+      d.prepare(`DELETE FROM runs WHERE id = ?`).run(rid);
+    }
+    // 只报实际存在的消息，调用方据此判断"是否真的删掉了东西"（幂等重放返回空数组）
+    const existing = (d
+      .prepare(`SELECT id FROM messages WHERE conversationId = ? AND id IN (${marks})`)
+      .all(conversationId, ...ids) as Array<Record<string, unknown>>).map((r) => String(r['id']));
+    d.prepare(`DELETE FROM messages WHERE conversationId = ? AND id IN (${marks})`).run(conversationId, ...ids);
+    d.prepare(`UPDATE conversations SET lastActivityAt = ? WHERE id = ?`).run(new Date().toISOString(), conversationId);
+    d.exec('COMMIT');
+    return { removedMessageIds: existing, removedRunIds };
+  } catch (err) {
+    d.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+/**
+ * 重算会话上下文快照：对每个字段取"最近一条 assistant 消息 meta.context 中的非空值"，
+ * 与 finalizeAssistantMessage 的 COALESCE 写入语义严格对应。无消息时全部清空。
+ */
+export function recomputeConversationContext(conversationId: string): ContextSnapshot {
+  const rows = getDb()
+    .prepare(`SELECT meta FROM messages WHERE conversationId = ? AND role = 'assistant' ORDER BY ordinal DESC`)
+    .all(conversationId) as Array<Record<string, unknown>>;
+  const ctx: ContextSnapshot = { labName: null, date: null, task: null };
+  for (const r of rows) {
+    if (ctx.labName && ctx.date && ctx.task) break;
+    if (!r['meta']) continue;
+    let meta: Record<string, unknown>;
+    try {
+      meta = JSON.parse(String(r['meta'])) as Record<string, unknown>;
+    } catch {
+      continue; // 损坏的 meta 不该让回档整体失败
+    }
+    const c = meta['context'] as { labName?: string | null; date?: string | null; task?: string | null } | null | undefined;
+    if (!c) continue;
+    if (!ctx.labName && c.labName) ctx.labName = c.labName;
+    if (!ctx.date && c.date) ctx.date = c.date;
+    if (!ctx.task && c.task) ctx.task = c.task;
+  }
+  saveContext(conversationId, ctx);
+  return ctx;
+}
+
+/**
+ * 轮次失效：把该轮涉及的待确认提案标为 superseded（不是 expired —— 它没有过期，
+ * 是被用户回档作废的），并把对应任务置为 cancelled 时一并返回。
+ * 已执行（executed）的提案不动：业务写入的撤销走 revert 通道。
+ */
+export function supersedePendingProposals(proposalIds: string[]): string[] {
+  const out: string[] = [];
+  const stmt = getDb().prepare(`UPDATE ops_proposals SET state = 'superseded' WHERE id = ? AND state = 'awaiting_confirmation'`);
+  for (const id of [...new Set(proposalIds.filter(Boolean))]) {
+    if (Number(stmt.run(id).changes) > 0) out.push(id);
+  }
+  return out;
+}
+
+/** 任务置为 cancelled（已完成/已失败的保持原状 —— 那是既成事实，不该被回档改写） */
+export function cancelOpsTasks(taskIds: string[]): string[] {
+  const out: string[] = [];
+  const stmt = getDb().prepare(`UPDATE ops_tasks SET status = 'cancelled', revision = revision + 1, updatedAt = ? WHERE id = ? AND status IN ('awaiting_confirmation','expired')`);
+  const now = new Date().toISOString();
+  for (const id of [...new Set(taskIds.filter(Boolean))]) {
+    if (Number(stmt.run(now, id).changes) > 0) out.push(id);
+  }
+  return out;
+}
+
+// --------------------------- 沙盒业务对象的补偿（回档专用） ---------------------------
+
+export interface BizRevertOutcome {
+  objectKind: string;
+  objectId: string;
+  action: string;
+  status: 'reverted' | 'skipped';
+  detail: string;
+}
+
+/** 工单：撤回为 reverted（不再是 open，日报与未结计数自然不再包含它） */
+export function revertBizIssue(id: string): BizRevertOutcome {
+  const r = getDb().prepare(`UPDATE biz_issues SET status = 'reverted', revision = revision + 1 WHERE id = ? AND status <> 'reverted'`).run(id);
+  return { objectKind: 'issue', objectId: id, action: 'issue.revert', status: Number(r.changes) > 0 ? 'reverted' : 'skipped', detail: Number(r.changes) > 0 ? '工单已撤回，不再计为未结' : '工单不存在或已撤回，未重复处理' };
+}
+
+/** 站内通知：撤回为 reverted；outbox 投递记录一并作废 */
+export function revertBizNotification(id: string): BizRevertOutcome {
+  const d = getDb();
+  const r = d.prepare(`UPDATE biz_notifications SET status = 'reverted', revision = revision + 1 WHERE id = ? AND status <> 'reverted'`).run(id);
+  d.prepare(`UPDATE ops_outbox SET status = 'cancelled' WHERE status <> 'cancelled' AND json_extract(payload, '$.notificationId') = ?`).run(id);
+  return {
+    objectKind: 'notification',
+    objectId: id,
+    action: 'notification.revert',
+    status: Number(r.changes) > 0 ? 'reverted' : 'skipped',
+    detail: Number(r.changes) > 0 ? '站内通知已撤回（本系统内作废；已送达的告知无法收回）' : '通知不存在或已撤回，未重复处理'
+  };
+}
+
+/** 房间停用：恢复为 restored（契约里既有的终态，语义就是"停用已解除"） */
+export function revertBizClosure(id: string): BizRevertOutcome {
+  const r = getDb().prepare(`UPDATE biz_closures SET status = 'restored', revision = revision + 1 WHERE id = ? AND status = 'active'`).run(id);
+  return { objectKind: 'closure', objectId: id, action: 'closure.restore', status: Number(r.changes) > 0 ? 'reverted' : 'skipped', detail: Number(r.changes) > 0 ? '房间停用已解除' : '停用不存在或已解除，未重复处理' };
+}
+
+/** 值班会话：开班的撤销为 reverted；已交接的退回 open（等于撤销这次交接） */
+export function revertBizDutySession(id: string, handedOver: boolean): BizRevertOutcome {
+  const d = getDb();
+  if (handedOver) {
+    const r = d.prepare(`UPDATE biz_duty_sessions SET status = 'open', checklist = NULL, handoverNote = NULL, revision = revision + 1 WHERE id = ? AND status = 'handed_over'`).run(id);
+    return { objectKind: 'duty_session', objectId: id, action: 'duty.handover.revert', status: Number(r.changes) > 0 ? 'reverted' : 'skipped', detail: Number(r.changes) > 0 ? '交接已撤销，值班会话回到进行中' : '值班会话不存在或不是已交接状态，未重复处理' };
+  }
+  const r = d.prepare(`UPDATE biz_duty_sessions SET status = 'reverted', revision = revision + 1 WHERE id = ? AND status = 'open'`).run(id);
+  return { objectKind: 'duty_session', objectId: id, action: 'duty.start.revert', status: Number(r.changes) > 0 ? 'reverted' : 'skipped', detail: Number(r.changes) > 0 ? '值班已撤销' : '值班会话不存在、已交接或已撤销，未重复处理' };
+}
+
+export interface RevertRecordInput {
+  conversationId: string;
+  userMessageId: string;
+  operationId: string;
+  outcome: BizRevertOutcome;
+  actorId: string;
+}
+
+/** 回档留痕：独立台账 + 审计双写，便于"回执说发生了什么 / 本表说撤回了什么"对照 */
+export function recordOpsRevert(input: RevertRecordInput): void {
+  const d = getDb();
+  const now = new Date().toISOString();
+  const id = opsId('rvk');
+  d.prepare(
+    `INSERT INTO ops_reverts (id, conversationId, userMessageId, operationId, objectKind, objectId, action, status, detail, actorId, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, input.conversationId, input.userMessageId, input.operationId, input.outcome.objectKind, input.outcome.objectId, input.outcome.action, input.outcome.status, input.outcome.detail, input.actorId, now);
+  insertOpsAudit({
+    actorId: input.actorId,
+    action: input.outcome.action,
+    objectKind: input.outcome.objectKind,
+    objectId: input.outcome.objectId,
+    operationId: input.operationId,
+    detail: { revertId: id, conversationId: input.conversationId, userMessageId: input.userMessageId, status: input.outcome.status }
+  });
+}
+
+export function listOpsReverts(conversationId: string, limit = 50): Array<Record<string, unknown>> {
+  return getDb()
+    .prepare(`SELECT * FROM ops_reverts WHERE conversationId = ? ORDER BY createdAt DESC LIMIT ?`)
+    .all(conversationId, limit) as Array<Record<string, unknown>>;
+}
+
+/** 该 operation 是否已被回档过（幂等：同一对象不重复记两次） */
+export function hasRevertedOperation(operationId: string): boolean {
+  const row = getDb().prepare(`SELECT id FROM ops_reverts WHERE operationId = ? AND status = 'reverted' LIMIT 1`).get(operationId);
+  return Boolean(row);
 }

@@ -490,7 +490,16 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   let toolCalls = 0;
   let answer = '';
   let usage: TokenUsage = {promptTokens:0,completionTokens:0,totalTokens:0};
-  let lastToolSummary: string | null = null;
+  /**
+   * 最近一次**失败**的工具调用，用于 run_failed 上报真实原因。
+   *
+   * 为什么不是 lastToolSummary：走到「本轮没有 verifiedAnswers」这条分支时，
+   * 不可能存在任何**成功**的工具调用（成功必进 verifiedAnswers），
+   * 所以「只在成功时赋值」的 lastToolSummary 在该分支恒为 null ——
+   * 结果是用户永远只看得到一句通用文案，而 tool_result.error 里的真实原因
+   * 被折叠在「已执行 N 次工具调用」面板里，用户无从自查。
+   */
+  let lastToolFailure: { tool: string; code: string; message: string; suggestions: string[] } | null = null;
   const verifiedAnswers: string[] = [];
   const businessFacts:BusinessResult[]=[];
   let modelFinal='';
@@ -609,7 +618,6 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
       if (exec.ok) {
         if(exec.resultKind==='business_plan')businessFacts.push(exec.result);
         verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label}));
-        lastToolSummary = exec.summary;
         yield a.emit('tool_result', {
           step: steps,
           toolCallId,
@@ -642,6 +650,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
           })
         });
       } else {
+        // 记下真实失败原因：这是 run_failed 能给出可执行提示的唯一来源
+        lastToolFailure = { tool: name, code: exec.code, message: exec.message, suggestions: exec.suggestions };
         yield a.emit('tool_result', {
           step: steps,
           toolCallId,
@@ -676,7 +686,22 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     const explanation=verifiedRecommendation(modelFinal,businessFacts);
     answer = verifiedAnswers.join('\n\n')+(explanation?'\n\n'+explanation:'');
   } else if (!SMALLTALK_RE.test(a.question.trim())) {
-    yield a.emit('run_failed',{code:'evidence_missing',message:lastToolSummary ?? '本轮未取得可验证业务依据，未生成事实结论。请明确日期、房间或所需操作后重试。',hint:'查看工具结果，补齐参数再重试'} satisfies RunFailedPayload);
+    // 走到这里 ⇒ 本轮没有任何成功的工具调用（成功必进 verifiedAnswers）。
+    // 旧实现用 lastToolSummary 兜底，它在该分支恒为 null ⇒ 永远只说「请明确日期、房间或所需操作」
+    // 这类通用文案 —— 对「帮我发一条通知」这种**已经说清操作**的请求是无效建议，
+    // 会诱导用户反复重试；真实原因其实就在 tool_result.error 里。
+    const f = lastToolFailure;
+    const message = f
+      ? `你要求的操作没有完成：${f.message}（工具 ${f.tool}｜错误码 ${f.code}）`
+      : '本轮没有得到任何可核验的业务结果，因此没有给出结论 —— 不会用常识补一个答案。';
+    const hint = !f
+      ? '可以换个可查询的问法，例如「E310 今天有哪些课」；办理类需求请到「我的工作」中操作。'
+      : f.code === 'scope_forbidden' || f.code === 'mode_forbidden' || f.code === 'unknown_tool'
+        ? '这不是参数问题：当前身份或当前模式下该办理工具不可用。请确认模式与权限，或到主系统对应页面办理。'
+        : f.suggestions.length
+          ? `可选项：${f.suggestions.slice(0, 8).join('、')}`
+          : '请按上面的原因调整后重试；若反复失败，请把错误码提供给管理员。';
+    yield a.emit('run_failed', { code: 'evidence_missing', message, hint } satisfies RunFailedPayload);
     return;
   }
   if (!answer.trim()) answer = '你好，可以查询课表、房间状态，或在任务模式准备办理单。';

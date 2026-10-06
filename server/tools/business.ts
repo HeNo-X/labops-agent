@@ -32,9 +32,76 @@ export async function queryBusiness(args:Record<string,unknown>,ctx:ToolContext)
   }catch(e){return fail(e);}
 }
 export async function queryDuty(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{return queryBusiness({...args,view:'duty'},ctx);}
+/**
+ * 原系统通知受众的口径归一（2026-10-06 修复 bad_audience）
+ * ============================================================================
+ *  事实：沙盒工具 `prepare_notification` 的受众是 `{kind:'class_ids'|'role_scope'|'all'}`，
+ *  而原系统 `/workflow/preview`（notification.publish）只认 `{kind:'all'|'role'|'class'|'user'}`
+ *  （见 Pages/server/operations.js 的 validateAudience）。两个工具同处一份工具清单，
+ *  模型很容易把沙盒词表套到原系统工具上 —— 实测就会出现 `bad_audience 接收对象无效`。
+ *
+ *  这里只做**语义等价的词表翻译**（role_scope→role；单班级的 class_ids→class）。
+ *  一旦有歧义（多班级、角色不明、给管理员群发）就明确报错并列出可选形式 ——
+ *  通知的收件人绝不能靠猜，猜错就是打扰一批不该收到的人。
+ */
+export type AudienceCheck = { ok: true; audience: Record<string, unknown> } | { ok: false; message: string };
+
+const AUDIENCE_FORMS = '请说明发给谁：全体（all）／志愿者（role=volunteer）／学生（role=student）／某个班级（class+className）／某个账号（user+userId）';
+
+function checkRole(raw: unknown): AudienceCheck {
+  const role = String(raw ?? '').trim();
+  if (role === 'student' || role === 'volunteer') return { ok: true, audience: { kind: 'role', role } };
+  if (role === 'admin' || role === '管理员') {
+    return { ok: false, message: `原系统不支持给「管理员」群发通知；${AUDIENCE_FORMS}` };
+  }
+  return { ok: false, message: `role 只能是 student 或 volunteer（收到「${role || '（空）'}」）；${AUDIENCE_FORMS}` };
+}
+
+export function normalizeNoticeAudience(raw: unknown): AudienceCheck {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, message: `缺少接收对象 audience；${AUDIENCE_FORMS}` };
+  }
+  const a = raw as Record<string, unknown>;
+  const kind = String(a['kind'] ?? '').trim();
+  // —— 沙盒词表（prepare_notification 用）→ 原系统词表 ——
+  if (kind === 'role_scope') return checkRole(a['role']);
+  if (kind === 'class_ids' || kind === 'classes' || kind === 'classNames') {
+    const list = (Array.isArray(a['classIds']) ? a['classIds'] : Array.isArray(a['classes']) ? a['classes'] : []).map((x) => String(x).trim()).filter(Boolean);
+    if (list.length === 1) return { ok: true, audience: { kind: 'class', className: list[0] } };
+    if (list.length > 1) {
+      return { ok: false, message: `原系统一次只能给一个班级发通知（收到 ${list.length} 个班级：${list.join('、')}）；请拆成多条通知，或改为发给全体/志愿者/学生` };
+    }
+    return { ok: false, message: `class_ids 没有给出班级名称；${AUDIENCE_FORMS}` };
+  }
+  // —— 原系统词表 ——
+  if (kind === 'all') return { ok: true, audience: { kind: 'all' } };
+  if (kind === 'role') return checkRole(a['role']);
+  if (kind === 'class') {
+    const className = String(a['className'] ?? '').trim();
+    return className ? { ok: true, audience: { kind: 'class', className } } : { ok: false, message: `kind=class 时必须给出 className（班级名称）；${AUDIENCE_FORMS}` };
+  }
+  if (kind === 'user') {
+    const userId = String(a['userId'] ?? a['username'] ?? '').trim();
+    return userId ? { ok: true, audience: { kind: 'user', userId } } : { ok: false, message: `kind=user 时必须给出 userId（账号）；${AUDIENCE_FORMS}` };
+  }
+  return {
+    ok: false,
+    message:
+      `接收对象类型「${kind || '（空）'}」无效：原系统只接受 all / role / class / user。` +
+      `注意 class_ids 与 role_scope 是**沙盒工具** prepare_notification 的写法，原系统工具请用 class 与 role。${AUDIENCE_FORMS}`
+  };
+}
+
 export async function prepareWorkflow(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{
   if(ctx.mode==='chat')return fail(new Error('聊天模式不能准备业务方案，请切换任务模式'));
-  try{const endpoint=args['kind']==='duty.handover'?'/handover/preview':'/workflow/preview';const r=await businessRequest(endpoint,'POST',{...args,conversationId:ctx.conversationId||undefined},ctx.signal);const plan=r['plan'] as NativePlan;
+  // 通知：先把受众口径归一，口径不对就不发请求（省一次往返，也避免把无效方案落到原系统任务上）
+  let payload:Record<string,unknown>=args;
+  if(args['kind']==='notification.publish'){
+    const audited=normalizeNoticeAudience(args['audience']);
+    if(!audited.ok)return {ok:false,code:'bad_audience',message:audited.message,suggestions:[],summary:'通知的接收对象未确定，尚未提交任何内容'};
+    payload={...args,audience:audited.audience};
+  }
+  try{const endpoint=payload['kind']==='duty.handover'?'/handover/preview':'/workflow/preview';const r=await businessRequest(endpoint,'POST',{...payload,conversationId:ctx.conversationId||undefined},ctx.signal);const plan=r['plan'] as NativePlan;
     return result({plan,task:r['task'] as BusinessResult['task'],taskId:plan.taskId,view:plan.kind==='resource.patch'?'health':plan.kind.startsWith('duty.')?'duty':plan.kind.startsWith('issue.')?'issues':plan.kind.startsWith('closure.')?'closures':'notifications',sourceRevision:plan.sourceRevision,summary:'原系统待确认方案已准备；业务尚未提交，请核对后本人点击确认。'},ctx);
   }catch(e){return fail(e);}
 }

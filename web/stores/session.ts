@@ -42,9 +42,11 @@ export interface ChatMessage {
   status: 'completed' | 'failed' | 'cancelled' | 'interrupted' | 'streaming';
   toolCalls: ToolCallRecord[];
   engine?: string | null;
+  /** 实际产出这条回答的模型（如 agnes-3.0-flash / deepseek-v4-flash-0731）；规则引擎为空 */
+  model?: string | null;
   sourceType?: string | null;
   ms?: number;
-  error?: { code: string; message: string } | null;
+  error?: { code: string; message: string; hint?: string } | null;
   responseMode?: 'chat'|'task';
   queriedAt?:string;
   scope?:string;
@@ -240,6 +242,7 @@ export const useSessionStore = defineStore('session', () => {
             status: (m['status'] as ChatMessage['status']) ?? 'completed',
             toolCalls: ((m['meta'] as Record<string, unknown> | null)?.['toolCalls'] as ToolCallRecord[]) ?? [],
             engine: (m['meta'] as Record<string, unknown> | null)?.['engine'] != null ? String((m['meta'] as Record<string, unknown>)['engine']) : null,
+            model: (m['meta'] as Record<string, unknown> | null)?.['model'] != null ? String((m['meta'] as Record<string, unknown>)['model']) : null,
             sourceType: (m['meta'] as Record<string, unknown> | null)?.['sourceType'] != null ? String((m['meta'] as Record<string, unknown>)['sourceType']) : null,
             ms: Number((m['meta'] as Record<string, unknown> | null)?.['ms'] ?? 0) || undefined,
             error: ((m['meta'] as Record<string, unknown> | null)?.['error'] as ChatMessage['error']) ?? null,
@@ -300,7 +303,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   /** 活跃轮结束：把 run store 的结果固化为一条历史消息 */
-  function commitRun(payload: { role: 'user' | 'assistant'; text: string; status: ChatMessage['status']; toolCalls: ToolCallRecord[]; engine?: string | null; sourceType?: string | null; ms?: number; error?: ChatMessage['error']; clientRequestId: string }): void {
+  function commitRun(payload: { role: 'user' | 'assistant'; text: string; status: ChatMessage['status']; toolCalls: ToolCallRecord[]; engine?: string | null; model?: string | null; sourceType?: string | null; ms?: number; error?: ChatMessage['error']; clientRequestId: string }): void {
     const id = currentId.value;
     if (!id) return;
     appendLocal(id, {
@@ -310,6 +313,7 @@ export const useSessionStore = defineStore('session', () => {
       status: payload.status,
       toolCalls: payload.toolCalls,
       engine: payload.engine ?? null,
+      model: payload.model ?? null,
       sourceType: payload.sourceType ?? null,
       ms: payload.ms,
       error: payload.error ?? null,

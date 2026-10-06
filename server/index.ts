@@ -26,7 +26,7 @@ import { handleConversations } from './api/conversations.ts';
 import { handleTasksApi } from './api/tasks.ts';
 import { loadDataset, verifySnapshotIntegrity } from './data/store.ts';
 import { runtimeCapabilities } from './agent/run.ts';
-import { engineForMode } from './llm/router.ts';
+import { engineForMode, modelPlan } from './llm/router.ts';
 import { loggerFor } from './obs/trace.ts';
 import { PROMPT_VERSION } from './agent/prompts.ts';
 
@@ -184,6 +184,9 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       // 而服务端其实处于演示引擎模式（界面上的机制说明就成了假话）。
       engine: engineForMode('task'),
       engineByMode: { chat: engineForMode('chat'), task: engineForMode('task') },
+      // 分模式的**模型清单**（只有模型 id，绝不含任何密钥）：运维与界面据此核对
+      //「聊天走 DashScope 链 / 任务走 Agnes」是否真的生效，而不是只看服务端自述。
+      modelsByMode: modelPlan(),
       provenance: {
         snapshotAt: ds.meta.snapshotAt ?? null,
         sourceSha256Prefix: ds.meta.sourceSha256Prefix ?? null,

@@ -113,9 +113,32 @@ async function copyAnswer(): Promise<void> {
   }
 }
 
-const engineLabel = computed(() =>
-  props.msg.engine === 'agnes' ? 'Agnes 3.0 Flash' : props.msg.engine === 'demo' ? props.msg.sourceType==='live'?'确定性事实引擎':'演示引擎' : props.msg.engine === 'facts' ? '可靠事实转换' : ''
-);
+/**
+ * 引擎/模型标注 —— 必须显示**真正在回答的那个模型**。
+ * 之前只在 engine==='agnes' 时硬编码"Agnes 3.0 Flash"：聊天模式走 DashScope 链时
+ * 标签直接是空的，用户无从知道是谁在回答，也无从核对模式分流是否生效。
+ * 现在优先显示 run_completed 回带的真实模型 id；只有拿不到时才退回提供方名。
+ */
+const engineLabel = computed(() => {
+  const m = props.msg.model;
+  switch (props.msg.engine) {
+    case 'dashscope':
+      return m ? `DashScope · ${m}` : 'DashScope（聊天链）';
+    case 'agnes':
+      return m ? `Agnes · ${m}` : 'Agnes';
+    case 'demo':
+      return props.msg.sourceType === 'live' ? '确定性事实引擎' : '演示引擎';
+    case 'facts':
+      return '可靠事实转换';
+    default:
+      return m ?? '';
+  }
+});
+const engineTitle = computed(() => {
+  if (props.msg.engine === 'dashscope') return `聊天模式固定走 DashScope（阿里云百炼）多模型链，本轮的模型是 ${props.msg.model ?? '未标注'}`;
+  if (props.msg.engine === 'agnes') return `工作（任务）模式固定走 Agnes，本轮的模型是 ${props.msg.model ?? '未标注'}`;
+  return '本轮未调用大模型，由服务端规则引擎生成';
+});
 </script>
 
 <template>
@@ -126,7 +149,7 @@ const engineLabel = computed(() =>
       <div class="msg__ahead">
         <span class="msg__who">Agent</span>
         <StatusTag :tone="statusMeta.tone" :glyph="statusMeta.glyph" :label="statusMeta.label" />
-        <span v-if="engineLabel" class="msg__engine">{{ engineLabel }}</span>
+        <span v-if="engineLabel" class="msg__engine" :title="engineTitle">{{ engineLabel }}</span>
         <span v-if="msg.ms" class="msg__ms">{{ msg.ms }} ms</span>
         <button v-if="msg.text && !isUser" type="button" class="msg__copy" @click="copyAnswer">
           {{ copied ? '已复制' : '复制' }}
@@ -175,7 +198,9 @@ const engineLabel = computed(() =>
       />
       <ReportCard v-for="a in reportArtifacts" :key="a.key" :report="a.report" />
       <TaskResult v-for="a in queryArtifacts" :key="a.key" :artifact="{ kind: a.kind, result: a.result }" :engine="(msg.engine as EngineType | null | undefined)" />
-      </template><p v-if="msg.error" class="msg__err" role="alert">失败原因：{{ msg.error.code }} {{ msg.error.message }}</p>
+      </template><p v-if="msg.error" class="msg__err" role="alert">
+        失败原因：{{ msg.error.code }} {{ msg.error.message }}<span v-if="msg.error.hint" class="msg__errhint">建议：{{ msg.error.hint }}</span>
+      </p>
       <div v-if="(msg.status === 'failed' || msg.status === 'interrupted') && !run.inputLocked" class="msg__retryrow">
         <button type="button" class="msg__retry" @click="emit('retry')">重新执行上一问</button>
       </div>
@@ -251,6 +276,11 @@ const engineLabel = computed(() =>
 }
 .msg__err {
   color: var(--danger);
+}
+.msg__errhint {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
 }
 .msg__trace,
 .msg__tools {

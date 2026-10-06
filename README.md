@@ -43,6 +43,14 @@ Node.js >=22.18.0。保留同级 `../Pages/`，按根 [README](../README.md) 运
 
 在室人数取自原系统 `GET /api/integration/occupancy`（当日有效签到−有效签退，与主系统页面同源），连接账号后即可查询，房间当天无签到时给 `0` 而不是"未知"；业务通道未连接或未取得授权时才如实标注取不到。逐人签到/签退/补签明细没有对外开放接口，仍明确说不可得。
 
+## 模型分流
+
+**聊天模式 → DashScope（阿里云百炼）多模型链**，按 `DASHSCOPE_MODELS` 顺序 fallback（仅在该模型尚未吐字时切换）；**工作（任务）模式 → Agnes**（`AGNES_MODEL`）。某一模式未配置对应 Key 时，该模式回落**服务端规则引擎**，不会借用另一家的 Key，启动日志与界面都会如实标注。
+
+每条回答都会显示**真正生效的模型**（如 `DashScope · deepseek-v4-flash-0731`、`Agnes · agnes-3.0-flash`）；`/api/state` 与 `/api/agent/health` 暴露 `modelsByMode`（只有模型 id，不含密钥）供核对。
+
+通知类办理的接收对象用**原系统口径**：`{"kind":"all"}`、`{"kind":"role","role":"student"|"volunteer"}`、`{"kind":"class","className":"…"}`、`{"kind":"user","userId":"…"}`（沙盒工具 `prepare_notification` 的 `class_ids`/`role_scope` 会被自动翻译；多班级或收件人不明时服务端会要求先确认，不会替用户猜）。
+
 会话正在执行时，以上操作一律禁用，服务端也会以 409 拒绝且不改动任何数据。设计依据、调研出处与验证证据见 [会话分区与轮次操作](docs/会话分区与轮次操作-开发规划.md)。
 
 ## 验证与限制

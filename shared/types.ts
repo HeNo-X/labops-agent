@@ -88,6 +88,8 @@ export interface RunStartedPayload {
   /** 用户原始问题（原样回显，便于前端渲染用户气泡） */
   question: string;
   engine: EngineType;
+  /** 本模式的模型标识（聊天=DashScope 链首，任务=Agnes）；未配置大模型时缺省。界面据此显示"谁在回答" */
+  model?: string;
   /** 本次结果的数据来源；前端据此显示"实时数据/脱敏快照/模拟演示" */
   sourceType: DataSourceType;
   /** 服务端时间（Asia/Shanghai），不信任客户端时钟 */
@@ -159,6 +161,8 @@ export interface RunCompletedPayload {
   ms: number;
   sourceType: DataSourceType;
   engine: EngineType;
+  /** 实际产出本次回答的模型（fallback 后是真正生效的那个）；规则引擎时为缺省 */
+  model?: string;
   /**
    * ops.v1：本次运行结束时关联任务的业务状态。
    * awaiting_confirmation 必须如实呈现——它**不是**"业务已办完"（任务书 §11.3）。

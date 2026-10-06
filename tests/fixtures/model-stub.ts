@@ -35,16 +35,30 @@ export function engineForMode(mode: 'chat' | 'task'): string {
   return mode === 'task' ? 'agnes' : 'agnes';
 }
 
+/** 与 router.ts 的 modelForMode/modelPlan 对齐：run_started 会写入计划模型 */
+export const STUB_MODELS: Record<'chat' | 'task', string> = { chat: 'stub-chat-model', task: 'stub-task-model' };
+export function modelForMode(mode: 'chat' | 'task'): string {
+  return STUB_MODELS[mode] ?? STUB_MODELS.task;
+}
+export function modelPlan(): { chat: string[]; task: string[] } {
+  return { chat: [STUB_MODELS.chat], task: [STUB_MODELS.task] };
+}
+
 /**
  * 签名与 server/llm/router.ts 的 streamChatWithFallback 对齐。
  * 轮次判定：run.ts 每执行完一轮就把 assistant 消息 push 回上下文，
  * 所以「上下文里 assistant 消息的条数」就是当前是第几轮。
+ *
+ * onAttempt：真实实现会在每次真正发起请求前回调。这里同样回调，
+ * 让 run_completed.model 断言的是"实际使用的模型"这条真实链路。
  */
 export async function* streamChatWithFallback(
   opts: { messages: Array<{ role: string }>; tools?: unknown; signal?: AbortSignal },
-  _mode?: 'chat' | 'task',
-  _log?: unknown
+  mode: 'chat' | 'task' = 'task',
+  _log?: unknown,
+  onAttempt?: (spec: { name: 'dashscope' | 'agnes'; apiKey: string; baseUrl: string; model: string }) => void
 ): AsyncGenerator<StubEvent> {
+  onAttempt?.({ name: mode === 'chat' ? 'dashscope' : 'agnes', apiKey: 'stub', baseUrl: 'stub', model: STUB_MODELS[mode] ?? STUB_MODELS.task });
   const turn = opts.messages.filter((m) => m.role === 'assistant').length;
   const step: StubTurn = script[turn] ?? { kind: 'none' };
 

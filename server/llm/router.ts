@@ -52,14 +52,31 @@ export function engineForMode(mode: 'chat' | 'task'): 'dashscope' | 'agnes' | 'd
   return list.length ? list[0]!.name : 'demo';
 }
 
+/** 该模式**计划**使用的模型（首个）；未配置返回 null。给 run_started 与健康检查用，不含密钥 */
+export function modelForMode(mode: 'chat' | 'task'): string | null {
+  return providersForMode(mode)[0]?.model ?? null;
+}
+
+/** 分模式的模型清单（模型 id，不含密钥）—— /api/agent/health 暴露给运维核对分流是否生效 */
+export function modelPlan(): { chat: string[]; task: string[] } {
+  return {
+    chat: providersForMode('chat').map((p) => p.model),
+    task: providersForMode('task').map((p) => p.model)
+  };
+}
+
 /**
  * 带 fallback 的流式调用。
  * ⚠️ 只在"尚未输出任何内容"时换模型；已输出则原样抛出，避免重复回答。
+ *
+ * `onAttempt` 在每次真正发起请求前回调 —— 上层据此知道自己实际用的是哪个提供方/模型
+ * （fallback 发生后会被下一次覆盖，因此它反映的是"最终真正产出这次回答的那个"）。
  */
 export async function* streamChatWithFallback(
   opts: StreamOptions,
   mode: 'chat' | 'task',
-  log?: Logger
+  log?: Logger,
+  onAttempt?: (spec: LlmProviderSpec) => void
 ): AsyncGenerator<AgnesStreamEvent> {
   const list = providersForMode(mode);
   if (!list.length) {
@@ -76,6 +93,7 @@ export async function* streamChatWithFallback(
   let lastError: unknown = null;
   for (let i = 0; i < list.length; i += 1) {
     const provider = list[i]!;
+    onAttempt?.(provider);
     let emitted = false;
     try {
       for await (const ev of streamChat({ ...opts, provider }, log)) {

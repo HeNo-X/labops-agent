@@ -122,6 +122,8 @@ export const useRunStore = defineStore('run', () => {
 
   // ------------------------------ 上下文 ------------------------------
   const engine = ref<EngineType | null>(null);
+  /** 实际产出本次回答的模型（run_completed.model 为 fallback 之后的真值，覆盖 run_started 的计划值） */
+  const model = ref<string | null>(null);
   const sourceType = ref<DataSourceType | null>(null);
   const serverNow = ref<ServerNowInfo | null>(null);
   const term = ref<TermInfo | null>(null);
@@ -214,6 +216,7 @@ export const useRunStore = defineStore('run', () => {
         case 'run_started': {
           const p = ev.payload as {
             engine: EngineType;
+            model?: string;
             sourceType: DataSourceType;
             serverNow: ServerNowInfo;
             term: TermInfo;
@@ -224,7 +227,7 @@ export const useRunStore = defineStore('run', () => {
             title: '任务已受理',
             detail:
               `服务端时间 ${p.serverNow.date} ${p.serverNow.time}（${p.serverNow.weekdayLabel}）｜` +
-              `数据来源：${DATA_SOURCE_LABELS[p.sourceType]}｜引擎：${p.engine === 'agnes' ? 'Agnes 3.0 Flash' : '演示引擎'}`,
+              `数据来源：${DATA_SOURCE_LABELS[p.sourceType]}｜引擎：${p.engine === 'agnes' ? `Agnes${p.model ? ` · ${p.model}` : ''}` : p.engine === 'dashscope' ? `DashScope${p.model ? ` · ${p.model}` : ''}` : '演示引擎'}`,
             status: 'done'
           });
           break;
@@ -429,6 +432,7 @@ export const useRunStore = defineStore('run', () => {
     error.value = null;
     elapsedMs.value = 0;
     engine.value = null;
+    model.value = null;
     sourceType.value = null;
     serverNow.value = null;
     term.value = null;
@@ -470,12 +474,14 @@ export const useRunStore = defineStore('run', () => {
         const p = ev.payload as {
           runId: string;
           engine: EngineType;
+          model?: string;
           sourceType: DataSourceType;
           serverNow: ServerNowInfo;
           term: TermInfo;
           allowedTools: string[];
         };
         engine.value = p.engine;
+        if (p.model) model.value = p.model;
         sourceType.value = p.sourceType;
         serverNow.value = p.serverNow;
         term.value = p.term;
@@ -505,8 +511,10 @@ export const useRunStore = defineStore('run', () => {
       case 'run_completed': {
         if (runStatus.value === 'running') runStatus.value = 'completed';
         // R03/C04：以服务端权威全文对齐（delta 可能漏块；durable 确认在保存成功后发出）
-        const p2 = ev.payload as { answer?: string; engine?: EngineType };
+        const p2 = ev.payload as { answer?: string; engine?: EngineType; model?: string };
         if(p2.engine) engine.value=p2.engine;
+        // model 反映 fallback 之后真正生效的模型，覆盖 run_started 的计划值
+        if(p2.model) model.value=p2.model;
         if (typeof p2.answer === 'string' && p2.answer) stream.value = p2.answer;
         break;
       }
@@ -662,6 +670,7 @@ export const useRunStore = defineStore('run', () => {
     error,
     elapsedMs,
     engine,
+    model,
     sourceType,
     serverNow,
     term,

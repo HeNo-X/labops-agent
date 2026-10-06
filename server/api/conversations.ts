@@ -367,9 +367,11 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
   let cancelRequested = false;
   let finalStatus = 'interrupted';
   let engine: string | null = null;
+  /** 实际产出本次回答的模型（fallback 后是真正生效的那个）；规则引擎时为空 */
+  let model: string | null = null;
   let sourceType: string | null = null;
   let elapsedMs = 0;
-  let failedError: { code: string; message: string } | null = null;
+  let failedError: { code: string; message: string; hint?: string } | null = null;
   const toolCalls: Array<Record<string, unknown>> = [];
   let completedPayload: Record<string, unknown> | null = null;
   let cancelEventSent = false;
@@ -419,6 +421,8 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         // 原系统数据请求可能刚检测到角色变化；采用已验证后的范围。
         authorityScope=isBusinessConnected()?businessScope().scopeKey:null;
         engine = String((ev.payload as Record<string, unknown>)['engine'] ?? '');
+        const planned = (ev.payload as Record<string, unknown>)['model'];
+        if (typeof planned === 'string' && planned) model = planned;
         sourceType = String((ev.payload as Record<string, unknown>)['sourceType'] ?? '');
       } else if (ev.type === 'answer_delta') {
         answerText += String((ev.payload as Record<string, unknown>)['text'] ?? '');
@@ -449,12 +453,14 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         answerText = String(p['answer'] ?? answerText);
         elapsedMs = Number(p['ms'] ?? 0);
         completedPayload = p;
+        // 完成事件里的 model 是 fallback 之后真正生效的那个，比 run_started 的计划值更权威
+        if (typeof p['model'] === 'string' && p['model']) model = String(p['model']);
       } else if (ev.type === 'run_failed') {
         terminal = true;
         finalStatus = 'failed';
-        const p = ev.payload as { code: string; message: string };
-        // N05：失败原因落库，刷新后仍有原因
-        failedError = { code: p.code, message: p.message };
+        const p = ev.payload as { code: string; message: string; hint?: string };
+        // N05：失败原因落库，刷新后仍有原因；hint 是"下一步怎么办"，同样必须留痕（否则刷新后就只剩错误码）
+        failedError = { code: p.code, message: p.message, ...(p.hint ? { hint: p.hint } : {}) };
         send(res, ev.type, ev);
       } else if (ev.type === 'run_cancelled') {
         terminal = true;
@@ -501,6 +507,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         scope:authorityScope,
         runId,
         engine:completedPayload?.['engine']||engine,
+        model,
         sourceType,
         ms: elapsedMs,
         toolCalls,

@@ -37,7 +37,7 @@ import type { Logger } from '../obs/trace.ts';
 import { describeWeek, serverNow } from '../time/term.ts';
 import type { ServerNow } from '../time/term.ts';
 import { AgnesError } from '../llm/agnes.ts';
-import { engineForMode, streamChatWithFallback } from '../llm/router.ts';
+import { engineForMode, modelForMode, modelPlan, streamChatWithFallback } from '../llm/router.ts';
 import type { ChatMessage, TokenUsage } from '../llm/agnes.ts';
 import { executeTool, toolSpecs, toolsForMode } from '../tools/registry.ts';
 import { availableRoomNames } from '../tools/query-schedule.ts';
@@ -138,6 +138,8 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   const sourceType: DataSourceType = ds.sourceType;
   const runMode: 'chat' | 'task' = input.mode === 'chat' ? 'chat' : 'task';
   const engine: EngineType = engineForMode(runMode);
+  /** 该模式计划使用的模型；真正生效的模型在 runAgnesEngine 里由 fallback 决定 */
+  const plannedModel = modelForMode(runMode);
   const intent: Intent = parseIntent(question, now);
 
   // ---- 会话承接（阶段 2A）：缺房间/日期时显式沿用上一问，且必须留痕 ----
@@ -199,6 +201,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
     ...(input.sessionId ? { sessionId: input.sessionId } : {}),
     question,
     engine,
+    ...(plannedModel ? { model: plannedModel } : {}),
     sourceType,
     serverNow: {
       iso: now.iso,
@@ -489,6 +492,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   let steps = 0;
   let toolCalls = 0;
   let answer = '';
+  /** 本次回答实际使用的模型（由 streamChatWithFallback 每次尝试时回调写入） */
+  let usedModel = modelForMode(a.mode ?? 'task') ?? '';
   let usage: TokenUsage = {promptTokens:0,completionTokens:0,totalTokens:0};
   /**
    * 最近一次**失败**的工具调用，用于 run_failed 上报真实原因。
@@ -519,7 +524,10 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     let roundText = '';
     let calls: ChatMessage['tool_calls'] = undefined;
 
-    for await (const ev of streamChatWithFallback({ messages, tools: toolsForMode(a.mode ?? 'task'), signal: a.signal }, a.mode ?? 'task', a.log)) {
+    for await (const ev of streamChatWithFallback({ messages, tools: toolsForMode(a.mode ?? 'task'), signal: a.signal }, a.mode ?? 'task', a.log, (spec) => {
+      // 记录**真正**发起请求的模型（fallback 后会被覆盖）——界面要显示的是它，不是配置里的第一个
+      usedModel = spec.model;
+    })) {
       if (ev.type === 'text') {
         roundText += ev.text;
         answer += ev.text;
@@ -673,9 +681,11 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
             instruction:
               exec.code === 'unknown_tool'
                 ? '这个工具不存在。你只能使用系统声明的工具。请改用可用工具，或直接向用户说明做不到。'
-                : exec.code === 'lab_not_found' || exec.suggestions.length
-                  ? '这个房间号系统里没有。请从 suggestions 里挑一个最接近的重新调用，若都不合适就直接告诉用户没有这个房间并列出可选项。'
-                  : '请修正参数后重试一次；若仍失败，直接告诉用户查不到。'
+                : exec.code === 'bad_audience'
+                  ? '接收对象写法无效。原系统只接受 all / role(student|volunteer) / class(className) / user(userId)，不要用沙盒的 class_ids / role_scope。若用户没有明确说明收件人，**不要猜**：把可选形式列给用户并请他确认。'
+                  : exec.code === 'lab_not_found' || exec.suggestions.length
+                    ? '这个房间号系统里没有。请从 suggestions 里挑一个最接近的重新调用，若都不合适就直接告诉用户没有这个房间并列出可选项。'
+                    : '请修正参数后重试一次；若仍失败，直接告诉用户查不到。'
           })
         });
       }
@@ -698,7 +708,9 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
       ? '可以换个可查询的问法，例如「E310 今天有哪些课」；办理类需求请到「我的工作」中操作。'
       : f.code === 'scope_forbidden' || f.code === 'mode_forbidden' || f.code === 'unknown_tool'
         ? '这不是参数问题：当前身份或当前模式下该办理工具不可用。请确认模式与权限，或到主系统对应页面办理。'
-        : f.suggestions.length
+        : f.code === 'bad_audience'
+          ? '请说明这条通知发给谁：全体 / 志愿者 / 学生 / 某个班级 / 某个账号；不确定时先确认再发，不要猜。'
+          : f.suggestions.length
           ? `可选项：${f.suggestions.slice(0, 8).join('、')}`
           : '请按上面的原因调整后重试；若反复失败，请把错误码提供给管理员。';
     yield a.emit('run_failed', { code: 'evidence_missing', message, hint } satisfies RunFailedPayload);
@@ -710,6 +722,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   if (a.signal?.aborted) return; // N06/B10：取消后不再补发完成终态
   a.log.info('run_completed', {
     engine: engineForMode(a.mode ?? 'task'),
+    model: usedModel,
     steps,
     toolCalls,
     ms: a.watch.ms,
@@ -724,6 +737,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     ms: a.watch.ms,
     sourceType: a.sourceType,
     engine: engineForMode(a.mode ?? 'task'),
+    ...(usedModel ? { model: usedModel } : {}),
     ...(runTaskStatus ? { taskStatus: runTaskStatus } : {}),
     ...(usage ? { usage } : {})
   } satisfies RunCompletedPayload);
@@ -770,6 +784,7 @@ export function runtimeCapabilities(): Record<string, unknown> {
   return {
     engine: engineForMode('task'),
     engineByMode: { chat: engineForMode('chat'), task: engineForMode('task') },
+    modelsByMode: modelPlan(),
     dataSource: ds?.sourceType||'authorized_api',
     dataSourceLabel: ds?.sourceLabel||'登录后按实际账号查询主系统',
     promptVersion: PROMPT_VERSION,

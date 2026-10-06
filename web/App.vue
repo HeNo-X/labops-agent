@@ -251,6 +251,7 @@ watch(
               ? 'cancelled'
               : 'interrupted';
     live.ms = store.elapsedMs;
+    live.model = store.model;
   }
 );
 watch(
@@ -368,6 +369,7 @@ async function onSubmit(q: string): Promise<void> {
               : 'interrupted';
       live.toolCalls = [...store.toolCalls];
       live.engine = store.engine;
+      live.model = store.model;
       live.sourceType = store.sourceType;
       live.ms = store.elapsedMs;
       live.error = store.error ? { ...store.error } : null;
@@ -765,7 +767,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
           </button>
         </div>
         <button v-if="authMode==='native'" type="button" class="theme__btn" @click="logout">退出登录</button>
-        <SourceBadge :source-type="store.sourceType ?? store.overviewSourceType" :engine="store.activeEngine" compact />
+        <SourceBadge :source-type="store.sourceType ?? store.overviewSourceType" :engine="store.activeEngine" :model="store.model" compact />
         <div class="nav__theme" role="group" aria-label="主题切换">
           <button
             v-for="m in (['auto', 'light', 'dark'] as ThemeMode[])"

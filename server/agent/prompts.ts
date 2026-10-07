@@ -8,7 +8,7 @@
  *  评测结果与它绑定，否则"改了 prompt 之后变准了还是变差了"永远说不清。
  */
 
-export const PROMPT_VERSION = 'labops-0.5.0-unified-jobs-v1';
+export const PROMPT_VERSION = 'labops-0.6.0-sync-mobile-v1';
 
 export const MAX_QUESTION_CHARS = 500;
 

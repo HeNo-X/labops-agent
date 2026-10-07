@@ -55,6 +55,8 @@ export interface Dataset {
   sourceRevision?: string;
   contractVersion?: number;
   principal?: {username:string;identity:string;className:string};
+  openLabStatus?:Record<string,string|{status:string;recordedAt?:string}>;
+  openLabStatusMeta?:Record<string,{recordedAt:string}>;
   roomClosures?: Array<{id:string;roomId:string;roomName?:string;startDate:string;endDate:string;periodKeys:string[];status:string;reason:string}>;
   sourceType: DataSourceType;
   sourceLabel: string;
@@ -202,6 +204,8 @@ export function buildFromSnapshotLike(
     sourceRevision: asString(parsed['revision'], crypto.createHash('sha256').update(JSON.stringify(parsed)).digest('hex')),
     contractVersion: asNumber(parsed['contractVersion'],1),
     principal: parsed['principal'] as Dataset['principal'],
+    openLabStatus: parsed['openLabStatus'] as Dataset['openLabStatus']||{},
+    openLabStatusMeta: parsed['openLabStatusMeta'] as Dataset['openLabStatusMeta']||{},
     roomClosures: Array.isArray(parsed['roomClosures']) ? parsed['roomClosures'] as Dataset['roomClosures'] : [],
     sourceLabel: DATA_SOURCE_LABELS[sourceType],
     meta: {
@@ -235,6 +239,8 @@ function buildFromLiveState(filePath: string): Dataset {
       labs: st['labs'] ?? [],
       openLabs: st['openLabs'] ?? [],
       scheduleAdjust: st['scheduleAdjust'] ?? [],
+      openLabStatus: st['openLabStatus']||{},
+      openLabStatusMeta: st['openLabStatusMeta']||{},
       roomClosures: st['roomClosures'] ?? [],
       timetable: st['timetable'] ?? []
     },

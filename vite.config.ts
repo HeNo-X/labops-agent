@@ -25,6 +25,7 @@ export default defineConfig({
     }
   },
   build: {
+    rolldownOptions:{input:{desktop:fileURLToPath(new URL('./index.html',import.meta.url)),mobile:fileURLToPath(new URL('./mobile.html',import.meta.url))}},
     outDir: 'dist',
     sourcemap: false,
     target: 'es2022'

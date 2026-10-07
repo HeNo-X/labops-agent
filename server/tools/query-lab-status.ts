@@ -97,9 +97,10 @@ export async function runQueryLabStatus(
   //   evidence_missing 兜底失败。0.5.0 打通业务通道后主系统已有签到数据，这里取值。
   //   ⚠️ 仅在**业务通道已连接**（经主系统授权）时取；取不到就保持 null 并如实说明 —— 绝不编造。
   let occupancy: LabStatusResult['occupancy'] = null;
+  let keySummary:LabStatusResult['keySummary']={state:'unknown',location:null,recordedAt:null,note:'未取得授权钥匙登记，不推测位置或借用人'};
   if (isBusinessConnected()) {
     try {
-      const occ = await businessRequest('/occupancy', 'GET');
+      const occ = await businessRequest('/occupancy?roomId='+encodeURIComponent(lab.id)+'&date='+encodeURIComponent(date), 'GET');
       const rows = occ['rooms'] as Array<Record<string, unknown>> | undefined;
       const key = normalizeLabName(lab.name);
       const row = rows?.find((r) => normalizeLabName(String(r['roomName'])) === key || String(r['roomId']) === lab.id);
@@ -108,12 +109,13 @@ export async function runQueryLabStatus(
           present: row['present'],
           source: 'authorized_api',
           date: String(occ['date'] ?? date),
-          note: String(occ['note'] ?? '')
+          note: String(row['note'] ?? occ['note'] ?? '')
         };
       }
     } catch { /* 取不到 → 保持 null，由下面的 notes 如实说明 */ }
   }
 
+  if(isBusinessConnected())try{const response=await businessRequest('/key-status?roomId='+encodeURIComponent(lab.id),'GET');keySummary=(response['keys'] as Array<NonNullable<LabStatusResult['keySummary']>>)?.[0]||keySummary;}catch{/* Unknown is an explicit fact, never substitute a guessed location. */}
   const week = describeWeek(date, ds.term);
   const holiday = isHoliday(date, ds.term);
 
@@ -121,9 +123,13 @@ export async function runQueryLabStatus(
   if (!week.determinable) notes.push('⚠️ 教学周不可确定，以下排课统计未做周次过滤');
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
   // F19：档案状态 ≠ 实时门禁。措辞必须避免把静态档案解释成"此刻能否进入"
-  notes.push('开放状态来自房间档案（随数据快照更新），不是实时门禁——实际此刻能否进入以现场为准');
+  const dynamic=ds.openLabStatus?.[lab.name]??ds.openLabStatus?.[lab.id],record=typeof dynamic==='object'?dynamic.status:dynamic;
+  const actualStatus=['active','closed'].includes(record||'')?record!:lab.status;
+  const doorNote=['active','closed'].includes(record||'')?'开放状态来自主系统人员动态登记，非门禁传感器状态':'无动态登记，回退房间档案，登记时间未知';
+  notes.push(doorNote);
+  if(ds.principal?.identity==='student')notes.push('当前课表仅为本人的课程；排课条数不代表该房间所有班级的教学活动。');
   notes.push(occupancy
-    ? `在室人数 ${occupancy.present} 人（${occupancy.date}，来源：主系统授权的实时签到数据；口径=当日有效签到−有效签退，与主系统页面同源）`
+    ? `在室人数 ${occupancy.present} 人（${occupancy.date}，来源：主系统授权的实时签到数据；口径=上海当日有效签到记录逐条配对签退；非现场传感器人数，与主系统页面同源）`
     : '在室人数没有数据来源（业务通道未连接或未取得授权），本工具无法提供，请勿据此回答人数问题');
 
   const labKey = normalizeLabName(lab.name);
@@ -173,8 +179,8 @@ export async function runQueryLabStatus(
     labName: lab.name,
     labLocation: lab.location,
     capacity: lab.capacity,
-    status: (lab.status as LabStatusResult['status']) ?? null,
-    statusLabel: STATUS_LABELS[lab.status] ?? `未知(${lab.status})`,
+    status: (actualStatus as LabStatusResult['status']) ?? null,
+    statusLabel: STATUS_LABELS[actualStatus] ?? `未知(${lab.status})`,
     description: lab.description,
     weekNo: week.weekNo,
     weekDeterminable: week.determinable,
@@ -185,7 +191,8 @@ export async function runQueryLabStatus(
       nextLessonReason
     },
     occupancy,
-    registryStatusNote: `档案状态「${STATUS_LABELS[lab.status] ?? lab.status}」随数据快照更新，非实时门禁`,
+    keySummary,
+    registryStatusNote: doorNote+'；档案状态 '+lab.status,
     suggestions: [],
     notes
   };

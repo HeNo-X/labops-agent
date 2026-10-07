@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {useSessionStore} from '../stores/session';
-import {ref,watch} from 'vue';
+import {ref,watch,onMounted,onUnmounted} from 'vue';
 import {useBusinessStore,businessApi} from '../stores/business';
 import type {NativeTaskList,NativeTaskDetail,NativeContext,BusinessResult,NativeIncident} from '@shared/business';
 import BusinessPlanCard from './BusinessPlanCard.vue';
@@ -21,6 +21,8 @@ async function resume(id:string){await work(async scope=>{const r=await business
 async function queue(view:'duty'|'issues'|'health'){await work(async scope=>{const ctx=await businessApi<NativeContext>('proxy/context');if(!valid(scope))return;selected.value={summary:'查询当前原账号工作队列',planId:null,view,context:ctx,candidates:[],scopeKey:scope,source:'原系统工作队列',workbenchUrl:'/operations.html?bridge=1'};selectedCard.value='queue:'+view;showIncident.value=false;});}
 function newIncident(){showIncident.value=true;incidentId.value='';incidentTask.value='';selected.value=undefined;}
 watch(()=>business.scopeKey,()=>{data.value=undefined;selected.value=undefined;incidents.value=[];showIncident.value=false;incidentId.value='';if(open.value&&business.connected)void refresh();});
+function target(event:Event){const destination=(event as CustomEvent).detail;if(destination.taskId){open.value=true;void resume(destination.taskId);}else if(destination.roomId){open.value=true;void work(async scope=>{const context=await businessApi<NativeContext>('proxy/context');if(!valid(scope))return;selected.value={summary:'从主系统实验室入口继续办理',view:destination.action||'issues',initialRoomId:destination.roomId,context,planId:null,candidates:[],scopeKey:scope,source:'主系统授权工作台',workbenchUrl:'/operations.html?bridge=1'};selectedCard.value='room:'+destination.roomId+':'+destination.action;});}}
+onMounted(()=>window.addEventListener('labops-target',target));onUnmounted(()=>window.removeEventListener('labops-target',target));
 </script>
 <template><div v-if="business.connected" class="native-work-entry"><button type="button" @click="show" :disabled="busy">我的工作</button><button v-if="business.profile?.identity==='admin'&&session.currentMode()!=='chat'" type="button" @click="open=true;newIncident()">登记故障事件</button><span>按原账号恢复任务、待接收交接与工单</span></div>
  <div v-if="open&&business.connected" class="native-work-mask" @click.self="open=false"><section class="native-work-panel" role="dialog" aria-modal="true" aria-label="我的工作"><header><b>我的工作 · {{business.profile?.username}}</b><button @click="refresh" :disabled="busy">刷新工作队列</button><button aria-label="关闭我的工作" @click="open=false">关闭</button></header><p v-if="error" role="alert">{{error}}</p>

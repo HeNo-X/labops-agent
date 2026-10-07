@@ -618,6 +618,7 @@ export const useRunStore = defineStore('run', () => {
   }
 
   let overviewGeneration = 0;
+  function clearOverview(){overviewGeneration++;labs.value=[];openLabs.value=[];selectedLab.value=null;overviewLoaded.value=false;overviewError.value=null;overviewTerm.value=null;overviewSourceType.value=null;overviewEngine.value=null;timetableCount.value=0;}
   async function loadOverview(): Promise<void> {
     const generation = ++overviewGeneration;
     // 账号变更时立即移除旧来源；迟到的请求不得覆盖新身份的概览。
@@ -709,7 +710,7 @@ export const useRunStore = defineStore('run', () => {
     cancelRun,
     finishRun,
     newSession,
-    loadOverview,
+    loadOverview,clearOverview,
     RUN_EVENT_TYPES
   };
 });

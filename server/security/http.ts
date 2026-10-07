@@ -38,6 +38,8 @@ async function authenticateRequest(req:IncomingMessage,res:ServerResponse,next:(
   if(mode==='native'||req.url.startsWith('/api/shared-chat/')){
     try{const delegated=await authenticateNative(req);await withNativeDelegation(delegated,async()=>{
       const actor=requestIdentity.getStore()!;
+      const endpoint=(req.url||'').split('?')[0]!.replace('/api/shared-chat/','/api/');
+      if(actor.role==='student'&&!/^\/api\/conversations(?:\/|$)/.test(endpoint)&&!/^\/api\/runs\/[A-Za-z0-9_-]+\/cancel$/.test(endpoint)&&!['/api/state','/api/health'].includes(endpoint)&&!endpoint.startsWith('/api/knowledge/'))return reject(res,403,'学生共享通道只开放只读聊天及本人历史，不开放完整工作台、任务或自动化接口');
       if(req.method==='POST'&&/\/messages(?:\?|$)|\/agent\/chat(?:\?|$)/.test(req.url||'')){
         if(!allowance(`minute:${actor.id}`,limit('LABOPS_RUNS_PER_MINUTE',12),60000)||!allowance(`day:${actor.id}`,limit('LABOPS_RUNS_PER_DAY',100),86400000)||!allowance('global-day',limit('LABOPS_GLOBAL_RUNS_PER_DAY',1000),86400000))return reject(res,429,'已达到模型调用限额，请稍后再试');
       }

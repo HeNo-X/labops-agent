@@ -196,7 +196,12 @@ function initDatabase(): DatabaseSync {
     if (ntfCols.length && !ntfCols.includes('status')) {
       conn.exec(`ALTER TABLE biz_notifications ADD COLUMN status TEXT NOT NULL DEFAULT 'published'`);
     }
-    conn.exec('PRAGMA user_version = 5');
+    conn.exec(`CREATE TABLE IF NOT EXISTS message_changes(seq INTEGER PRIMARY KEY AUTOINCREMENT,conversationId TEXT NOT NULL,messageId TEXT NOT NULL);
+    CREATE INDEX IF NOT EXISTS message_changes_conv ON message_changes(conversationId,seq);
+    CREATE TRIGGER IF NOT EXISTS messages_insert_change AFTER INSERT ON messages BEGIN INSERT INTO message_changes(conversationId,messageId) VALUES (NEW.conversationId,NEW.id); DELETE FROM message_changes WHERE seq < last_insert_rowid()-20000; END;
+    CREATE TRIGGER IF NOT EXISTS messages_update_change AFTER UPDATE ON messages BEGIN INSERT INTO message_changes(conversationId,messageId) VALUES (NEW.conversationId,NEW.id); DELETE FROM message_changes WHERE seq < last_insert_rowid()-20000; END;
+    CREATE TRIGGER IF NOT EXISTS messages_delete_change AFTER DELETE ON messages BEGIN INSERT INTO message_changes(conversationId,messageId) VALUES (OLD.conversationId,OLD.id); DELETE FROM message_changes WHERE seq < last_insert_rowid()-20000; END;`);
+    conn.exec('PRAGMA user_version = 6');
     if (migrated) console.log('[persistence] 旧库升级完成（含遗留运行恢复）');
     return conn;
   } catch (err) {

@@ -39,10 +39,20 @@
     const closures=(ctx.roomClosures||[]).filter(c=>(c.roomId===room.id||c.roomId===room.name)&&c.status!=='revoked'&&c.startDate<=date&&c.endDate>=date&&(!period||!(c.periodKeys||[]).length||(c.periodKeys||[]).includes(period)));
     const rows=effective(date,ctx).filter(t=>(t.labId===room.id||t.labName===room.name)&&(!period||t.periodKey===period));
     const dc=dayContext(date,ctx.sysConfig||ctx.term||{});
-    return {roomId:room.id,roomName:room.name,door:room.status==='active'?'open':room.status==='closed'?'closed':'unknown',
+    const dynamic=(ctx.openLabStatus||{})[room.name]??(ctx.openLabStatus||{})[room.id],record=typeof dynamic==='object'&&dynamic?dynamic.status:dynamic;
+    const hasDynamic=['active','closed'].includes(record),registered=room.status==='active'?'open':room.status==='closed'?'closed':'unknown';
+    const door=hasDynamic?(record==='active'?'open':'closed'):registered,meta=(ctx.openLabStatusMeta||{})[room.name]||(ctx.openLabStatusMeta||{})[room.id]||{};
+    return {roomId:room.id,roomName:room.name,registryStatus:room.status,recordedDoorState:door,doorSource:hasDynamic?'dynamic_record':registered==='unknown'?'missing':'registry',doorRecordedAt:hasDynamic?(dynamic&&dynamic.recordedAt||meta.recordedAt||null):null,doorNote:hasDynamic?'人员登记的开放状态，不是门禁传感器状态':'没有动态记录，按房间档案回退；登记时间未知',door,
       service:room.status==='inactive'||closures.length?'suspended':'normal',
       schedule:rows.length?'occupied':dc.coverage==='complete'&&(ctx.timetable||[]).length?'no_scheduled_class':'unknown',
-      presence:'unknown',keyStatus:((ctx.keys||[]).find(k=>k.labId===room.id)||{}).status||'unknown',closures,stats:stats(rows)};
+      presence:'unknown',keyStatus:keyState(room,ctx).state,closures,stats:stats(rows)};
+  }
+  function keyState(room,ctx){
+    const key=(ctx.keys||[]).find(k=>k.labId===room.id||k.roomId===room.id||k.labName===room.name||k.labName===room.id||k.name===room.name);
+    if(!key)return {state:'unknown',location:null,holder:null,recordedAt:null,note:'未登记钥匙资料'};
+    const location=typeof key.location==='string'?key.location.trim():'',holder=typeof key.holder==='string'?key.holder.trim():'';
+    const state=location.includes('柜')&&!holder?'in_cabinet':holder?'borrowed':location?'handover':'unknown';
+    return {state,location:location||null,holder:holder||null,recordedAt:key.updatedAt||key.time||key.borrowedAt||null,note:'来源为人工登记；记录缺失不推定已归还'};
   }
   function inspectionSummary(records,rooms,date){
     const ids=new Set((rooms||[]).map(r=>r.id)),latest=new Map();
@@ -74,5 +84,5 @@
     if(minutes>end+60)return {valid:false,msg:'已超过签退补签截止时间，请联系管理员'};
     return {valid:true,status:minutes>end+20?'补签退':'签退'};
   }
-  return {inspectionRows,dutyWindow,valid,dayContext,effective,stats,roomState,inspectionSummary};
+  return {inspectionRows,dutyWindow,valid,dayContext,effective,stats,roomState,keyState,inspectionSummary};
 });

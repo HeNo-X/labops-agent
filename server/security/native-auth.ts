@@ -10,12 +10,12 @@ function table(){getDb().exec('CREATE TABLE IF NOT EXISTS native_auth_sessions(t
 function cookie(req:IncomingMessage){return /(?:^|;\s*)labops_session=([a-f0-9]{64})(?:;|$)/.exec(req.headers.cookie||'')?.[1];}
 function send(res:ServerResponse,status:number,data:unknown){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));}
 function fail(message:string,status=401):never{throw Object.assign(new Error(message),{status});}
-function principal(raw:unknown):NativeDelegation['profile']{
+function principal(raw:unknown,channel:'full_labops'|'main_shared_chat'='full_labops'):NativeDelegation['profile']{
  const p=raw as Record<string,unknown>;if(!p||typeof p['username']!=='string'||!['admin','volunteer','student'].includes(String(p['identity'])))return fail('主系统未返回有效身份',502);
  if(p['mustChangePassword'])return fail('请先在主系统修改临时密码',403);
  // 2026-10-05 按用户要求：LabOps 仅对管理员与志愿者开放；学生账号一律拒绝（学生请用主系统学生端）。
  // 放在 principal() 内 → 登录与会话恢复两条路径都会拦，已登录的学生会话也会失效。
- if(p['identity']==='student')return fail('学生账号暂不能登录 LabOps（仅志愿者与管理员可用）',403);
+ if(p['identity']==='student'&&channel==='full_labops')return fail('学生账号暂不能登录 LabOps（仅志愿者与管理员可用）',403);
  return {username:p['username'],identity:p['identity'] as NativeDelegation['profile']['identity'],className:String(p['className']||''),name:String(p['name']||p['username'])};
 }
 export async function authenticateNative(req:IncomingMessage):Promise<NativeDelegation>{
@@ -24,7 +24,7 @@ export async function authenticateNative(req:IncomingMessage):Promise<NativeDele
  if(shared){token=/^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization||'')?.[1];}
  else{const id=cookie(req);const row=id?getDb().prepare('SELECT credential FROM native_auth_sessions WHERE tokenHash=? AND expiresAt>?').get(hash(id),Date.now()) as {credential:string}|undefined:undefined;if(row){try{token=decryptCredential(row.credential);}catch{return fail('LabOps登录凭证无法解密，请重新登录并核对持久化密钥',401);}}}
  if(!token)return fail('请使用主系统账号登录');
- const result=await nativeRemote('/api/auth/profile','GET',token);return {token,profile:principal(result['profile']),sharedChat:Boolean(shared)};
+ const result=await nativeRemote('/api/auth/profile','GET',token);return {token,profile:principal(result['profile'],shared?'main_shared_chat':'full_labops'),sharedChat:Boolean(shared),channel:shared?'main_shared_chat':'full_labops'};
 }
 export async function withNativeDelegation(d:NativeDelegation,next:()=>Promise<void>){
  const id='native-'+hash(JSON.stringify([nativeBaseUrl(),d.profile.username,d.profile.identity,d.profile.className||'']));
@@ -36,7 +36,7 @@ export async function handleNativeAuth(req:IncomingMessage,res:ServerResponse,p:
  try{
   if(p==='/api/auth/session'&&req.method==='GET'){
    if(authMode()==='demo'){send(res,200,{mode:'demo',authenticated:true});return true;}
-   try{const d=await authenticateNative(req);send(res,200,{mode:'native',authenticated:true,profile:d.profile});}
+   try{const d=await authenticateNative(req);send(res,200,{mode:'native',authenticated:true,profile:d.profile,channel:'full_labops',capabilities:{fullLabops:true,sharedChat:true,automation:true}});}
    catch(e){const status=(e as {status?:number}).status||502;send(res,status===401?200:status,{mode:'native',authenticated:false,message:(e as Error).message,configured:Boolean(process.env.LABOPS_BUSINESS_URL)});}return true;
   }
   if(req.method!=='POST'||!['/api/auth/login','/api/auth/sso/exchange','/api/auth/logout'].includes(p)){send(res,404,{message:'认证入口不存在'});return true;}
@@ -56,6 +56,6 @@ export async function handleNativeAuth(req:IncomingMessage,res:ServerResponse,p:
   const token=crypto.randomBytes(32).toString('hex');getDb().prepare('DELETE FROM native_auth_sessions WHERE expiresAt<?').run(Date.now());
   getDb().prepare('INSERT INTO native_auth_sessions VALUES (?,?,?)').run(hash(token),encryptCredential(result['token']),Date.now()+7*86400000);
   setCookie(res,token);await withNativeDelegation({token:result['token'],profile},async()=>undefined);
-  send(res,200,{authenticated:true,mode:'native',profile,conversationId:result['conversationId']||null});return true;
+  send(res,200,{authenticated:true,mode:'native',profile,conversationId:result['conversationId']||null,target:result['target']||null,channel:'full_labops',capabilities:{fullLabops:true,sharedChat:true,automation:true}});return true;
  }catch(e){send(res,(e as {status?:number}).status||502,{message:(e as Error).message,code:'native_auth_failed'});return true;}
 }

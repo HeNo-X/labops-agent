@@ -17,6 +17,7 @@
   /* --- 排版 --- */
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
     'Microsoft YaHei', 'Source Han Sans SC', 'Noto Sans CJK SC', sans-serif;
+  --font-serif: "SimSun","Songti SC","Noto Serif SC",serif;
   --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
 
   /* --- 间距 --- */
@@ -161,3 +162,5 @@ body {
     transition-duration: 0.01ms !important;
   }
 }
+
+.desktop-new-messages{position:fixed;bottom:96px;left:50%;z-index:80;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)}

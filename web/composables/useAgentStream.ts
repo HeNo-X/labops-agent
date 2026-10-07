@@ -11,6 +11,7 @@
  *  fetch + ReadableStream 是等价方案，服务端仍是标准 SSE 文本格式。
  */
 
+import SSE from '@shared/sse.js';
 import { ref } from 'vue';
 import type { RunEvent } from '@shared/types';
 import { actorHeaders } from '../actor';
@@ -47,7 +48,7 @@ export function useAgentStream() {
   async function start(opts: StartOptions): Promise<void> {
     controller = new AbortController();
     streaming.value = true;
-    let lastSeq = -1;
+    let durableTerminal=false;
 
     try {
       const res = await fetch(
@@ -94,40 +95,10 @@ export function useAgentStream() {
       }
 
       const reader = res.body.getReader();
-      const decoder = new TextDecoder('utf-8', { fatal: false });
-      let buffer = '';
-
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        // stream:true 是关键 —— 否则一个中文字被切成两半时会出现 U+FFFD
-        buffer += decoder.decode(value, { stream: true });
-
-        let sep: number;
-        // SSE 以空行分隔消息块
-        while ((sep = buffer.indexOf('\n\n')) >= 0) {
-          const block = buffer.slice(0, sep);
-          buffer = buffer.slice(sep + 2);
-
-          for (const line of block.split('\n')) {
-            if (!line.startsWith('data: ')) continue; // 忽略 `event:` 行与注释行
-            const raw = line.slice(6);
-            let ev: RunEvent;
-            try {
-              ev = JSON.parse(raw) as RunEvent;
-            } catch {
-              continue; // 单个坏块不该毁掉整个回答
-            }
-            // seq 去重：网络重传或代理重放时不会出现重复气泡。
-            // seq=-1 是 run_accepted 接受凭证（会话端点专用，先于业务事件），放行给调用方对齐 ID。
-            if (typeof ev.seq === 'number' && ev.seq !== -1) {
-              if (ev.seq <= lastSeq) continue;
-              lastSeq = ev.seq;
-            }
-            opts.onEvent(ev);
-          }
-        }
-      }
+      const parser=SSE.createDecoder((ev:RunEvent)=>{if(SSE.terminal(ev))durableTerminal=true;opts.onEvent(ev);});
+      for(;;){const {done,value}=await reader.read();if(done)break;parser.push(value);}
+      parser.finish();
+      if(!durableTerminal)opts.onError({code:'stream_ended_early',message:'连接中断或未确认历史保存，请保留内容并回查本会话，勿自动重发。'});
     } catch (err) {
       const e = err as Error;
       if (e.name === 'AbortError') {

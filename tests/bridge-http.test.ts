@@ -42,7 +42,7 @@ test('真实本地双服务HTTP：登录桥接、指定日期调课、重试回�
   const live=await admin('/api/state');assert.equal(live.data.sourceType,'live');
   const lookup=await admin('/api/business/proxy/schedule/preview',{date:fixture.date,timetableId:'fixture-lesson'});assert.equal(lookup.data.source.labId,'fixture-e312');
   const owner=await admin('/api/business/proxy/operations/'+first.data.receipt.operationId);assert.equal(owner.status,200);
-  const student=await client('student');assert.equal((await student('/api/business/proxy/plans/commit',{planId:plan.id,version:1})).status,404);
+  const student=await client('student');assert.equal((await student('/api/business/proxy/plans/commit',{planId:plan.id,version:1})).status,403);
 });
 test('V03 代理写请求缺少/伪造授权范围拒绝，旧卡重新连接后不能借新会话提交',async()=>{
  const request=await client('admin'),status=await request('/api/business/status'),input={date:fixture.date,timetableId:'fixture-lesson'};

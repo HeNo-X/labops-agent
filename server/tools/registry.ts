@@ -571,6 +571,7 @@ export function roomListHint(ds: Dataset): string {
 /** Prompt, model tools and executor share this exact mode policy. */
 export function toolsForMode(mode: 'chat' | 'task'): ToolSpec[] {
   const connected=isBusinessConnected();const role=effectiveRole('student');
+  const studentReads=new Set(['query_schedule','query_free_rooms','query_lab_status','query_knowledge','query_business_context']);
   const sandbox=new Set(['prepare_issue_ticket','prepare_room_closure','prepare_notification','prepare_duty_session','create_operations_report']);
-  return REGISTRY.filter(t => (mode === 'task' || t.effect === 'read')&&(!connected||!sandbox.has(t.spec.name))&&(!connected||role==='admin'||t.spec.name!=='prepare_schedule_adjustment'&&t.spec.name!=='prepare_incident_plan')).map(t => t.spec);
+  return REGISTRY.filter(t => (!connected||role!=='student'||mode==='chat'&&studentReads.has(t.spec.name))&&(mode === 'task' || t.effect === 'read')&&(!connected||!sandbox.has(t.spec.name))&&(!connected||role==='admin'||t.spec.name!=='prepare_schedule_adjustment'&&t.spec.name!=='prepare_incident_plan')).map(t => t.spec);
 }

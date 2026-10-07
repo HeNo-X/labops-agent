@@ -105,7 +105,7 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   page.setDefaultTimeout(20000);
 
-  await page.goto(base);
+  await page.goto(base+'?desktop=1');
   await page.locator('#username').fill('rounds-review');
   await page.locator('#password').fill('demo-only');
   await page.locator('.login-btn').click();
@@ -243,7 +243,7 @@ try {
   });
 
   // ---------------------------------------------------------------- W08
-  await record('W08 390px 手机：分区与轮次操作可用，无整页横向溢出', async () => {
+  await record('W08 390px 窄窗口桌面版：分区与轮次操作可用，无整页横向溢出', async () => {
     // 演示模式下每个浏览器上下文是独立的演示身份（独立工作区）——
     // 所以手机端必须复用桌面端的存储状态，否则看到的是"另一个人的空列表"
     const storageState = await ctx.storageState();
@@ -259,7 +259,7 @@ try {
     const m = await mctx.newPage();
     m.on('pageerror', (e) => errors.push(e.message));
     m.setDefaultTimeout(20000);
-    await m.goto(base);
+    await m.goto(base+'?desktop=1');
     await m.locator('#cmd').waitFor({ state: 'visible' });
     await m.locator('.chat__navtoggle').click();
     await m.locator('.nav__fold:has-text("工作会话")').waitFor();

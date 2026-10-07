@@ -1,0 +1,33 @@
+{
+  "daily_report": [
+    "maxMissedHours"
+  ],
+  "tomorrow_courses": [
+    "roomId",
+    "className",
+    "maxMissedHours"
+  ],
+  "duty_reminder": [
+    "roomId",
+    "maxMissedHours"
+  ],
+  "due_followup": [
+    "roomId",
+    "thresholdHours",
+    "maxMissedHours"
+  ],
+  "weekly_report": [
+    "maxMissedHours"
+  ],
+  "resource_risk": [
+    "roomId",
+    "maxMissedHours"
+  ],
+  "closure_expiry": [
+    "roomId",
+    "maxMissedHours"
+  ],
+  "notice_reminder": [
+    "maxMissedHours"
+  ]
+}

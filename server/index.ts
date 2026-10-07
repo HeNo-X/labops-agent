@@ -39,6 +39,7 @@ const MIME: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
+  '.webmanifest':'application/manifest+json; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
@@ -154,7 +155,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     json(res, 200, {
       ok: true,
       service: 'labops-agent',
-      version:'0.5.0',build:process.env.BUILD_ID||'20261005-unified-chat-scheduler',contractVersion:3,
+      version:'0.6.0',build:process.env.BUILD_ID||'20261005-unified-chat-scheduler',contractVersion:3,
       stage:'unified-chat-persistent-scheduler',
       capability: runtimeCapabilities(),
       authMode:authMode(),

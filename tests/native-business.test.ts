@@ -122,11 +122,11 @@ test('V03-05 默认管理员也要存在可接收的另一有效账号；旧死�
  h.state.users.find((u:any)=>u.username===admin.username).status='active';h.state.handoverRecords=[{id:'legacy-self',actorId:vol.username,receiverId:vol.username,status:'awaiting_acceptance',revision:1,shiftId:'shift-fixture'}];const p=h.call('/workflow/preview',{kind:'duty.reassign',recordId:'legacy-self',expectedRevision:1,receiverId:'',note:'修复旧记录自接收死锁'}).plan;h.call('/plans/commit',{planId:p.id,version:1});assert.equal(h.state.handoverRecords[0].receiverId,'');assert.equal(h.state.handoverRecords[0].receiverHistory[0].before,vol.username);assert.equal(h.state.handoverRecords[0].revision,2);
 });
 test('X08 原账号角色变化只显示任务不可用标记，不继承原计划和候选内容',()=>{
- const h=harness(),p=h.call('/schedule/preview',draft).plan,downgraded={...admin,identity:'student'},r=h.call('/tasks/'+p.taskId,undefined,downgraded);assert.equal(r.task.status,'permission_changed');assert.equal(r.plan,null);assert.equal(r.candidateSet,null);assert.deepEqual(r.plans,[]);assert.throws(()=>h.call('/plans/'+p.id,undefined,downgraded),/角色已变化/);assert.equal(h.call('/context',undefined,downgraded).plans.length,0);
+ const h=harness(),p=h.call('/schedule/preview',draft).plan,downgraded={...admin,identity:'volunteer'},r=h.call('/tasks/'+p.taskId,undefined,downgraded);assert.equal(r.task.status,'permission_changed');assert.equal(r.plan,null);assert.equal(r.candidateSet,null);assert.deepEqual(r.plans,[]);assert.throws(()=>h.call('/plans/'+p.id,undefined,downgraded),/角色已变化/);assert.equal(h.call('/context',undefined,downgraded).plans.length,0);
 });
 test('V03-06/07 一致日报给未知数量null，业务变化更新版本，权限限定统计依据',()=>{
  const h=harness(),r=h.call('/report/2026-10-05');assert.equal(r.metrics[0].value,1);assert.equal(h.call('/report/2030-10-05').metrics[0].value,null);
- h.state.issueTickets=[{id:'i',actorId:vol.username,status:'open',createdAt:now.toISOString(),revision:1}];const after=h.call('/report/2026-10-05');assert.notEqual(after.reportRevision,r.reportRevision);assert.equal(after.sourceRevision,r.sourceRevision);assert.equal(after.metrics[3].value,1);assert.equal(after.metrics[5].coverage,'current_visible');assert.equal(h.call('/report/2026-10-05',undefined,student).metrics[3].value,0);
+ h.state.issueTickets=[{id:'i',actorId:vol.username,status:'open',createdAt:now.toISOString(),revision:1}];const after=h.call('/report/2026-10-05');assert.notEqual(after.reportRevision,r.reportRevision);assert.equal(after.sourceRevision,r.sourceRevision);assert.equal(after.metrics[3].value,1);assert.equal(after.metrics[5].coverage,'current_visible');assert.throws(()=>h.call('/report/2026-10-05',undefined,student),(e:any)=>e.status===403);
  assert.ok(after.metrics.every((m:any)=>m.sourceRevision===after.reportRevision&&m.queriedAt===after.queriedAt));
 });
 

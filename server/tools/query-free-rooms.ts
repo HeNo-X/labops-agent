@@ -1,4 +1,4 @@
-import { effectiveSchedule } from '../data/calendar.ts';
+import { calendar,effectiveSchedule } from '../data/calendar.ts';
 import { closuresFor } from '../data/closures.ts';
 /**
  * 只读工具：query_free_rooms —— 找空实验室（阶段 2A / F09·F11·F12 修正）
@@ -77,7 +77,9 @@ export function runQueryFreeRooms(
     coverage = 'unknown';
   }
 
+  if(ds.principal?.identity==='student')coverage='unknown';
   const notes: string[] = [week.note];
+  if(ds.principal?.identity==='student')notes.push('学生通道仅提供本人课表，不能据此确认其他班级占用；候选空闲状态保留未知，请查询房间的公开教学状态。');
   if (!week.determinable) notes.push('⚠️ 教学周不可确定，以下结果未做周次过滤，可能包含非本周的占用');
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
   if (coverage === 'missing') {
@@ -88,7 +90,7 @@ export function runQueryFreeRooms(
     notes.push('⚠️ 学期结束日未配置（或教学周不可确定），无法证明该日期的课表完整覆盖——以下候选状态未知，不能当作确认空闲');
   }
   notes.push('「空闲」指课表上无排课，不代表房间内无人，也不代表可以预约借用');
-  notes.push('主名单只含档案状态为「开放」的房间；关闭/停用房间移入"已排除"并给出原因');
+  notes.push('主名单使用同源人员开放登记，无登记时回退档案；档案停用仍排除。登记不是门禁传感器，也不保证未来日期可以进入');
 
   const periodsToList = PERIODS.filter((p) => wanted.includes(p.key));
 
@@ -99,14 +101,14 @@ export function runQueryFreeRooms(
   const allRooms = [...ds.labs, ...ds.openLabs].sort((a, b) =>
     a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true })
   );
-  const activeRooms = allRooms.filter((l) => l.status === 'active');
+  const activeRooms = allRooms.filter((l) => l.status!=='inactive'&&calendar.roomState(l,ds,date).door==='open');
   const excluded = allRooms
-    .filter((l) => l.status !== 'active')
+    .filter((l) => !activeRooms.includes(l))
     .map((l) => ({
       labName: l.name,
       location: l.location,
-      status: (l.status as 'closed' | 'inactive') ?? 'closed',
-      reason: l.status === 'inactive' ? '档案状态：停用/修整' : '档案状态：关闭'
+      status: l.status==='inactive'?'inactive' as const:'closed' as const,
+      reason: l.status === 'inactive' ? '档案状态：停用/修整' : calendar.roomState(l,ds,date).doorNote
     }));
 
   const freeByPeriod: FreeRoomsResult['freeByPeriod'] = periodsToList.map((p) => {

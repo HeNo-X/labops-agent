@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
 export const calendar = require('../../shared/calendar.cjs') as {
   dayContext(date:string,term:TermConfig): {weekNo:number|null;weekday:number;holiday:boolean;coverage:string};
   effective(date:string,ds:Dataset):TimetableRow[];
+  roomState(room:{id:string;name:string;status:string},ds:Dataset,date:string):{door:'open'|'closed'|'unknown';doorNote:string;registryStatus:string;service:string};
   stats(rows:TimetableRow[]):{recordCount:number;activityCount:number;classCount:number;occupiedPeriodCount:number;conflicts:Array<{slot:string;activityIds:string[];status:string}>};
 };
 export function effectiveSchedule(ds:Dataset,date:string):TimetableRow[]{return calendar.effective(date,ds);}

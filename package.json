@@ -1,9 +1,9 @@
 {
   "name": "labops-agent",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
-  "description": "主系统统一身份、共享聊天与持久定时提醒",
+  "description": "统一身份与共享聊天、独立移动端、正式业务与持久自动化",
   "engines": {
     "node": ">=22.18.0"
   },
@@ -19,7 +19,7 @@
     "test": "node --test --test-concurrency=1 tests/*.test.ts",
     "test:acceptance": "node --test tests/bridge-http.test.ts tests/stream-facts.test.ts",
     "test:browser": "node tests/review-browser.mjs",
-    "test:all": "npm run check:rules && npm run build && npm test && npm run test:review-browser && npm run test:next-browser && npm run test:v4-browser && npm run test:v5-browser && npm run test:rounds-browser",
+    "test:all": "npm run check:rules && npm run build && npm test && npm run test:review-browser && npm run test:next-browser && npm run test:v4-browser && npm run test:v5-browser && npm run test:rounds-browser && npm run test:v6-browser",
     "sync:rules": "node scripts/sync-rules.mjs",
     "check:rules": "node scripts/sync-rules.mjs --check",
     "demo": "node scripts/run-review.mjs",
@@ -32,7 +32,8 @@
     "test:v4-browser": "node tests/v4-browser.mjs",
     "test:v5-browser": "node tests/v5-browser.mjs",
     "test:rounds-browser": "node tests/rounds-browser.mjs",
-    "eval:release": "node scripts/evaluate-release.mjs"
+    "eval:release": "node scripts/evaluate-release.mjs",
+    "test:v6-browser": "node tests/v6-browser.mjs"
   },
   "dependencies": {
     "@vue/devtools-api": "8.2.1",

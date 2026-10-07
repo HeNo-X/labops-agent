@@ -9,7 +9,7 @@ export function createNativeBusinessCard(props:{result:BusinessResult;cardId:str
  const context=ref<NativeContext|null>(props.result.context||null),plan=ref<NativePlan|null>(props.result.plan||null),receipt=ref<NativeReceipt|null>(null),candidates=ref(props.result.candidates||[]),task=ref<NativeTask|null>(props.result.task||null),taskId=ref(props.result.taskId||props.result.plan?.taskId||''),candidateSetId=ref(props.result.candidateSetId||'');
  const report=ref<NativeReport|undefined>(props.result.report);
  const date=ref(props.result.date||props.result.report?.date||props.result.plan?.payload.date||props.result.context?.date||''),timetableId=ref(props.result.sourceLesson?.id||props.result.plan?.payload.timetableId||''),reason=ref(props.result.plan?.payload.reason||''),source=ref(props.result.sourceLesson||props.result.plan?.payload.source);
- const roomId=ref(props.result.plan?.payload.roomId||''),description=ref(props.result.plan?.payload.description||''),note=ref(''),shiftId=ref(props.result.plan?.payload.shiftId||''),finalize=ref(false),createIssue=ref(false),receiverId=ref('');
+ const roomId=ref(props.result.plan?.payload.roomId||props.result.initialRoomId||''),description=ref(props.result.plan?.payload.description||''),note=ref(''),shiftId=ref(props.result.plan?.payload.shiftId||''),finalize=ref(false),createIssue=ref(false),receiverId=ref('');
  const checklist=ref<NativeCheck[]>(['power','lights','doors','keys','todo'].map((key,i)=>({key,label:['电源与设备','照明','门窗与清场','钥匙交接','未完成事项'][i],state:'unchecked'})));
  const leftoverDescription=ref(''),leftoverDeadline=ref(''),leftoverIssue=ref(''),leftoverLocalId=ref(crypto.randomUUID());
  const title=ref(''),content=ref(''),audience=ref('volunteer'),assigneeId=ref(''),selectedIssueId=ref(''),issueAction=ref('assign'),endDate=ref('');
@@ -34,10 +34,10 @@ export function createNativeBusinessCard(props:{result:BusinessResult;cardId:str
  async function perform(fn:()=>Promise<void>){if(!sameScope.value){error.value='业务账号或授权范围已变化，请重新查询';return;}busy.value=true;error.value='';try{await fn();}catch(e){error.value=(e as Error).message;stage.value='失败可恢复';}finally{busy.value=false;}}
  function remember(r:{task?:NativeTask;plan?:NativePlan;candidateSetId?:string}){if(r.task){task.value=r.task;taskId.value=r.task.id;}else if(r.plan?.taskId)taskId.value=r.plan.taskId;if(r.candidateSetId)candidateSetId.value=r.candidateSetId;}
  async function refresh(){
-  const ctx=await businessApi<NativeContext>('proxy/context');context.value=ctx;
+  const ctx=await businessApi<NativeContext>('proxy/context');context.value=props.result.initialRoomId?{...ctx,issues:ctx.issues.filter(i=>i.roomId===props.result.initialRoomId),shifts:ctx.shifts.filter(s=>s.roomId===props.result.initialRoomId),handovers:ctx.handovers.filter(h=>h.roomId===props.result.initialRoomId),closures:ctx.closures.filter(c=>c.roomId===props.result.initialRoomId)}:ctx;
   if(!date.value)date.value=ctx.date;if(!endDate.value)endDate.value=date.value;
   if(!roomId.value)roomId.value=ctx.rooms[0]?.id||'';
-  if(!shiftId.value)shiftId.value=ctx.dutyGroups?.currentShiftId||ctx.dutyGroups?.nextShiftId||ownShifts.value.at(-1)?.id||'';
+  if(!shiftId.value){const candidates=[ctx.dutyGroups?.currentShiftId,ctx.dutyGroups?.nextShiftId];shiftId.value=candidates.find(id=>ownShifts.value.some(s=>s.id===id))||ownShifts.value.at(-1)?.id||'';}
   if(hydrating&&props.result.view==='duty'){try{const selected=selectedDraftEntity(localStorage,props.result.scopeKey!,props.cardId);if(ownShifts.value.some(s=>s.id===selected)){shiftId.value=selected;if(plan.value?.kind==='duty.handover'&&plan.value.payload.shiftId!==selected){task.value=null;taskId.value='';plan.value=null;receipt.value=null;}}}catch{}}
   const latest=[...(ctx.plans||[])].reverse().find(p=>p.clientCardId===props.cardId&&(props.result.view!=='duty'||p.kind!=='duty.handover'||p.payload.shiftId===shiftId.value));
   if(!taskId.value&&latest?.taskId)taskId.value=latest.taskId;

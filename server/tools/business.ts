@@ -1,4 +1,4 @@
-import { businessRequest,businessScope,rememberBusinessTask,readBusinessTask,listBusinessTasks } from '../business/bridge.ts';
+import { businessRequest,businessScope,effectiveRole,rememberBusinessTask,readBusinessTask,listBusinessTasks } from '../business/bridge.ts';
 import { effectiveSchedule } from '../data/calendar.ts';
 import { isValidDateString } from '../time/term.ts';
 import { parseIntent } from '../agent/intent.ts';
@@ -17,7 +17,7 @@ export async function prepareSchedule(args:Record<string,unknown>,ctx:ToolContex
   }catch(e){return fail(e);}
 }
 export async function queryBusiness(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{
-  try{const context=await businessRequest('/context','GET',undefined,ctx.signal) as unknown as NativeContext;const view=(['schedule','duty','issues','notifications','closures','report','tasks','incidents','health'].includes(String(args['view']))?args['view']:'issues') as BusinessResult['view'];
+  try{if(effectiveRole()==='student'&&!['schedule','notifications','closures'].includes(String(args['view'])))throw Object.assign(new Error('学生共享聊天仅可查询本人课程、本人通知和公开房间状态'),{code:'scope_forbidden'});const context=await businessRequest('/context','GET',undefined,ctx.signal) as unknown as NativeContext;const view=(['schedule','duty','issues','notifications','closures','report','tasks','incidents','health'].includes(String(args['view']))?args['view']:'issues') as BusinessResult['view'];
     if(view==='schedule'){const date=typeof args['date']==='string'?args['date']:context.date;if(!isValidDateString(date))throw new Error('查询日期无效');context.date=date;context.timetable=effectiveSchedule(ctx.dataset,date) as unknown as NativeContext['timetable'];}
     const tasks=view==='tasks'?await businessRequest('/tasks','GET',undefined,ctx.signal) as unknown as BusinessResult['tasks']:undefined;
     const incidents=view==='incidents'?(await businessRequest('/incidents','GET',undefined,ctx.signal))['incidents'] as BusinessResult['incidents']:undefined;

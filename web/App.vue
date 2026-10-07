@@ -9,6 +9,10 @@
  *  · 房间点击只回填草稿，不自动发请求（F29）；发送后草稿清空（F27）
  *  · 主题：跟随系统 = 显式解析 prefers-color-scheme 并实时响应（F28 已修，保持）
  */
+import {auth,bootstrapAuth as sharedBootstrap,switchEdition,clearAuth} from './auth/bootstrap';
+import Targets from '@shared/labops-targets.js';
+import {useEvidenceUpload} from './stores/evidence-upload';
+import {useVisibleRefresh} from './composables/useVisibleRefresh';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRunStore } from './stores/run';
 import { useSessionStore } from './stores/session';
@@ -49,6 +53,7 @@ const session = useSessionStore();
 const business=useBusinessStore();
 watch(()=>business.scopeKey,(next,old)=>{
   if(old===next)return;
+  if(!business.connected||!authed.value){store.clearOverview();session.clearPrivate();return;}
   void store.loadOverview();
   if(store.runStatus!=='running'){
     store.resetRun();
@@ -57,8 +62,9 @@ watch(()=>business.scopeKey,(next,old)=>{
   }
 });
 const authMode = ref<'native'|'demo'>('native');
-const authed = ref(false), authLoading = ref(true), authError = ref('');
+const authed = ref(false), authLoading = ref(true), authError = ref(''),workspaceReady=ref(false);
 async function loadWorkspace(conversationId?:string):Promise<void>{
+  workspaceReady.value=false;
   await business.refresh();
   if(authMode.value==='native'&&business.profile)actor.value=business.profile.identity as ActorRole;
   await Promise.all([store.loadOverview(),loadTasks(),session.loadConversations()]);
@@ -66,27 +72,21 @@ async function loadWorkspace(conversationId?:string):Promise<void>{
   const id=conversationId||session.currentId;
   if(id&&session.conversations.some(c=>c.id===id))await session.openConversation(id);
   else session.startDraft();
+  workspaceReady.value=true;
 }
-async function bootstrapAuth():Promise<void>{
-  authLoading.value=true;authError.value='';
-  try{
-    const fragment=new URLSearchParams(location.hash.slice(1)),ticket=fragment.get('labops-ticket');
-    if(ticket)history.replaceState(null,'',location.pathname+location.search);
-    const res=await fetch(ticket?'/api/auth/sso/exchange':'/api/auth/session',ticket?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket})}:{});
-    const data=await res.json();authMode.value=data.mode==='demo'?'demo':'native';
-    if(!res.ok)throw new Error(data.message||'登录状态无法验证');
-    authed.value=authMode.value==='demo'?sessionStorage.getItem('labops.auth')!==null:Boolean(data.authenticated);
-    if(authed.value)await loadWorkspace(data.conversationId||undefined);
-  }catch(e){authed.value=false;authError.value=(e as Error).message;}
-  finally{authLoading.value=false;}
+watch(()=>session.currentId,id=>{if(!authed.value||!workspaceReady.value)return;if(!id&&auth.target.value.view!=='conversation')return;const target=id?{view:'conversation',conversationId:id}:{view:'home'};auth.target.value=target;history.replaceState(history.state,'','/index.html?'+Targets.search(target));});
+async function bootstrapAuth(force=false):Promise<void>{
+  await sharedBootstrap(force);authMode.value=auth.mode.value;authLoading.value=auth.loading.value;authError.value=auth.error.value;authed.value=auth.authenticated.value;
+  if(authed.value){const target=auth.target.value;await loadWorkspace(target.conversationId);if(target.jobId||target.view==='automation')window.dispatchEvent(new CustomEvent('labops-target',{detail:target}));else if(target.roomId||target.taskId)window.dispatchEvent(new CustomEvent('labops-target',{detail:target}));}
 }
+useVisibleRefresh(async()=>{await session.loadConversations();if(session.currentId)await session.syncConversation(session.currentId);},()=>authed.value&&store.runStatus!=='running');
 async function onLogin(account: string):Promise<void>{
-  sessionStorage.setItem('labops.auth',account);
+  sessionStorage.removeItem('labops.manual-logout');sessionStorage.setItem('labops.auth',account);
   if(authMode.value==='demo'){authed.value=true;await loadWorkspace();}
-  else await bootstrapAuth();
+  else await bootstrapAuth(true);
 }
 async function logout():Promise<void>{
-  cancel();await fetch('/api/auth/logout',{method:'POST'}).catch(()=>undefined);
+  sessionStorage.setItem('labops.manual-logout','1');activeToken='';cancel();session.clearPrivate();useEvidenceUpload().clearPrivate();business.clearPrivate();tasks.value=[];store.resetRun();store.clearOverview();for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);if(key?.startsWith('labops.native-draft:'))localStorage.removeItem(key);}clearAuth();await fetch('/api/auth/logout',{method:'POST'}).catch(()=>undefined);
   sessionStorage.removeItem('labops.auth');session.messages={};session.conversations=[];session.startDraft();store.resetRun();authed.value=false;
 }
 const { start, cancel } = useAgentStream();
@@ -101,6 +101,10 @@ watch(
 );
 watch(draft, (t) => session.saveDraft(session.currentId ?? '__new', t));
 const msgsEl = ref<HTMLElement | null>(null);
+const nearBottom=ref(true),newMessages=ref(false);
+function trackScroll(){const el=msgsEl.value;if(el){nearBottom.value=el.scrollHeight-el.scrollTop-el.clientHeight<100;if(nearBottom.value)newMessages.value=false;}}
+function showLatest(){nearBottom.value=true;newMessages.value=false;scrollFollow();}
+
 const navOpen = ref(false);
 /** 右侧房间侧边栏：宽屏默认展开，窄屏默认收起；用户选择持久化（停靠式，可收起为窄轨） */
 const roomsOpen = ref(window.innerWidth >= 1280);
@@ -140,7 +144,7 @@ const modeLockTip = computed(
 );
 
 /** 活跃轮的助手占位消息（直接写入会话消息数组，流式更新同一对象） */
-let liveTarget: ChatMessageData | null = null;
+
 
 type ThemeMode = 'auto' | 'light' | 'dark';
 const themeMode = ref<ThemeMode>('auto');
@@ -189,14 +193,14 @@ const tasksError = ref<string | null>(null);
 const actor = ref<ActorRole>(actorRole());
 
 async function loadTasks(): Promise<void> {
-  try {
+  const owner=business.scopeKey;try {
     const res = await fetch('/api/tasks', { headers: actorHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const j = (await res.json()) as { tasks: TaskRow[] };
-    tasks.value = j.tasks ?? [];
+    if(owner!==business.scopeKey||!authed.value)return;tasks.value = j.tasks ?? [];
     tasksError.value = null;
   } catch (e) {
-    tasksError.value = `任务列表载入失败：${(e as Error).message}`;
+    if(owner===business.scopeKey&&authed.value)tasksError.value = `任务列表载入失败：${(e as Error).message}`;
   }
 }
 
@@ -204,8 +208,7 @@ function switchRole(r: ActorRole): void {
   if(store.runStatus==='running'||r===actor.value)return;
   setActorRole(r);
   session.startDraft();
-  session.messages={};
-  session.conversations=[];
+  session.clearPrivate();
   store.resetRun();
   void business.refresh();
   actor.value = r;
@@ -231,7 +234,7 @@ const currentTitle = computed(() => {
 function scrollFollow(): void {
   const el = msgsEl.value;
   if (!el) return;
-  el.scrollTop = el.scrollHeight;
+  if(nearBottom.value)el.scrollTop = el.scrollHeight;else newMessages.value=true;
 }
 watch(
   () => [store.stream, store.toolCalls, store.runStatus, store.elapsedMs] as const,
@@ -257,7 +260,7 @@ watch(
 watch(
   () => session.currentMessages.length + store.stream.length,
   async () => {
-    if (!liveTarget) return;
+    if (!liveConvId) return;
     await nextTick();
     scrollFollow();
   }
@@ -581,6 +584,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 </script>
 
 <template>
+ <button v-if="authed&&newMessages" class="desktop-new-messages" @click="showLatest">有新消息 · 查看最新</button>
   <p v-if="authLoading" class="auth-status" role="status">正在验证主系统登录状态…</p>
   <template v-else-if="!authed"><p v-if="authError" class="auth-status" role="alert">{{authError}}</p><LoginView :mode="authMode" @done="onLogin" /></template>
   <div v-else class="app" :class="{ 'app--railclosed': !roomsOpen }">
@@ -766,7 +770,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
             {{ ACTOR_ROLE_LABELS[r].replace('演示', '') }}
           </button>
         </div>
-        <button v-if="authMode==='native'" type="button" class="theme__btn" @click="logout">退出登录</button>
+        <button type="button" class="theme__btn" @click="switchEdition('mobile',session.currentId?{view:'conversation',conversationId:session.currentId}:{view:'home'})">手机版</button><button v-if="authMode==='native'" type="button" class="theme__btn" @click="logout">退出登录</button>
         <SourceBadge :source-type="store.sourceType ?? store.overviewSourceType" :engine="store.activeEngine" :model="store.model" compact />
         <div class="nav__theme" role="group" aria-label="主题切换">
           <button
@@ -834,8 +838,8 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
           <p class="hero__scope">
             查课表、看房间开放状态、找空闲实验室；也可以直接交办事务：报修、临时停用、站内通知、值班收尾、运营日报
             （连接原系统后，按实际账号权限办理；未连接时为沙盒演示）。
-            连接账号后可在消息中比较调课、补全检查、处理工单、发布通知并回查；在室人数按原系统当日有效签到−有效签退给出，
-            钥匙台账和预约尚未接入。历史会话在左侧导航找回。
+            连接账号后可在消息中比较调课、补全检查、处理工单、发布通知并回查；按上海当日同房间、同主体逐条配对的有效签到记录统计，
+            钥匙读取人工台账，未登记保持未知；预约尚未接入。历史会话在左侧导航找回。
           </p>
         </template>
         <template v-else>
@@ -872,7 +876,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
         </header>
         <p v-if="session.currentMessagesError" class="chat__err" role="alert">{{ session.currentMessagesError }}</p>
 
-        <div ref="msgsEl" class="chat__msgs">
+        <div ref="msgsEl" @scroll.passive="trackScroll" class="chat__msgs">
           <div v-for="(r, i) in rounds" :key="r.key" class="round" :data-round="i + 1">
             <RoundToolbar
               :index="i + 1"

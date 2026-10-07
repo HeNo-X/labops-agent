@@ -51,6 +51,7 @@ export interface ChatMessage {
   queriedAt?:string;
   scope?:string;
   createdAt: string;
+  ordinal?:number;
 }
 
 /**
@@ -130,6 +131,11 @@ export const useSessionStore = defineStore('session', () => {
   // R11：加载/错误状态按会话隔离 —— A 的失败不得显示在 B 上
   const messagesErrors = ref<Record<string, string>>({});
   const loadGen = new Map<string, number>();
+  let epoch=0,listGeneration=0;
+  const requests=new Map<string,AbortController>(),syncCursors=new Map<string,{cursor:string;revision:string}>();
+  const activeRuns=ref<Record<string,string|null>>({});
+  function clearPrivate(){epoch++;listGeneration++;for(const c of requests.values())c.abort();requests.clear();syncCursors.clear();loadGen.clear();messages.value={};conversations.value=[];messagesErrors.value={};convModes.value={};drafts.value={};activeRuns.value={};saveCurrentId(null);}
+
 
   /** 当前会话的加载错误（R11：从当前实体派生，而不是全局单槽） */
   const currentMessagesError = computed<string | null>(() =>
@@ -182,12 +188,14 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function loadConversations(): Promise<void> {
+    const generation=++listGeneration,identity=epoch;
     listLoading.value = true;
     listError.value = null;
     try {
       const res = await fetch('/api/conversations', {headers: actorHeaders()});
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = (await res.json()) as { conversations: ConvSummary[] };
+      if(generation!==listGeneration||identity!==epoch)return;
       conversations.value = j.conversations ?? [];
       for (const c of conversations.value) {
         if (c.mode) convModes.value[c.id] = c.mode;
@@ -197,6 +205,7 @@ export const useSessionStore = defineStore('session', () => {
         saveCurrentId(null);
       }
     } catch (e) {
+      if(generation!==listGeneration||identity!==epoch)return;
       listError.value = `会话列表载入失败：${(e as Error).message}`;
     } finally {
       listLoading.value = false;
@@ -212,54 +221,31 @@ export const useSessionStore = defineStore('session', () => {
     drafts.value[key] = text;
   }
 
-  async function openConversation(id: string): Promise<void> {
-    saveCurrentId(id);
-    // N15：已有缓存先展示，但**始终**后台重新核对 —— 跨标签页变更、中途 streaming 终态都能收敛
-    const gen = (loadGen.get(id) ?? 0) + 1;
-    loadGen.set(id, gen);
-    const hadCache = Boolean(messages.value[id]);
-    if (!hadCache) messagesLoading.value = true;
-    try {
-      const res = await fetch(`/api/conversations/${encodeURIComponent(id)}`, {headers: actorHeaders()});
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const j = (await res.json()) as {
-        mode?: 'chat' | 'task';
-        messages: Array<Record<string, unknown>>;
-      };
-      if (gen !== loadGen.get(id)) return; // 旧响应不得覆盖新会话状态（N15）
-      if (j.mode) setCurrentMode(id, j.mode);
-      // R04：历史快照与本地活跃增量按 ID 合并 —— 本地已有的消息保留（较新），只追加本地没有的
-      const local = messages.value[id] ?? [];
-      const serverMsgs = (j.messages ?? []) as Array<Record<string, unknown>>;
-      const localIds = new Set(local.map((m) => m.id));
-      const merged = [...local];
-      for (const m of serverMsgs) {
-        if (!localIds.has(String(m['id']))) {
-          merged.push({
-            id: String(m['id']),
-            role: m['role'] as 'user' | 'assistant',
-            text: String(m['text'] ?? ''),
-            status: (m['status'] as ChatMessage['status']) ?? 'completed',
-            toolCalls: ((m['meta'] as Record<string, unknown> | null)?.['toolCalls'] as ToolCallRecord[]) ?? [],
-            engine: (m['meta'] as Record<string, unknown> | null)?.['engine'] != null ? String((m['meta'] as Record<string, unknown>)['engine']) : null,
-            model: (m['meta'] as Record<string, unknown> | null)?.['model'] != null ? String((m['meta'] as Record<string, unknown>)['model']) : null,
-            sourceType: (m['meta'] as Record<string, unknown> | null)?.['sourceType'] != null ? String((m['meta'] as Record<string, unknown>)['sourceType']) : null,
-            ms: Number((m['meta'] as Record<string, unknown> | null)?.['ms'] ?? 0) || undefined,
-            error: ((m['meta'] as Record<string, unknown> | null)?.['error'] as ChatMessage['error']) ?? null,
-            responseMode:(m['meta'] as Record<string,unknown>)?.['responseMode'] as 'chat'|'task'|undefined,
-            queriedAt:(m['meta'] as Record<string,unknown>)?.['queriedAt'] as string|undefined,
-            scope:(m['meta'] as Record<string,unknown>)?.['scope'] as string|undefined,
-            createdAt: String(m['createdAt'] ?? '')
-          });
-        }
-      }
-      messages.value[id] = merged.sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
-    } catch (e) {
-      if (gen === loadGen.get(id)) messagesErrors.value[id] = `消息载入失败：${(e as Error).message}`;
-    } finally {
-      if (gen === loadGen.get(id)) messagesLoading.value = false;
-    }
+  function fromServer(m:Record<string,unknown>):ChatMessage{
+    const meta=(m['meta']||{}) as Record<string,unknown>;
+    return {id:String(m['id']),role:m['role'] as ChatMessage['role'],text:String(m['text']||''),status:(m['status'] as ChatMessage['status'])||'completed',toolCalls:(meta['toolCalls'] as ToolCallRecord[])||[],engine:meta['engine'] as string|null,model:meta['model'] as string|null,sourceType:meta['sourceType'] as string|null,ms:Number(meta['ms'])||undefined,error:meta['error'] as ChatMessage['error'],responseMode:meta['responseMode'] as 'chat'|'task'|undefined,queriedAt:meta['queriedAt'] as string|undefined,scope:meta['scope'] as string|undefined,createdAt:String(m['createdAt']||''),ordinal:Number(m['ordinal'])};
   }
+  async function syncConversation(id:string,select=false):Promise<void>{
+    if(select)saveCurrentId(id);
+    if(requests.has(id))return;
+    const controller=new AbortController(),identity=epoch;requests.set(id,controller);
+    if(!messages.value[id])messagesLoading.value=true;
+    try{
+      const cursor=syncCursors.get(id),q=cursor?'?'+new URLSearchParams(cursor):'';
+      const res=await fetch(`/api/conversations/${encodeURIComponent(id)}${q}`,{headers:actorHeaders(),signal:controller.signal});
+      if(!res.ok)throw await responseError(res);
+      const data=await res.json() as {mode?:'chat'|'task';messages:Record<string,unknown>[];messageIds?:string[];cursor?:string;revision?:string;reset?:boolean;activeRunId?:string|null};
+      if(identity!==epoch)return;
+      if(data.mode)setCurrentMode(id,data.mode);
+      const local=messages.value[id]||[],ids=data.messageIds?new Set(data.messageIds):null,map=new Map(local.filter(m=>!ids||ids.has(m.id)||Boolean(activeRuns.value[id])&&(m.status==='streaming'||m.id.startsWith('local-u-'))).map(m=>[m.id,m]));
+      for(const raw of data.messages||[]){const m=fromServer(raw),old=map.get(m.id);if(old){if(old.status!=='streaming'||m.status!=='streaming')Object.assign(old,m);}else map.set(m.id,m);}
+      messages.value[id]=Array.from(map.values()).sort((a,b)=>(a.ordinal??Infinity)-(b.ordinal??Infinity)||a.createdAt.localeCompare(b.createdAt));
+      if(data.cursor&&data.revision)syncCursors.set(id,{cursor:data.cursor,revision:data.revision});
+      activeRuns.value[id]=data.activeRunId||null;delete messagesErrors.value[id];
+    }catch(e){if(identity===epoch&&(e as Error).name!=='AbortError')messagesErrors.value[id]='消息载入失败：'+(e as Error).message;}
+    finally{if(identity===epoch){requests.delete(id);messagesLoading.value=false;}}
+  }
+  async function openConversation(id:string):Promise<void>{await syncConversation(id,true);}
 
   /** 新聊天：先只切到空会话；第一次发送成功后才落库建会话（避免一排空白会话） */
   function startDraft(): void {
@@ -323,7 +309,8 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function removeConversation(id: string): Promise<void> {
-    await fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: actorHeaders() });
+    const response=await fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: actorHeaders() });
+    if(!response.ok)throw await responseError(response);
     delete messages.value[id];
     delete messagesErrors.value[id];
     if (currentId.value === id) saveCurrentId(null);
@@ -347,6 +334,7 @@ export const useSessionStore = defineStore('session', () => {
     } catch (e) {
       return { ok: false, message: `网络请求失败：${(e as Error).message}` };
     }
+    syncCursors.delete(id);
     messages.value[id] = [];
     delete messagesErrors.value[id];
     await openConversation(id);
@@ -379,15 +367,17 @@ export const useSessionStore = defineStore('session', () => {
   // 服务端 PATCH 同样返回 409 mode_locked。此处刻意不保留 setConversationMode，
   // 避免将来有人顺手把入口加回来而绕过服务端规则。
   async function renameConversation(id: string, title: string): Promise<void> {
-    await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+    const response=await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { ...actorHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ title })
     });
+    if(!response.ok)throw await responseError(response);
     await loadConversations();
   }
 
   return {
+    clearPrivate,syncConversation,activeRuns,saveCurrentId,
     conversations,
     currentId,
     currentMessages,

@@ -43,12 +43,12 @@ const OUT_OF_SCOPE_PATTERNS: Array<[RegExp, string]> = [
   [/积分|补记分|加分明细/, '积分核对与补记（F11）尚未接入。'],
   [/白名单|导入名单|导入学生|批量导入人员/, '人员导入预审（F12）尚未接入。'],
   [/故障|怎么用|怎么办|规定|制度|手册|坏了[^。]{0,6}(怎么办|如何处理)/, '知识库问答（RAG）不在本阶段范围内，尚未接入，所以我无法给出制度或手册类回答。'],
-  [/钥匙(在|去哪|在哪|在谁|是谁)|门禁/, '钥匙台账与交接（F07）尚未接入，我无法查询钥匙位置。'],
+  [/门禁/, '未接入门禁传感器。可查询人员开放登记与钥匙台账，不能据此判断实时门禁状态。'],
   [/去年|历史|平均使用率|趋势|统计[^。]{0,4}报表/, '本系统只覆盖当前学期的课表数据，不含历史统计，我无法给出这类数字。']
 ];
 
 // ---- 在室人数 vs 签到明细：两者数据可得性完全不同，不能混成一条拒绝文案（2026-10-06 修正）----
-//  在室人数：主系统 /occupancy 提供"当日有效签到−有效签退"的房间级计数（与主系统页面同源），
+//  在室人数：主系统 /occupancy 提供"上海当日同房间、同主体逐条配对的未结束有效签到记录"的房间级计数（与主系统页面同源），
 //           业务通道连通时**可以给真实数字**；此前被这条兜底规则一律拦成"无法提供"，是错的。
 //  签到明细：逐人签到/签退/补签记录没有对 LabOps 开放的接口，仍然如实说不可得。
 const OCCUPANCY_RE = /在室|几个人|多少人|谁在|签到(人数|情况|统计)|签退(人数|情况|统计)/;
@@ -57,17 +57,17 @@ const CHECKIN_DETAIL_RE = /签到|签退|补签/;
 /** 「在室人数」类问题的兜底回答：只有在取不到房间号或未连通业务通道时才说"无法提供" */
 function occupancyFallback(reason: 'no_room' | 'no_channel', ds: Dataset): string {
   if (reason === 'no_room') {
-    return '请告诉我是哪个房间，例如「E310 现在有多少人？」。在室人数按原系统当日有效签到−有效签退统计，与主系统页面同源；' +
+    return '请告诉我是哪个房间，例如「E310 现在有多少人？」。在室人数按原系统上海当日同房间、同主体逐条配对的未结束有效签到记录统计，与主系统页面同源；' +
       `逐人签到明细没有开放接口，仍然查不到。当前收录的房间号有：${[...ds.labs, ...ds.openLabs].map((l) => l.name).join('、')}。`;
   }
   return '现在没有连接原系统账号，取不到签到数据，所以我给不出在室人数，也不会估计。' +
-    '连接原系统账号后可以按「当日有效签到−有效签退」给出房间人数（与主系统页面同源）；逐人签到明细没有开放接口。';
+    '连接原系统账号后可以按「上海当日同房间、同主体逐条配对的未结束有效签到记录」给出房间人数（与主系统页面同源）；逐人签到明细没有开放接口。';
 }
 
 /** 「哪些房间空着/找空教室」类问题：不需要房间号（导出供 run.ts 做继承判定） */
 export const FREE_ROOMS_RE = /哪些.{0,6}(空|闲)|空(着|的|教室|实验室|房间)|空闲|没(有)?被占用|可以(用|借)/;
 /** 房间档案/状态类问题：需要房间号，且在问开放/容量/状态/在室人数等 */
-export const LAB_STATUS_RE = /开放吗|开(着|放)吗|还开|状态|容量|多大|能坐|位置|在哪|什么情况|简介|介绍|下一?节|在室|几个人|多少人|谁在/;
+export const LAB_STATUS_RE = /开放吗|开(着|放)吗|还开|状态|容量|多大|能坐|位置|在哪|什么情况|简介|介绍|下一?节|在室|几个人|多少人|谁在|钥匙/;
 /** 纯寒暄/致谢（导出供 run.ts 做继承判定） */
 export const SMALLTALK_RE = /^(谢谢|多谢|感谢|辛苦了|辛苦|好的|好|嗯+|噢|哦|ok|OK|Ok|收到|明白|了解了|你好|您好|嗨|hi|hello|哈喽)[！!。.~，,～\s]*$/;
 
@@ -109,7 +109,7 @@ export function planDemo(question: string, intent: Intent, ds: Dataset): DemoPla
         args: {},
         directReply:
           '逐人签到/签退/补签明细没有对 LabOps 开放的接口，我查不到（签到办理与异常申诉也尚未接入）。' +
-          '房间在室人数可以查，例如「E310 现在有多少人？」——口径是当日有效签到−有效签退，与主系统页面同源。',
+          '房间在室人数可以查，例如「E310 现在有多少人？」——口径是上海当日同房间、同主体逐条配对的未结束有效签到记录，与主系统页面同源。',
         needsDisclosure: disclosure
       };
     }
@@ -585,7 +585,7 @@ function renderLabStatusAnswer(r: LabStatusResult): string {
   const lines: string[] = [];
   // F19：档案状态措辞，避免被理解为"此刻开着门"
   lines.push(
-    `${r.labName}（${r.labLocation ?? '位置未录入'}）档案状态「${r.statusLabel}」，容量 ${r.capacity ?? '未知'} 人。${r.date}（${r.weekdayLabel}）有 ${r.schedule.lessonCount} 条排课。`
+    `${r.labName}（${r.labLocation ?? '位置未录入'}）人员开放登记/档案回退「${r.statusLabel}」，容量 ${r.capacity ?? '未知'} 人。${r.date}（${r.weekdayLabel}）有 ${r.schedule.lessonCount} 条排课。`
   );
   if (r.schedule.nextLesson) {
     lines.push(`下一节是 ${r.schedule.nextLesson.startTime} 的《${r.schedule.nextLesson.courseName}》（${r.schedule.nextLesson.periodLabel}）。`);
@@ -599,9 +599,12 @@ function renderLabStatusAnswer(r: LabStatusResult): string {
   // 渲染层漏改会让真实数字被自己抹掉。有值就说值，没值才说为什么没有。
   lines.push(
     r.occupancy
-      ? `在室人数：${r.occupancy.present} 人（${r.occupancy.date}，来源：主系统授权的实时签到数据，口径=当日有效签到−有效签退，与主系统页面同源；逐人明细未开放）。这是记录数口径，不等于"此刻屋里一定有人"。`
+      ? `在室人数：${r.occupancy.present} 人（${r.occupancy.date}，来源：主系统授权的实时签到数据，口径=上海当日同房间、同主体逐条配对的未结束有效签到记录，与主系统页面同源；逐人明细未开放）。这是记录数口径，不等于"此刻屋里一定有人"。`
       : '在室人数：未知 —— 当前没有取到签到数据来源（业务通道未连接或未取得授权），无法提供，请勿据此判断房间内是否有人。'
   );
+  if(r.registryStatusNote)lines.push(r.registryStatusNote);
+  if(r.serviceState==='suspended')lines.push('服务状态：停用；请分别核对停用节次与排课。');
+  if(r.keySummary){const k=r.keySummary;const labels:Record<string,string>={in_cabinet:'在钥匙柜',borrowed:'登记借用',handover:'登记位置待交接',unknown:'未知'};lines.push('钥匙登记：'+(labels[k.state]||'未知')+'；位置 '+(k.location||'未知')+(k.holder?'；借用人 '+k.holder:'')+'；时间 '+(k.recordedAt||'未知')+'。'+k.note);}
   return lines.join('\n');
 }
 

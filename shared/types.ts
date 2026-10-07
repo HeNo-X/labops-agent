@@ -223,6 +223,7 @@ export interface LabStatusArgs {
 }
 
 export interface LabStatusResult {
+  keySummary?:{state:string;location:string|null;holder?:string|null;recordedAt:string|null;note:string};
   serviceState?: 'normal'|'suspended';
   suspendedPeriods?: string[];
   labId: string | null;
@@ -252,7 +253,7 @@ export interface LabStatusResult {
     nextLessonReason: 'no_more_today' | 'not_applicable' | 'unknown';
   };
   /**
-   * 在室人数：经主系统授权的实时通道可用时给出真实值（口径=当日有效签到−有效签退，与主系统页面同源）；
+   * 经授权读取上海当日未结束的有效签到记录：同房间同主体逐条配对，重复记录不去重。
    * 无数据来源时为 null —— **任何情况下都不允许编造人数**。
    */
   occupancy: { present: number; source: 'authorized_api'; date: string; note: string } | null;

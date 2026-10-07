@@ -1,4 +1,5 @@
 import {businessScope,isBusinessConnected,businessRequest} from '../business/bridge.ts';
+import crypto from 'node:crypto';
 import {nativeDelegation} from '../security/context.ts';
 /**
  * 会话 API —— 持久化会话/消息/运行的 REST 与 SSE（M0/M1 加固版）
@@ -22,6 +23,7 @@ import { MAX_QUESTION_CHARS } from '../agent/prompts.ts';
 import { resolveActor } from '../operations/identity.ts';
 import { readJsonBody, sseHeaders } from './agent-chat.ts';
 import {
+  getDb,
   dbReady,
   dbLastError,
   listConversations,
@@ -146,7 +148,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
     const target = roundMatch ?? rollbackMatch!;
     const conversationId = decodeURIComponent(target[1]!);
     const meta = getConversationMeta(conversationId);
-    if (!meta) return json(res, 404, { error: 'conversation_not_found' }), true;
+    if (!meta) return json(res, 404, { error: 'conversation_not_found',message:'会话不存在或当前账户不可见' }), true;
     if (nativeDelegation.getStore()?.sharedChat && meta.mode !== 'chat') {
       return json(res, 403, { message: '悬浮窗不能读取或操作任务会话' }), true;
     }
@@ -217,13 +219,20 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
     if (!isMessages && method === 'GET') {
       const meta = getConversationMeta(conversationId);
       if (!meta) {
-        json(res, 404, { error: 'conversation_not_found' });
+        json(res, 404, { error: 'conversation_not_found',message:'会话不存在或当前账户不可见' });
         return true;
       }
       if(isBusinessConnected()){try{await businessRequest('/context');}catch{/* expired credentials are invalidated; scoped history is redacted below */}}
       const scope=businessScope().scopeKey;
       const messages=getMessages(conversationId).map(m=>m.meta?.['authorityScope']&&m.meta['authorityScope']!==scope?{...m,text:'此条原系统历史结果属于其他账号或已失效授权范围。请重新连接相应账号并查询。',meta:{...m.meta,toolCalls:[]}}:m);
-      json(res, 200, { ...meta, messages });
+      const query=new URL(req.url||'/', 'http://localhost').searchParams;
+      if([...query].some(([k,v])=>!['cursor','revision'].includes(k)||v.length>100||query.getAll(k).length!==1)||query.has('cursor')&&!/^\d{1,16}$/.test(query.get('cursor')!))return json(res,400,{error:'bad_cursor',message:'会话查询参数无效'}),true;
+      const db=getDb(),cursor=Number((db.prepare('SELECT COALESCE(MAX(seq),0) AS n FROM message_changes').get() as {n:number}).n),since=query.has('cursor')?Number(query.get('cursor')):null;
+      const revision=crypto.createHash('sha256').update(JSON.stringify([meta.mode,meta.title,scope,messages])).digest('hex');
+      const changed=since===null?new Set<string>():new Set((db.prepare('SELECT DISTINCT messageId FROM message_changes WHERE conversationId=? AND seq>?').all(conversationId,since) as Array<{messageId:string}>).map(r=>r.messageId));
+      const reset=since===null||since>cursor||since<Math.max(0,cursor-20000)||query.get('revision')!==revision&&!changed.size;
+      const active=getDb().prepare("SELECT id FROM runs WHERE conversationId=? AND status='running' LIMIT 1").get(conversationId) as {id:string}|undefined;
+      json(res, 200, { ...meta, messages:reset?messages:query.get('revision')===revision?[]:messages.filter(m=>changed.has(m.id)),messageIds:messages.map(m=>m.id),cursor:String(cursor),revision,reset,activeRunId:active?.id||null });
       return true;
     }
     if (!isMessages && method === 'PATCH') {
@@ -254,7 +263,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
       if (typeof title === 'string') renameConversation(conversationId, title.trim());
       const meta = getConversationMeta(conversationId);
       if (!meta) {
-        json(res, 404, { error: 'conversation_not_found' });
+        json(res, 404, { error: 'conversation_not_found',message:'会话不存在或当前账户不可见' });
         return true;
       }
       json(res, 200, { ok: true, mode: meta.mode, title: meta.title });
@@ -280,7 +289,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
 async function handleConversationMessage(req: IncomingMessage, res: ServerResponse, conversationId: string): Promise<void> {
   const meta = getConversationMeta(conversationId);
   if (!meta) {
-    json(res, 404, { error: 'conversation_not_found' });
+    json(res, 404, { error: 'conversation_not_found',message:'会话不存在或当前账户不可见' });
     return;
   }
   const body = await readJsonBody(req);

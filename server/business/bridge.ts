@@ -110,11 +110,15 @@ export async function handleBusinessApi(req:IncomingMessage,res:ServerResponse,p
       return send(200,{connected:true,profile,scopeKey:businessScope().scopeKey});
     }
     let endpoint=p.slice('/api/business/proxy'.length);
-    const cleanEndpoint=endpoint.split('?')[0];
-    if(method==='GET'&&endpoint.startsWith('/evidence/')){const q=new URL(req.url||'/', 'http://localhost').searchParams;if([...q].some(([k,v])=>!['q','device','targetKind','targetId'].includes(k)||v.length>200))return send(400,{message:'证据查询参数无效'});const search=q.toString();if(search)endpoint+='?'+search;}
-
-    const allowedGet=endpoint==='/diagnostics'||['/evidence/attachments','/evidence/manuals'].includes(cleanEndpoint)||/^\/evidence\/attachments\/attachment-[a-f0-9-]+$/.test(cleanEndpoint)||['/scheduled-jobs','/scheduled-results','/reminder-preferences','/preparation-pack'].includes(endpoint)||(/^\/scheduled-jobs\/job-[a-f0-9-]+$/.test(endpoint)||/^\/scheduled-jobs\/plans\/jobplan-[a-f0-9-]+$/.test(endpoint))||endpoint==='/context'||endpoint==='/resource-health'||endpoint==='/tasks'||endpoint==='/incidents'||/^\/incidents\/incident-[a-f0-9-]+$/.test(endpoint)||/^\/tasks\/task-[a-f0-9-]+$/.test(endpoint)||/^\/report\/\d{4}-\d{2}-\d{2}$/.test(endpoint)||/^\/(operations\/business-plan-|plans\/plan-)[a-f0-9-]+$/.test(endpoint);
-    const allowedPost=['/evidence/attachments','/evidence/manuals','/scheduled-jobs/preview','/scheduled-jobs/confirm','/reminder-preferences'].includes(endpoint)||endpoint==='/incidents/draft'||/^\/incidents\/incident-[a-f0-9-]+\/(analyze|preview|restore|takeover)$/.test(endpoint)||['/schedule/preview','/handover/preview','/workflow/preview','/plans/commit','/plans/reject','/shifts','/resources','/calendar','/notifications','/notifications/read'].includes(endpoint);
+    const cleanEndpoint=endpoint;
+    const readQueries:Record<string,string[]>={'/occupancy':['roomId','date','limit'],'/room-summaries':['roomId','date','limit'],'/key-status':['roomId'],'/mobile-home':[],'/notifications':['limit'],'/evidence/attachments':['targetKind','targetId'],'/evidence/manuals':['q','device']};
+    const q=new URL(req.url||'/', 'http://localhost').searchParams;
+    if(method==='GET'){
+      const allowed=readQueries[cleanEndpoint]||[];
+      if([...q].some(([k,v])=>!allowed.includes(k)||v.length>200||q.getAll(k).length!==1))return send(400,{message:'此端点的查询参数无效',code:'bad_query'});
+    }
+    const allowedGet=/^\/notifications\/[A-Za-z0-9_-]{1,100}$/.test(endpoint)||['/diagnostics','/evidence/attachments','/evidence/manuals','/scheduled-jobs','/scheduled-results','/reminder-preferences','/preparation-pack','/context','/resource-health','/tasks','/incidents','/occupancy','/room-summaries','/key-status','/mobile-home','/notifications'].includes(endpoint)||/^\/evidence\/attachments\/attachment-[a-f0-9-]+$/.test(endpoint)||/^\/scheduled-jobs\/(?:plans\/jobplan-|job-)[a-f0-9-]+$/.test(endpoint)||/^\/incidents\/incident-[a-f0-9-]+$/.test(endpoint)||/^\/tasks\/task-[a-f0-9-]+$/.test(endpoint)||/^\/report\/\d{4}-\d{2}-\d{2}$/.test(endpoint)||/^\/(operations\/business-plan-|plans\/plan-)[a-f0-9-]+$/.test(endpoint);
+    const allowedPost=['/evidence/attachments','/evidence/manuals','/scheduled-jobs/preview','/scheduled-jobs/confirm','/reminder-preferences','/incidents/draft','/schedule/preview','/handover/preview','/workflow/preview','/plans/commit','/plans/reject','/shifts','/resources','/calendar','/notifications','/notifications/read','/notifications/read-batch'].includes(endpoint)||/^\/incidents\/incident-[a-f0-9-]+\/(analyze|preview|restore|takeover)$/.test(endpoint);
     if(!p.startsWith('/api/business/proxy/')||method==='GET'&&!allowedGet||method==='POST'&&!allowedPost||!['GET','POST'].includes(method))return send(404,{message:'业务入口不存在'});
     let body:unknown;
     if(method==='POST'){const input=await readJsonBody(req,endpoint.startsWith('/evidence/')?5*1024*1024:16*1024);if(!input.ok)return send(input.status,{message:input.message});body=input.value;}
@@ -124,7 +128,7 @@ export async function handleBusinessApi(req:IncomingMessage,res:ServerResponse,p
     if(method==='POST'&&(typeof record?.['scopeKey']!=='string'||!record['scopeKey']))return send(409,{message:'业务操作缺少当前授权范围，请重新查询',code:'scope_required'});
     if(record?.['scopeKey']&&record['scopeKey']!==businessScope().scopeKey)return send(409,{message:'业务账号或授权范围已变化，请重新查询和确认',code:'scope_changed'});
     if(record?.['conversationId']&&!(getDb().prepare('SELECT id FROM conversations WHERE id=? AND ownerId=?').get(record['conversationId'] as string,ownerId())))return send(403,{message:'会话不属于当前工作区',code:'conversation_forbidden'});
-    if(method==='POST'&&!['/notifications/read','/reminder-preferences'].includes(endpoint)){
+    if(method==='POST'&&!['/notifications/read','/notifications/read-batch','/reminder-preferences'].includes(endpoint)){
       const conversations=new Set<string>();if(typeof record?.['conversationId']==='string')conversations.add(record['conversationId']);
       if(endpoint==='/scheduled-jobs/confirm'&&typeof record?.['planId']==='string'){const linked=await businessRequest('/scheduled-jobs/plans/'+record['planId']);const id=String((linked['plan'] as {conversationId?:string}).conversationId||'');if(id)conversations.add(id);}
       if(typeof record?.['planId']==='string'&&endpoint.startsWith('/plans/')){
@@ -134,7 +138,7 @@ export async function handleBusinessApi(req:IncomingMessage,res:ServerResponse,p
       }
       for(const id of conversations){const c=getDb().prepare('SELECT mode FROM conversations WHERE id=? AND ownerId=? AND deletedAt IS NULL').get(id,ownerId()) as {mode:string}|undefined;if(!c||c.mode!=='task')return send(403,{message:'方案所属会话为聊天模式或不在当前工作区，请在任务模式重新准备',code:'mode_forbidden'});}
     }
-    const out=await businessRequest(endpoint,method,body);
+    const search=q.toString();const out=await businessRequest(endpoint+(method==='GET'&&search?'?'+search:''),method,body);
     if(endpoint==='/diagnostics'&&effectiveRole()==='admin'){
       let writable=true;try{getDb().prepare('UPDATE business_connections SET profile=profile WHERE 0').run();}catch{writable=false;}
       out['agentDatabaseWritable']=writable;out['credentialKeyReady']=credentialKey().length===32;out['authMode']=process.env.LABOPS_AUTH_MODE||'native';out['allowedOrigins']=(process.env.LABOPS_ALLOWED_ORIGINS||'').split(',').filter(Boolean);out['requestHealth']=requestHealth.get(ownerId())||{};

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 /**
  * 命令栏 —— 任务的唯一输入入口，两种形态同一组件
  * ============================================================================
@@ -72,7 +73,7 @@ function onKeydown(e: KeyboardEvent): void {
 
 <template>
   <section class="bar" :class="isHero ? 'bar--hero' : 'bar--dock'" aria-labelledby="bar-h">
-    <h2 id="bar-h" class="sr-only">命令栏</h2>
+    <h2 id="bar-h" class="sr-only">{{tr("命令栏")}}</h2>
 
     <div v-if="isHero && props.examples !== false" class="bar__examples">
       <button
@@ -88,32 +89,29 @@ function onKeydown(e: KeyboardEvent): void {
     </div>
 
     <div class="bar__row">
-      <label class="sr-only" for="cmd">输入你的实验室问题</label>
+      <label class="sr-only" for="cmd">{{tr("输入你的实验室问题")}}</label>
       <textarea
         id="cmd"
         ref="inputEl"
         v-model="text"
         class="bar__input"
         :rows="isHero ? 2 : 1"
-        :placeholder="props.placeholder ?? '用一句话交办，例如：E310 2026-09-30 有哪些课？'"
+        :placeholder="props.placeholder ?? '输入实验室问题或要办理的事项…'"
         :disabled="busy"
         @keydown="onKeydown"
       />
       <button v-if="!busy" type="button" class="bar__btn" :disabled="!canSubmit" @click="submit">
-        {{ props.submitLabel ?? (isHero ? '交给 Agent' : '发起任务') }}
+        {{tr(props.submitLabel ?? '发送')}}
       </button>
-      <button v-else type="button" class="bar__btn bar__btn--ghost" @click="emit('cancel')">取消</button>
+      <button v-else type="button" class="bar__btn bar__btn--ghost" @click="emit('cancel')">{{tr("停止")}}</button>
     </div>
 
-    <div class="bar__hint">
-      <StatusTag v-if="busy" tone="info" glyph="◌" :label="props.submitting && !store.inputLocked ? '正在提交…' : '任务执行中'" title="正在处理，请稍候" />
-      <span v-if="isHero && store.demoDate" class="bar__hint-text">
-        说「今天」「下周三」「9月30日」都可以；当前学期第 4 教学周的周三是 <b>{{ store.demoDate }}</b>
-      </span>
+    <div v-if="busy" class="bar__hint">
+      <StatusTag v-if="busy" tone="info" glyph="◌" :label="props.submitting && !store.inputLocked ? '正在提交…' : '任务执行中'" :title="tr('正在处理，请稍候')" />
     </div>
 
     <div v-if="!isHero && props.examples !== false" class="bar__examples bar__examples--dock">
-      <span class="bar__examples-label">示例：</span>
+      <span class="bar__examples-label">{{tr("示例：")}}</span>
       <button v-for="q in store.exampleQuestions" :key="q" type="button" class="chip" :disabled="busy" @click="useExample(q)">
         {{ q }}
       </button>
@@ -135,12 +133,12 @@ function onKeydown(e: KeyboardEvent): void {
   padding: var(--sp-4) var(--sp-5);
 }
 .bar--hero .bar__input {
-  font-size: 15px;
+  font-size: calc(var(--ui-font-size) * 1.15385);
   min-height: 56px;
 }
 .bar--hero .bar__btn {
   min-height: 56px;
-  font-size: 15px;
+  font-size: calc(var(--ui-font-size) * 1.15385);
 }
 .bar__examples {
   display: flex;
@@ -156,7 +154,7 @@ function onKeydown(e: KeyboardEvent): void {
   margin-bottom: 0;
 }
 .bar__examples-label {
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
 }
 .chip {
@@ -164,7 +162,7 @@ function onKeydown(e: KeyboardEvent): void {
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   padding: 3px 12px;
   cursor: pointer;
 }
@@ -199,13 +197,16 @@ function onKeydown(e: KeyboardEvent): void {
   opacity: 0.6;
 }
 .bar__btn {
+  position: static;
+  z-index: auto;
+  transform: none;
   flex: 0 0 auto;
   padding: 0 var(--sp-5);
   border: 1px solid var(--primary);
   border-radius: var(--radius);
   background: var(--primary);
   color: var(--primary-contrast);
-  font-size: 14px;
+  font-size: calc(var(--ui-font-size) * 1.07692);
   font-weight: 600;
   cursor: pointer;
   min-height: 40px;
@@ -232,7 +233,7 @@ function onKeydown(e: KeyboardEvent): void {
   justify-content: center;
   gap: var(--sp-2);
   margin: var(--sp-2) 0 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
   flex-wrap: wrap;
 }

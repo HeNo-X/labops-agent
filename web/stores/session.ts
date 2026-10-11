@@ -1,3 +1,4 @@
+import {auth} from '../auth/bootstrap';import {actorRole} from '../actor';
 import {responseError} from '../http';
 import { actorHeaders } from '../actor';
 /**
@@ -134,7 +135,7 @@ export const useSessionStore = defineStore('session', () => {
   let epoch=0,listGeneration=0;
   const requests=new Map<string,AbortController>(),syncCursors=new Map<string,{cursor:string;revision:string}>();
   const activeRuns=ref<Record<string,string|null>>({});
-  function clearPrivate(){epoch++;listGeneration++;for(const c of requests.values())c.abort();requests.clear();syncCursors.clear();loadGen.clear();messages.value={};conversations.value=[];messagesErrors.value={};convModes.value={};drafts.value={};activeRuns.value={};saveCurrentId(null);}
+  function clearPrivate(){epoch++;listGeneration++;for(const c of requests.values())c.abort();requests.clear();syncCursors.clear();loadGen.clear();messages.value={};conversations.value=[];messagesErrors.value={};convModes.value={};drafts.value={};try{for(let i=sessionStorage.length-1;i>=0;i--){const key=sessionStorage.key(i);if(key?.startsWith('labops.chat-drafts:'))sessionStorage.removeItem(key);}}catch{}activeRuns.value={};saveCurrentId(null);}
 
 
   /** 当前会话的加载错误（R11：从当前实体派生，而不是全局单槽） */
@@ -214,11 +215,18 @@ export const useSessionStore = defineStore('session', () => {
 
   // N21：草稿按会话保存
   const drafts = ref<Record<string, string>>({});
+  function draftKey(){const profile=auth.profile.value;return 'labops.chat-drafts:'+(profile?profile.identity+':'+profile.username:'demo:'+actorRole()+':'+(sessionStorage.getItem('labops.auth')||''));}
   function draftFor(key: string): string {
-    return drafts.value[key] ?? '';
+    if(drafts.value[key]!==undefined)return drafts.value[key]!;
+    try{const saved=JSON.parse(sessionStorage.getItem(draftKey())||'{}'),text=saved?.[key];return typeof text==='string'?text.slice(0,3000):'';}catch{return '';}
   }
   function saveDraft(key: string, text: string): void {
     drafts.value[key] = text;
+    try{let saved:Record<string,unknown>={};try{const raw=JSON.parse(sessionStorage.getItem(draftKey())||'{}');if(raw&&typeof raw==='object'&&!Array.isArray(raw))saved=raw;}catch{}
+      if(text)saved[key]=text.slice(0,3000);else delete saved[key];
+      const entries=Object.entries(saved).filter(([k,v])=>k.length<150&&typeof v==='string').slice(-100);
+      if(entries.length)sessionStorage.setItem(draftKey(),JSON.stringify(Object.fromEntries(entries)));else sessionStorage.removeItem(draftKey());
+    }catch{}
   }
 
   function fromServer(m:Record<string,unknown>):ChatMessage{

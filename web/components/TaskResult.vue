@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 /**
  * 任务结果区 —— 按 resultKind 分流渲染
  * ============================================================================
@@ -145,7 +146,7 @@ const freeList = computed(() => {
 
   <section v-if="r && (kind === 'schedule_hit' || kind === 'schedule_empty' || kind === 'config_insufficient')" class="res" aria-labelledby="res-h">
     <header class="res__head">
-      <h2 id="res-h" class="sr-only">查询结果与依据</h2>
+      <h2 id="res-h" class="sr-only">{{tr("查询结果与依据")}}</h2>
       <StatusTag :tone="kindTag.tone" :glyph="kindTag.glyph" :label="kindTag.label" />
     </header>
 
@@ -153,18 +154,16 @@ const freeList = computed(() => {
     <div v-if="kind === 'config_insufficient'" class="alert alert--warn" role="status">
       <StatusTag tone="warn" label="配置不足" />
       <p class="alert__msg">
-        {{ r && !r.weekDeterminable ? '无法确定该日期属于第几教学周。' : '课表数据为空。' }}
-        下面显示的是按已知数据能给出的**有条件**结果，请勿直接当作最终排课。
-      </p>
+        {{tr(r && !r.weekDeterminable ? '无法确定该日期属于第几教学周。' : '课表数据为空。')}} {{tr("下面显示的是按已知数据能给出的**有条件**结果，请勿直接当作最终排课。")}} </p>
       <p v-if="r?.weekNote" class="alert__hint">{{ r.weekNote }}</p>
     </div>
 
     <!-- 无匹配 -->
     <div v-else-if="kind === 'schedule_empty'" class="alert alert--warn" role="status">
       <StatusTag tone="warn" label="无匹配结果" />
-      <p class="alert__msg">{{ reasonText }}。系统没有编造任何课程。</p>
+      <p class="alert__msg">{{ reasonText }}{{tr("。系统没有编造任何课程。")}}</p>
       <div v-if="r?.suggestions?.length" class="suggest">
-        <span class="suggest__label">可选房间号：</span>
+        <span class="suggest__label">{{tr("可选房间号：")}}</span>
         <span v-for="s in r.suggestions" :key="s" class="suggest__item">{{ s }}</span>
       </div>
     </div>
@@ -192,7 +191,7 @@ const freeList = computed(() => {
           :title="`${b.label} ${b.start}-${b.end}：${b.count} 条`"
         >
           <span class="bar__sym" aria-hidden="true">{{ b.hit ? '▮' : '▯' }}</span>
-          <span class="bar__label">{{ b.label.replace('上午第', '上午').replace('下午第', '下午').replace('大节', '') }}</span>
+          <span class="bar__label">{{tr(b.label.replace('上午第', '上午').replace('下午第', '下午').replace('大节', ''))}}</span>
           <span class="bar__count">{{ b.count }}</span>
         </span>
       </div>
@@ -220,41 +219,41 @@ const freeList = computed(() => {
 
     <!-- 数据依据：默认折叠 -->
     <details class="prov">
-      <summary class="prov__sum">数据依据与条件说明</summary>
+      <summary class="prov__sum">{{tr("数据依据与条件说明")}}</summary>
       <div class="prov__body">
         <div class="prov__badges">
           <SourceBadge :source-type="r.provenance.sourceType" :engine="engineOf" />
         </div>
         <dl class="prov__list">
           <div class="prov__row">
-            <dt>数据类型</dt>
+            <dt>{{tr("数据类型")}}</dt>
             <dd>{{ r.provenance.sourceLabel }}（{{ r.provenance.sourceType }}）</dd>
           </div>
           <div class="prov__row">
-            <dt>数据覆盖</dt>
+            <dt>{{tr("数据覆盖")}}</dt>
             <dd>{{ r.provenance.coverage }}</dd>
           </div>
           <div class="prov__row">
-            <dt>查询时间</dt>
+            <dt>{{tr("查询时间")}}</dt>
             <dd>{{ fmtIso(r.provenance.queryTime) }}（{{ r.provenance.timezone }}）</dd>
           </div>
           <div v-if="r.provenance.snapshotAt" class="prov__row">
-            <dt>快照导出时间</dt>
+            <dt>{{tr("快照导出时间")}}</dt>
             <dd>{{ fmtIso(r.provenance.snapshotAt) }}</dd>
           </div>
           <div v-if="r.provenance.sourceSha256Prefix" class="prov__row">
-            <dt>源数据指纹</dt>
-            <dd class="prov__mono">sha256 前 16 位：{{ r.provenance.sourceSha256Prefix }}</dd>
+            <dt>{{tr("源数据指纹")}}</dt>
+            <dd class="prov__mono">{{tr("sha256 前 16 位：")}}{{ r.provenance.sourceSha256Prefix }}</dd>
           </div>
           <div class="prov__row">
-            <dt>查询条件</dt>
+            <dt>{{tr("查询条件")}}</dt>
             <dd class="prov__mono">
               labName={{ r.labName }}，date={{ r.date }}<template v-if="r.periodFilter">，periodKey={{ r.periodFilter }}</template>
             </dd>
           </div>
         </dl>
         <template v-if="r.notes.length">
-          <h4 class="prov__h4">条件说明（必须一并阅读）</h4>
+          <h4 class="prov__h4">{{tr("条件说明（必须一并阅读）")}}</h4>
           <ul class="notes">
             <li v-for="(n, i) in r.notes" :key="i">{{ n }}</li>
           </ul>
@@ -264,15 +263,15 @@ const freeList = computed(() => {
   </section>
 
   <!-- 房间状态卡 -->
-  <section v-else-if="extra && extra.kind === 'lab_status'" class="res" aria-label="房间状态">
+  <section v-else-if="extra && extra.kind === 'lab_status'" class="res" :aria-label="tr('房间状态')">
     <header class="res__head">
       <StatusTag :tone="kindTag.tone" :glyph="kindTag.glyph" :label="kindTag.label" />
     </header>
     <template v-if="(extra.payload as LabStatusResult).labName === null">
       <div class="alert alert--warn" role="status">
-        <p class="alert__msg">系统中没有这个房间号，未编造任何数据。</p>
+        <p class="alert__msg">{{tr("系统中没有这个房间号，未编造任何数据。")}}</p>
         <div v-if="(extra.payload as LabStatusResult).suggestions.length" class="suggest">
-          <span class="suggest__label">可选房间号：</span>
+          <span class="suggest__label">{{tr("可选房间号：")}}</span>
           <span v-for="s in (extra.payload as LabStatusResult).suggestions" :key="s" class="suggest__item">{{ s }}</span>
         </div>
       </div>
@@ -291,51 +290,45 @@ const freeList = computed(() => {
         <p v-if="(extra.payload as LabStatusResult).description" class="labdesc">{{ (extra.payload as LabStatusResult).description }}</p>
         <dl class="labfacts">
           <div class="prov__row">
-            <dt>当日排课</dt>
+            <dt>{{tr("当日排课")}}</dt>
             <dd>
-              {{ (extra.payload as LabStatusResult).schedule.lessonCount }} 条（{{ (extra.payload as LabStatusResult).date }}
+              {{ (extra.payload as LabStatusResult).schedule.lessonCount }} {{tr("条（")}}{{ (extra.payload as LabStatusResult).date }}
               {{ (extra.payload as LabStatusResult).weekdayLabel }}）
             </dd>
           </div>
           <div class="prov__row">
-            <dt>占用节次</dt>
+            <dt>{{tr("占用节次")}}</dt>
             <dd>
               <template v-if="(extra.payload as LabStatusResult).schedule.occupiedPeriods.length">
                 <span v-for="p in (extra.payload as LabStatusResult).schedule.occupiedPeriods" :key="p.periodKey" class="suggest__item">
                   {{ p.periodLabel }} {{ p.courseNames.join('、') }}
                 </span>
               </template>
-              <template v-else>无</template>
+              <template v-else>{{tr("无")}}</template>
             </dd>
           </div>
           <div class="prov__row">
-            <dt>下一节课</dt>
+            <dt>{{tr("下一节课")}}</dt>
             <dd>
               <template v-if="(extra.payload as LabStatusResult).schedule.nextLesson">
                 {{ (extra.payload as LabStatusResult).schedule.nextLesson!.startTime }}
                 《{{ (extra.payload as LabStatusResult).schedule.nextLesson!.courseName }}》（{{ (extra.payload as LabStatusResult).schedule.nextLesson!.periodLabel }}）
               </template>
-              <template v-else-if="(extra.payload as LabStatusResult).schedule.nextLessonReason === 'not_applicable'">
-                所查日期非今天，此处不提供"下一节课"——请看当天排课明细
-              </template>
-              <template v-else-if="(extra.payload as LabStatusResult).schedule.nextLessonReason === 'unknown'">
-                无法确定（教学周不可判定）
-              </template>
-              <template v-else>当天剩余时间没有更多排课</template>
+              <template v-else-if="(extra.payload as LabStatusResult).schedule.nextLessonReason === 'not_applicable'"> {{tr("所查日期非今天，此处不提供\"下一节课\"——请看当天排课明细")}} </template>
+              <template v-else-if="(extra.payload as LabStatusResult).schedule.nextLessonReason === 'unknown'"> {{tr("无法确定（教学周不可判定）")}} </template>
+              <template v-else>{{tr("当天剩余时间没有更多排课")}}</template>
             </dd>
           </div>
           <div class="prov__row">
-            <dt>在室人数</dt>
+            <dt>{{tr("在室人数")}}</dt>
             <dd v-if="(extra.payload as LabStatusResult).occupancy">
-              {{ (extra.payload as LabStatusResult).occupancy!.present }} 人（{{ (extra.payload as LabStatusResult).occupancy!.date }}）
-              —— 当日有效签到−有效签退，与主系统页面同源；逐人明细未开放，记录数口径不等于"此刻屋里一定有人"
-            </dd>
-            <dd v-else class="alert__hint">未知 —— 当前没有取到签到数据（业务通道未连接或未取得授权），请勿据此判断</dd>
+              {{ (extra.payload as LabStatusResult).occupancy!.present }} {{tr("人（")}}{{ (extra.payload as LabStatusResult).occupancy!.date }}{{tr("） —— 当日有效签到−有效签退，与主系统页面同源；逐人明细未开放，记录数口径不等于\"此刻屋里一定有人\"")}} </dd>
+            <dd v-else class="alert__hint">{{tr("未知 —— 当前没有取到签到数据（业务通道未连接或未取得授权），请勿据此判断")}}</dd>
           </div>
         </dl>
       </div>
       <details class="prov">
-        <summary class="prov__sum">数据依据与条件说明</summary>
+        <summary class="prov__sum">{{tr("数据依据与条件说明")}}</summary>
         <div class="prov__body">
           <div class="prov__badges">
             <SourceBadge :source-type="(extra.payload as LabStatusResult).provenance.sourceType" :engine="engineOf" />
@@ -349,30 +342,24 @@ const freeList = computed(() => {
   </section>
 
   <!-- 空闲房间卡 -->
-  <section v-else-if="extra && extra.kind === 'free_rooms'" class="res" aria-label="空闲房间">
+  <section v-else-if="extra && extra.kind === 'free_rooms'" class="res" :aria-label="tr('空闲房间')">
     <header class="res__head">
       <StatusTag :tone="kindTag.tone" :glyph="kindTag.glyph" :label="kindTag.label" />
       <span class="hit__when">
         {{ (extra.payload as FreeRoomsResult).date }}（{{ (extra.payload as FreeRoomsResult).weekdayLabel }}）
-        <template v-if="(extra.payload as FreeRoomsResult).weekNo !== null">
-          · 第 {{ (extra.payload as FreeRoomsResult).weekNo }} 教学周
-        </template>
+        <template v-if="(extra.payload as FreeRoomsResult).weekNo !== null"> {{tr("· 第")}} {{ (extra.payload as FreeRoomsResult).weekNo }} {{tr("教学周")}} </template>
       </span>
     </header>
     <!-- R08：覆盖不足 → 无法判断，候选是"未知"而不是"无空闲" -->
     <div v-if="(extra.payload as FreeRoomsResult).coverage !== 'complete'" class="alert alert--warn" role="status">
       <p class="alert__msg">
-        {{
-          (extra.payload as FreeRoomsResult).coverage === 'missing'
+        {{tr((extra.payload as FreeRoomsResult).coverage === 'missing'
             ? '课表数据为空，无法判断哪些房间空闲。'
             : (extra.payload as FreeRoomsResult).coverage === 'out_of_range'
               ? '日期超出学期覆盖范围，无法判断空闲。'
-              : '学期结束日未配置（或教学周不可确定），无法证明该日期的课表完整覆盖。'
-        }}
-        下列候选的空闲状态**未知**，不能作为可用推荐。
-      </p>
+              : '学期结束日未配置（或教学周不可确定），无法证明该日期的课表完整覆盖。')}} {{tr("下列候选的空闲状态**未知**，不能作为可用推荐。")}} </p>
       <div v-if="(extra.payload as FreeRoomsResult).unknownCandidates.length" class="suggest">
-        <span class="suggest__label">未知候选（非确认空闲）：</span>
+        <span class="suggest__label">{{tr("未知候选（非确认空闲）：")}}</span>
         <span v-for="u in (extra.payload as FreeRoomsResult).unknownCandidates" :key="u" class="suggest__item">{{ u }}</span>
       </div>
     </div>
@@ -384,11 +371,11 @@ const freeList = computed(() => {
             {{ room.labName }}{{ labStatusOf(room) }}
           </span>
         </span>
-        <span v-else class="freetier__none">无空闲房间</span>
+        <span v-else class="freetier__none">{{tr("无空闲房间")}}</span>
       </li>
     </ul>
     <details class="prov">
-      <summary class="prov__sum">数据依据与条件说明</summary>
+      <summary class="prov__sum">{{tr("数据依据与条件说明")}}</summary>
       <div class="prov__body">
         <ul class="notes">
           <li v-for="(n, i) in (extra.payload as FreeRoomsResult).notes" :key="i">{{ n }}</li>
@@ -429,11 +416,11 @@ const freeList = computed(() => {
 .alert__msg {
   margin: 0;
   color: var(--text);
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
 }
 .alert__hint {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-muted);
 }
 .suggest {
@@ -441,7 +428,7 @@ const freeList = computed(() => {
   flex-wrap: wrap;
   gap: 6px;
   align-items: baseline;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
 }
 .suggest__label {
   color: var(--text-muted);
@@ -461,12 +448,12 @@ const freeList = computed(() => {
 }
 .hit__room {
   font-family: var(--font-mono);
-  font-size: 18px;
+  font-size: calc(var(--ui-font-size) * 1.38462);
   letter-spacing: 0.03em;
 }
 .hit__loc,
 .hit__when {
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-muted);
 }
 .hit__when {
@@ -474,7 +461,7 @@ const freeList = computed(() => {
 }
 .labdesc {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-muted);
 }
 .labfacts {
@@ -495,7 +482,7 @@ const freeList = computed(() => {
   padding: 3px 8px;
   border: 1px dashed var(--border-strong);
   border-radius: 999px;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
   background: var(--surface-2);
 }
@@ -506,7 +493,7 @@ const freeList = computed(() => {
   color: var(--info);
 }
 .bar__sym {
-  font-size: 10px;
+  font-size: calc(var(--ui-font-size) * 0.76923);
 }
 .bar__count {
   font-family: var(--font-mono);
@@ -537,12 +524,12 @@ const freeList = computed(() => {
   flex-direction: column;
 }
 .lesson__period {
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   font-weight: 600;
 }
 .lesson__clock {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
 .lesson__main {
@@ -553,12 +540,12 @@ const freeList = computed(() => {
   flex-wrap: wrap;
 }
 .lesson__course {
-  font-size: 14px;
+  font-size: calc(var(--ui-font-size) * 1.07692);
   font-weight: 600;
 }
 .lesson__meta {
   grid-area: meta;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-muted);
 }
 .lesson__sep {
@@ -583,7 +570,7 @@ const freeList = computed(() => {
   border-radius: var(--radius);
 }
 .freetier__period {
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   font-weight: 600;
 }
 .freetier__rooms {
@@ -592,18 +579,18 @@ const freeList = computed(() => {
   gap: 4px;
 }
 .freetier__none {
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
 }
 .prov {
   border-top: 1px dashed var(--border);
   padding-top: var(--sp-2);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
 }
 .prov__sum {
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   user-select: none;
 }
 .prov__body {
@@ -621,7 +608,7 @@ const freeList = computed(() => {
 .prov__row {
   display: flex;
   gap: var(--sp-3);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
 }
 .prov__row dt {
   flex: 0 0 96px;
@@ -637,13 +624,13 @@ const freeList = computed(() => {
 }
 .prov__h4 {
   margin: var(--sp-3) 0 var(--sp-1);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-muted);
 }
 .notes {
   margin: 0;
   padding-left: 18px;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-muted);
 }
 .notes li {

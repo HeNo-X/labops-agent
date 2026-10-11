@@ -25,7 +25,7 @@ export const DATA_SOURCE_LABELS: Record<DataSourceType, string> = {
 };
 
 /** 推理引擎：agnes = 真实模型；demo = 服务端确定性规则（未配置 Key 时的诚实降级） */
-export type EngineType = 'agnes' | 'demo' | 'facts' | 'dashscope';
+export type EngineType = 'agnes' | 'demo' | 'facts' | 'dashscope' | 'scope';
 
 // ===========================================================================
 //  SSE 事件契约
@@ -154,7 +154,7 @@ export interface AnswerDeltaPayload {
 
 export interface RunCompletedPayload {
   durable?: boolean;
-  strategy?: 'fact_transform'|'verified_query_transform';
+  strategy?: 'fact_transform'|'verified_query_transform'|'scope_guidance';
   answer: string;
   steps: number;
   toolCalls: number;

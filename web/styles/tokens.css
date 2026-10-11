@@ -163,4 +163,5 @@ body {
   }
 }
 
-.desktop-new-messages{position:fixed;bottom:96px;left:50%;z-index:80;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)}
+.sidebar-resizing,.sidebar-resizing *{cursor:col-resize!important;user-select:none!important}
+.desktop-new-messages{align-self:center;position:relative;z-index:1;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)}

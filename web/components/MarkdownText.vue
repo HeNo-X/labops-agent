@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 import { computed } from 'vue';
 const props = defineProps<{text:string}>();
 type Block={kind:'text';text:string}|{kind:'table';header:string[];rows:string[][]};
@@ -18,7 +19,7 @@ const blocks=computed<Block[]>(()=>{
 <template>
   <div class="safe-markdown">
     <template v-for="(block,index) in blocks" :key="index">
-      <div v-if="block.kind==='table'" class="table-scroll" tabindex="0" aria-label="查询结果表格">
+      <div v-if="block.kind==='table'" class="table-scroll" tabindex="0" :aria-label="tr('查询结果表格')">
         <table><thead><tr><th v-for="(cell,c) in block.header" :key="c" scope="col">{{ cell }}</th></tr></thead>
           <tbody><tr v-for="(row,r) in block.rows" :key="r"><td v-for="(cell,c) in row" :key="c">{{cell}}</td></tr></tbody></table>
       </div>
@@ -27,5 +28,5 @@ const blocks=computed<Block[]>(()=>{
   </div>
 </template>
 <style scoped>
-.safe-markdown{line-height:1.7;overflow-wrap:anywhere}.safe-markdown p{white-space:pre-wrap;margin:.45rem 0}.table-scroll{overflow:auto;margin:1rem 0}table{border-collapse:collapse;min-width:100%;font-size:14px}th,td{padding:10px 14px;text-align:left;border:1px solid var(--border,#dce3ec)}th{background:var(--surface-soft,#f3f6fa)}
+.safe-markdown{line-height:1.7;overflow-wrap:anywhere}.safe-markdown p{white-space:pre-wrap;margin:.45rem 0}.table-scroll{overflow:auto;margin:1rem 0}table{border-collapse:collapse;min-width:100%;font-size:calc(var(--ui-font-size) * 1.07692)}th,td{padding:10px 14px;text-align:left;border:1px solid var(--border,#dce3ec)}th{background:var(--surface-soft,#f3f6fa)}
 </style>

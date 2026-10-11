@@ -38,13 +38,13 @@ const symbol = computed(() => props.glyph ?? TONE_GLYPH[props.tone]);
   border-radius: 999px;
   border-width: 1px;
   border-style: solid;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   line-height: 18px;
   white-space: nowrap;
   font-weight: 500;
 }
 .tag__glyph {
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   line-height: 1;
 }
 .tag--solid {

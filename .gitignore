@@ -31,3 +31,5 @@ server/data/*.sqlite-*
 server/credentials/
 *.key
 .evaluation/
+
+.review-shots*/

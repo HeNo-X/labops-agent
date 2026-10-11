@@ -8,6 +8,7 @@ import { forgetOwnerSessions } from '../agent/session.ts';
 import { readJsonBody } from '../api/agent-chat.ts';
 import { buildFromSnapshotLike, loadDataset, type Dataset } from '../data/store.ts';
 import { PROJECT_ROOT } from '../config.ts';
+import {accountLinks} from '../security/account-links.ts';
 
 type Profile={username?:string;account?:string;identity?:string;className?:string;mustChangePassword?:boolean};
 type Connection = {token:string;profile:string};
@@ -93,7 +94,7 @@ export async function handleBusinessApi(req:IncomingMessage,res:ServerResponse,p
     if(p==='/api/business/status'&&method==='GET'){
       const c=connection();let profile=c?JSON.parse(c.profile):null;let state='disconnected';
       if(c){try{const r=await businessRequest('/context');profile=r['actor'];state='connected';}catch(e){state=isBusinessConnected()?'unavailable':'expired';return send(200,{configured:Boolean(process.env.LABOPS_BUSINESS_URL),connected:false,state,profile:null,message:(e as Error).message});}}
-      return send(200,{configured:Boolean(process.env.LABOPS_BUSINESS_URL),connected:Boolean(c),state,profile,scopeKey:businessScope().scopeKey,actions:['指定日期调课','检查补全与最终交接','工单流转','定向通知','真实日报']});
+      return send(200,{configured:Boolean(process.env.LABOPS_BUSINESS_URL),connected:Boolean(c),state,profile,accountLinks:accountLinks(profile),scopeKey:businessScope().scopeKey,actions:['指定日期调课','检查补全与最终交接','工单流转','定向通知','真实日报']});
     }
     if(p==='/api/business/disconnect'&&method==='POST'){
       const c=connection();let revoked=true;if(c){try{await remote('/api/auth/logout','POST',c.token,{});}catch{revoked=false;}}

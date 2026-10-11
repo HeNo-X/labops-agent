@@ -19,20 +19,18 @@ import { useSessionStore } from './stores/session';
 import type { ChatMessage as ChatMessageData, Round, RoundEffects } from './stores/session';
 import { useAgentStream } from './composables/useAgentStream';
 import LabMatrix from './components/LabMatrix.vue';
+import AgentSidebar from './components/AgentSidebar.vue';
+import SettingsDialog from './components/SettingsDialog.vue';
+import {preferences} from './preferences';
+import {t as tr} from './i18n';
 import CommandBar from './components/CommandBar.vue';
 import ChatMessage from './components/ChatMessage.vue';
 import RoundToolbar from './components/RoundToolbar.vue';
 import RoundActionDialog from './components/RoundActionDialog.vue';
-import NativeWorkPanel from './components/NativeWorkPanel.vue';
-import BusinessConnectionPanel from './components/BusinessConnectionPanel.vue';
 import {useBusinessStore} from './stores/business';
-import EvidencePanel from './components/EvidencePanel.vue';
-import ScheduledJobsPanel from './components/ScheduledJobsPanel.vue';
 import LoginView from './components/LoginView.vue';
-import SourceBadge from './components/SourceBadge.vue';
-import { ACTOR_ROLE_LABELS, actorHeaders, actorRole, setActorRole } from './actor';
+import { actorHeaders, actorRole, setActorRole } from './actor';
 import type { ActorRole } from './actor';
-import { TASK_STATUS_LABELS } from '@shared/operations-contract';
 import type { TaskStatus } from '@shared/operations-contract';
 
 /** 任务中心条目（/api/tasks；字段与 TaskRecord 对齐，前端只读展示） */
@@ -77,7 +75,7 @@ async function loadWorkspace(conversationId?:string):Promise<void>{
 watch(()=>session.currentId,id=>{if(!authed.value||!workspaceReady.value)return;if(!id&&auth.target.value.view!=='conversation')return;const target=id?{view:'conversation',conversationId:id}:{view:'home'};auth.target.value=target;history.replaceState(history.state,'','/index.html?'+Targets.search(target));});
 async function bootstrapAuth(force=false):Promise<void>{
   await sharedBootstrap(force);authMode.value=auth.mode.value;authLoading.value=auth.loading.value;authError.value=auth.error.value;authed.value=auth.authenticated.value;
-  if(authed.value){const target=auth.target.value;await loadWorkspace(target.conversationId);if(target.jobId||target.view==='automation')window.dispatchEvent(new CustomEvent('labops-target',{detail:target}));else if(target.roomId||target.taskId)window.dispatchEvent(new CustomEvent('labops-target',{detail:target}));}
+  if(authed.value){const target=auth.target.value;await loadWorkspace(target.conversationId);await nextTick();if(target.jobId||target.view==='automation')window.dispatchEvent(new CustomEvent('labops-target',{detail:target}));else if(target.view==='settings')settingsOpen.value=true;else if(target.roomId||target.taskId)window.dispatchEvent(new CustomEvent('labops-target',{detail:target}));}
 }
 useVisibleRefresh(async()=>{await session.loadConversations();if(session.currentId)await session.syncConversation(session.currentId);},()=>authed.value&&store.runStatus!=='running');
 async function onLogin(account: string):Promise<void>{
@@ -91,7 +89,7 @@ async function logout():Promise<void>{
 }
 const { start, cancel } = useAgentStream();
 
-const draft = ref('');
+const draft = ref(session.draftFor('__new'));
 // N21：草稿按会话保存；切回会话时恢复
 watch(
   () => session.currentId,
@@ -136,7 +134,8 @@ onUnmounted(() => window.removeEventListener('resize', collapseRailOnMobile));
 // 2026-10-06 用户要求 —— 会话内部不再提供切换入口，服务端同样以 409 拒绝改模式，
 // 否则同一条历史会在"只查询"和"可办理"两种语义之间漂移。
 type ConvMode = 'chat' | 'task';
-const draftMode = ref<ConvMode>('task');
+const draftMode = ref<ConvMode>(preferences.value.defaultMode);
+watch(()=>preferences.value.defaultMode,value=>{if(!session.currentId)draftMode.value=value;});
 const convMode = computed<ConvMode>(() => session.currentMode());
 const modeLabel = (m: ConvMode): string => (m === 'chat' ? '聊天会话' : '工作会话');
 const modeLockTip = computed(
@@ -146,46 +145,9 @@ const modeLockTip = computed(
 /** 活跃轮的助手占位消息（直接写入会话消息数组，流式更新同一对象） */
 
 
-type ThemeMode = 'auto' | 'light' | 'dark';
-const themeMode = ref<ThemeMode>('auto');
-const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
-
-function resolveTheme(mode: ThemeMode): 'light' | 'dark' {
-  return mode === 'auto' ? (systemDark.matches ? 'dark' : 'light') : mode;
-}
-
-function applyTheme(mode: ThemeMode): void {
-  themeMode.value = mode;
-  document.documentElement.setAttribute('data-theme', resolveTheme(mode));
-  try {
-    localStorage.setItem('labops.theme', mode);
-  } catch {
-    /* 忽略 */
-  }
-}
-
-systemDark.addEventListener?.('change', () => {
-  if (themeMode.value === 'auto') {
-    document.documentElement.setAttribute('data-theme', resolveTheme('auto'));
-  }
-});
-
-onMounted(() => {
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      navOpen.value = false;
-    }
-  });
-  let saved: ThemeMode = 'auto';
-  try {
-    const v = localStorage.getItem('labops.theme');
-    if (v === 'light' || v === 'dark' || v === 'auto') saved = v;
-  } catch {
-    /* 忽略 */
-  }
-  applyTheme(saved);
-  void bootstrapAuth();
-});
+const settingsOpen=ref(false);
+function closeSettings(){settingsOpen.value=false;void nextTick(()=>document.querySelector<HTMLButtonElement>('.sidebar-account')?.focus());}
+onMounted(()=>{void bootstrapAuth();});
 
 // ---- ops.v1：任务中心 + 沙盒演示身份（仅沙盒可切换视角，服务端校验）----
 const tasks = ref<TaskRow[]>([]);
@@ -217,9 +179,9 @@ function switchRole(r: ActorRole): void {
   void loadTasks();
 }
 
-function openTask(t: TaskRow): void {
-  if (t.conversationId && session.conversations.some((c) => c.id === t.conversationId)) {
-    void session.openConversation(t.conversationId);
+function openTask(conversationId: string | null): void {
+  if (conversationId && session.conversations.some((c) => c.id === conversationId)) {
+    void session.openConversation(conversationId);
     navOpen.value = false;
   }
 }
@@ -401,7 +363,7 @@ async function onCancel(): Promise<void> {
 
 function onNewChat(mode?: ConvMode): void {
   if (store.inputLocked) return;
-  if (mode) draftMode.value = mode;
+  draftMode.value = mode || preferences.value.defaultMode;
   session.startDraft();
   navOpen.value = false;
 }
@@ -436,27 +398,6 @@ function onDelete(id: string, title: string): void {
 function onPickRoom(q: string): void {
   // F29：房间点击只回填草稿，不自动发送
   draft.value = q;
-}
-
-// ---- 侧栏分区：工作会话 / 聊天会话（0.6.0）----
-// 折叠态持久化：用户希望"我不关心聊天会话"这件事被记住，而不是每次重新折一遍
-const navFolded = ref<{ work: boolean; chat: boolean }>({ work: false, chat: false });
-try {
-  const raw = localStorage.getItem('labops.nav.folded');
-  if (raw) {
-    const j = JSON.parse(raw) as Partial<{ work: boolean; chat: boolean }>;
-    navFolded.value = { work: j?.work === true, chat: j?.chat === true };
-  }
-} catch {
-  /* 忽略损坏的本地偏好 */
-}
-function toggleSection(key: 'work' | 'chat'): void {
-  navFolded.value = { ...navFolded.value, [key]: !navFolded.value[key] };
-  try {
-    localStorage.setItem('labops.nav.folded', JSON.stringify(navFolded.value));
-  } catch {
-    /* 忽略 */
-  }
 }
 
 // ---- 轮次操作：删除本轮 / 回档 / 修改（0.6.0）----
@@ -584,214 +525,22 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 </script>
 
 <template>
- <button v-if="authed&&newMessages" class="desktop-new-messages" @click="showLatest">有新消息 · 查看最新</button>
-  <p v-if="authLoading" class="auth-status" role="status">正在验证主系统登录状态…</p>
+
+  <p v-if="authLoading" class="auth-status" role="status">{{tr("正在验证主系统登录状态…")}}</p>
   <template v-else-if="!authed"><p v-if="authError" class="auth-status" role="alert">{{authError}}</p><LoginView :mode="authMode" @done="onLogin" /></template>
+  <div v-else-if="!workspaceReady" class="workspace-loading" role="status">{{tr("正在恢复本人工作区…")}}</div>
   <div v-else class="app" :class="{ 'app--railclosed': !roomsOpen }">
     <!-- 左侧导航 -->
-    <aside class="nav" :class="{ 'nav--open': navOpen }" aria-label="会话导航">
-      <div class="nav__brand">
-        <span class="nav__mark" aria-hidden="true">▤</span>
-        <b>启真 LabOps</b>
-      </div>
-      <button type="button" class="nav__new" @click="onNewChat()">＋ 新聊天</button>
-
-      <!-- 工作会话：能查询、能准备办理单并执行（mode=task） -->
-      <div class="nav__section">
-        <h2 class="nav__h">
-          <button
-            type="button"
-            class="nav__fold"
-            :aria-expanded="!navFolded.work"
-            aria-controls="nav-work-list"
-            title="工作会话可以查询数据、准备办理单并执行"
-            @click="toggleSection('work')"
-          >
-            <span class="nav__chev" aria-hidden="true">{{ navFolded.work ? '▸' : '▾' }}</span>工作会话
-          </button>
-          <span class="nav__count">{{ session.workConversations.length }}</span>
-          <button
-            type="button"
-            class="nav__add"
-            aria-label="新建工作会话"
-            title="新建工作会话（可查询、可办理）"
-            :disabled="store.inputLocked"
-            @click="onNewChat('task')"
-          >
-            ＋
-          </button>
-        </h2>
-        <template v-if="!navFolded.work">
-          <p v-if="session.listError" class="nav__err" role="alert">{{ session.listError }}</p>
-          <p v-else-if="session.listLoading && !session.conversations.length" class="nav__hint">载入中…</p>
-          <p v-else-if="!session.workConversations.length" class="nav__hint">
-            还没有工作会话。发第一条消息即可开始办理事务。
-          </p>
-          <ul v-else id="nav-work-list" class="nav__convs">
-            <li v-for="c in session.workConversations" :key="c.id">
-              <button
-                type="button"
-                class="conv"
-                :class="{ 'conv--on': c.id === session.currentId }"
-                :title="`${c.title}（${c.messageCount} 条消息 · 工作会话）`"
-                @click="session.openConversation(c.id); navOpen = false"
-              >
-                <span class="conv__title">{{ c.title }}</span>
-                <span class="conv__time">{{ session.timeLabel(c.lastActivityAt) }}</span>
-              </button>
-              <button
-                type="button"
-                class="conv__del"
-                :aria-label="`重命名会话：${c.title}`"
-                title="重命名"
-                @click="onRename(c.id, c.title)"
-              >
-                ✎
-              </button>
-              <button
-                type="button"
-                class="conv__del"
-                :aria-label="`删除会话：${c.title}`"
-                title="删除会话"
-                @click="onDelete(c.id, c.title)"
-              >
-                ✕
-              </button>
-            </li>
-          </ul>
-        </template>
-      </div>
-
-      <!-- 聊天会话：只查询、不办理（mode=chat） -->
-      <div class="nav__section">
-        <h2 class="nav__h">
-          <button
-            type="button"
-            class="nav__fold"
-            :aria-expanded="!navFolded.chat"
-            aria-controls="nav-chat-list"
-            title="聊天会话只查询数据，不准备办理单"
-            @click="toggleSection('chat')"
-          >
-            <span class="nav__chev" aria-hidden="true">{{ navFolded.chat ? '▸' : '▾' }}</span>聊天会话
-          </button>
-          <span class="nav__count">{{ session.chatConversations.length }}</span>
-          <button
-            type="button"
-            class="nav__add"
-            aria-label="新建聊天会话"
-            title="新建聊天会话（只查询，不办理）"
-            :disabled="store.inputLocked"
-            @click="onNewChat('chat')"
-          >
-            ＋
-          </button>
-        </h2>
-        <template v-if="!navFolded.chat">
-          <p v-if="!session.chatConversations.length" class="nav__hint">还没有聊天会话。聊天只查询，不办理事务。</p>
-          <ul v-else id="nav-chat-list" class="nav__convs">
-            <li v-for="c in session.chatConversations" :key="c.id">
-              <button
-                type="button"
-                class="conv"
-                :class="{ 'conv--on': c.id === session.currentId }"
-                :title="`${c.title}（${c.messageCount} 条消息 · 聊天会话）`"
-                @click="session.openConversation(c.id); navOpen = false"
-              >
-                <span class="conv__title">{{ c.title }}</span>
-                <span class="conv__time">{{ session.timeLabel(c.lastActivityAt) }}</span>
-              </button>
-              <button
-                type="button"
-                class="conv__del"
-                :aria-label="`重命名会话：${c.title}`"
-                title="重命名"
-                @click="onRename(c.id, c.title)"
-              >
-                ✎
-              </button>
-              <button
-                type="button"
-                class="conv__del"
-                :aria-label="`删除会话：${c.title}`"
-                title="删除会话"
-                @click="onDelete(c.id, c.title)"
-              >
-                ✕
-              </button>
-            </li>
-          </ul>
-        </template>
-      </div>
-
-      <div class="nav__section">
-        <h2 class="nav__h">我的任务</h2>
-        <p v-if="tasksError" class="nav__err" role="alert">{{ tasksError }}</p>
-        <p v-else-if="!tasks.length" class="nav__hint">
-          {{ business.connected ? '原系统办理记录保存在对应会话中，点击最近会话可回查。' : '还没有业务任务。试试「E310 投影没有信号，帮我报修」「发布通知《…》」或「结束值班收尾」。' }}
-        </p>
-        <ul v-else class="nav__convs">
-          <li v-for="t in tasks.slice(0, 12)" :key="t.taskId">
-            <button
-              type="button"
-              class="conv"
-              :title="`${t.goal}（${TASK_STATUS_LABELS[t.status]}）`"
-              @click="openTask(t)"
-            >
-              <span class="conv__title">{{ t.goal }}</span>
-              <span class="conv__time">{{ TASK_STATUS_LABELS[t.status] }} · {{ session.timeLabel(t.createdAt) }}</span>
-            </button>
-          </li>
-        </ul>
-      </div>
-
-      <!-- 业务工具（2026-10-06：原在工作区顶部的横排按钮，按负责人要求移到左侧栏，形态更接近常规 Agent） -->
-      <div class="nav__section">
-        <h2 class="nav__h">业务工具</h2>
-        <div class="nav__tools">
-          <ScheduledJobsPanel :readonly="(session.currentId?convMode:draftMode)==='chat'" />
-          <EvidencePanel :readonly="(session.currentId?convMode:draftMode)==='chat'" />
-        </div>
-      </div>
-
-      <div class="nav__foot">
-        <div v-if="authMode==='demo'" class="nav__actor" role="group" aria-label="沙盒演示身份">
-          <button
-            v-for="r in (['admin', 'volunteer', 'student'] as ActorRole[])"
-            :key="r"
-            type="button"
-            class="theme__btn"
-            :disabled="store.runStatus==='running'"
-            :class="{ 'theme__btn--on': actor === r }"
-            :aria-pressed="actor === r"
-            :title="`切换沙盒演示视角：${ACTOR_ROLE_LABELS[r]}（能力边界由服务端校验）`"
-            @click="switchRole(r)"
-          >
-            {{ ACTOR_ROLE_LABELS[r].replace('演示', '') }}
-          </button>
-        </div>
-        <button type="button" class="theme__btn" @click="switchEdition('mobile',session.currentId?{view:'conversation',conversationId:session.currentId}:{view:'home'})">手机版</button><button v-if="authMode==='native'" type="button" class="theme__btn" @click="logout">退出登录</button>
-        <SourceBadge :source-type="store.sourceType ?? store.overviewSourceType" :engine="store.activeEngine" :model="store.model" compact />
-        <div class="nav__theme" role="group" aria-label="主题切换">
-          <button
-            v-for="m in (['auto', 'light', 'dark'] as ThemeMode[])"
-            :key="m"
-            type="button"
-            class="theme__btn"
-            :class="{ 'theme__btn--on': themeMode === m }"
-            :aria-pressed="themeMode === m"
-            @click="applyTheme(m)"
-          >
-            {{ m === 'auto' ? '跟随系统' : m === 'light' ? '浅色' : '深色' }}
-          </button>
-        </div>
-      </div>
-    </aside>
+    <AgentSidebar :open="navOpen" :task-mode="(session.currentId?convMode:draftMode)!=='chat'" :auth-mode="authMode" :actor="actor" :tasks="tasks"
+      @new="onNewChat" @select="id=>{session.openConversation(id);navOpen=false}" @rename="onRename" @remove="onDelete"
+      @task="openTask" @rooms="toggleRooms(!roomsOpen)" @actor="switchRole" @close="navOpen=false" @logout="logout"
+      @settings="settingsOpen=true" />
+    <SettingsDialog :open="settingsOpen" @close="closeSettings" @logout="settingsOpen=false;logout()" @edition="switchEdition('mobile',session.currentId?{view:'conversation',conversationId:session.currentId}:{view:'assistant'})"/>
     <div v-if="navOpen" class="nav__mask" @click="navOpen = false"></div>
 
     <!-- 主区：会话（有消息时列高锁定视口，输入框固定在底部） -->
     <main class="chat" :class="{ 'chat--conv': session.currentId && session.currentMessages.length > 0 }">
-      <BusinessConnectionPanel :unified="authMode==='native'" /><div class="workspace-tools"><NativeWorkPanel v-if="(session.currentId?convMode:draftMode)!=='chat'" /></div>
+
 
       <!-- 轮次操作结果：回档/删除之后必须让用户看到真实后果（含撤不回来的写入）。
            放在 hero/会话两个分支之前 —— 回档到第一轮会让会话变空，那时更需要这条说明。 -->
@@ -799,79 +548,64 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
         <ul class="chat__noticelist">
           <li v-for="(line, i) in roundNotice.lines" :key="i">{{ line }}</li>
         </ul>
-        <button type="button" class="chat__noticedismiss" aria-label="关闭提示" title="关闭" @click="roundNotice = null">✕</button>
+        <button type="button" class="chat__noticedismiss" :aria-label="tr('关闭提示')" :title="tr('关闭')" @click="roundNotice = null">✕</button>
       </div>
 
       <!-- 空会话：欢迎页即输入（保持居中首屏形态） -->
       <div v-if="!session.currentId || session.currentMessages.length === 0" class="hero">
-        <button type="button" class="chat__navtoggle hero__navtoggle" @click="navOpen = !navOpen">会话</button>
+        <button type="button" class="chat__navtoggle hero__navtoggle" @click="navOpen = !navOpen">{{tr("会话")}}</button>
 
-        <div class="mode-seg mode-seg--hero" role="group" aria-label="会话模式">
+        <div class="mode-seg mode-seg--hero" role="group" :aria-label="tr('会话模式')">
           <button
             type="button"
             class="mode-seg__btn"
             :class="{ 'mode-seg__btn--on': draftMode === 'chat' }"
             :aria-pressed="draftMode === 'chat'"
-            title="聊天查询：可读取数据，不准备办理单"
+            :title="tr('聊天查询：可读取数据，不准备办理单')"
             @click="draftMode = 'chat'"
-          >
-            聊天
-          </button>
+          > {{tr("聊天")}} </button>
           <button
             type="button"
             class="mode-seg__btn"
             :class="{ 'mode-seg__btn--on': draftMode === 'task' }"
             :aria-pressed="draftMode === 'task'"
-            title="任务工作台：查询数据、生成办理单并执行"
+            :title="tr('任务工作台：查询数据、生成办理单并执行')"
             @click="draftMode = 'task'"
-          >
-            任务
-          </button>
+          > {{tr("任务")}} </button>
         </div>
 
         <template v-if="draftMode === 'task'">
-          <h1 class="hero__h">交代一件实验室任务</h1>
-          <p class="hero__p">
-            查课表、看房间开放状态、找空闲实验室。说清房间号与日期即可，例如「E310 2026-09-30 有哪些课？」。
-          </p>
+          <h1 class="hero__h">{{tr("交代一件实验室任务")}}</h1>
+
           <CommandBar v-model:draft="draft" variant="hero" :submitting="submitting" @submit="onSubmit" @cancel="onCancel" />
-          <p class="hero__scope">
-            查课表、看房间开放状态、找空闲实验室；也可以直接交办事务：报修、临时停用、站内通知、值班收尾、运营日报
-            （连接原系统后，按实际账号权限办理；未连接时为沙盒演示）。
-            连接账号后可在消息中比较调课、补全检查、处理工单、发布通知并回查；按上海当日同房间、同主体逐条配对的有效签到记录统计，
-            钥匙读取人工台账，未登记保持未知；预约尚未接入。历史会话在左侧导航找回。
-          </p>
+
         </template>
         <template v-else>
-          <h1 class="hero__h">随便聊聊</h1>
-          <p class="hero__p">
-            聊天模式可以查询课表、状态与操作说明；办理事务请切回「任务」模式。
-          </p>
+          <h1 class="hero__h">{{tr("查询实验室")}}</h1>
+
           <CommandBar
             v-model:draft="draft"
             variant="hero"
             :submitting="submitting"
             :examples="false"
-            placeholder="随便说点什么，例如：实验室值班要注意哪些事？"
-            submit-label="发送"
+            :placeholder="tr('查询课表、房间状态、钥匙或操作说明…')"
+            :submit-label="tr('发送')"
             @submit="onSubmit"
             @cancel="onCancel"
           />
-          <p class="hero__scope">
-            聊天模式可以查询真实数据并保存聊天；办理业务请切换「任务」模式并人工确认。
-          </p>
+
         </template>
       </div>
 
       <!-- 连续消息流 -->
       <template v-else>
         <header class="chat__head">
-          <button type="button" class="chat__navtoggle" @click="navOpen = !navOpen">会话</button>
+          <button type="button" class="chat__navtoggle" @click="navOpen = !navOpen">{{tr("会话")}}</button>
           <h1 class="chat__title">{{ currentTitle }}</h1>
-          <span class="chat__count">{{ session.currentMessages.length }} 条消息</span>
+          <span class="chat__count">{{ session.currentMessages.length }} {{tr("条消息")}}</span>
           <!-- 模式一旦确定就只读展示：不再提供会话内切换入口 -->
           <span class="chat__mode" :class="`chat__mode--${convMode}`" :title="modeLockTip" :aria-label="modeLockTip">
-            {{ modeLabel(convMode) }} · 模式已确定
+            {{ modeLabel(convMode) }}
           </span>
         </header>
         <p v-if="session.currentMessagesError" class="chat__err" role="alert">{{ session.currentMessagesError }}</p>
@@ -891,13 +625,14 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
           </div>
         </div>
 
+        <button v-if="newMessages" class="desktop-new-messages" @click="showLatest">{{tr("查看新消息")}}</button>
         <div class="chat__composer">
           <CommandBar
             v-model:draft="draft"
             variant="dock"
             :submitting="submitting"
-            :examples="convMode === 'task'"
-            :placeholder="convMode === 'chat' ? '随便说点什么（聊天模式不能执行任务操作）' : undefined"
+            :examples="false"
+            :placeholder="convMode === 'chat' ? '查询课表、房间、钥匙或实验室操作说明' : undefined"
             :submit-label="convMode === 'chat' ? '发送' : undefined"
             @submit="onSubmit"
             @cancel="onCancel"
@@ -907,15 +642,15 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
     </main>
 
     <!-- 右侧：房间清单（停靠式侧边栏，可收起为窄轨） -->
-    <aside class="side" :class="{ 'side--collapsed': !roomsOpen }" aria-label="实验室房间">
+    <aside class="side" :class="{ 'side--collapsed': !roomsOpen }" :aria-label="tr('实验室房间')">
       <template v-if="roomsOpen">
         <header class="side__head">
-          <h2 class="side__h">实验室房间</h2>
+          <h2 class="side__h">{{tr("实验室房间")}}</h2>
           <button
             type="button"
             class="side__toggle"
-            title="收起房间清单"
-            aria-label="收起房间清单"
+            :title="tr('收起房间清单')"
+            :aria-label="tr('收起房间清单')"
             @click="toggleRooms(false)"
           >
             »
@@ -927,13 +662,13 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
         <button
           type="button"
           class="side__expand"
-          title="展开房间清单"
-          aria-label="展开房间侧边栏"
+          :title="tr('展开房间清单')"
+          :aria-label="tr('展开房间侧边栏')"
           @click="toggleRooms(true)"
         >
           «
         </button>
-        <button type="button" class="side__rail-label" @click="toggleRooms(true)">房间清单</button>
+        <button type="button" class="side__rail-label" @click="toggleRooms(true)">{{tr("房间清单")}}</button>
       </template>
     </aside>
 
@@ -953,228 +688,20 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 </template>
 
 <style scoped>
+.workspace-loading{display:grid;place-items:center;height:var(--app-height,100dvh);font-size:calc(var(--ui-font-size) * 0.92308);color:var(--text-muted)}
 /* 布局：占满视口宽度（两侧留白最小化），中间对话区拿到全部剩余空间 */
 .app {
   display: grid;
-  grid-template-columns: 264px minmax(0, 1fr) auto;
-  gap: var(--sp-3);
-  padding: var(--sp-4) var(--sp-2) 0;
-  min-height: var(--app-height,100dvh);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0;
+  padding: 8px 0;
+  height: var(--app-height,100dvh);
+  min-height: 0;
+  overflow: hidden;
 }
 
-.workspace-tools{display:flex;align-items:center;flex-wrap:wrap;gap:4px;flex-shrink:0;padding:4px 10px;border-bottom:1px solid var(--border)}
-.workspace-tools :deep(.native-work-entry),.workspace-tools :deep(.jobs-entry),.workspace-tools :deep(.evidence-entry){padding:2px;border:0;font-size:12px}
-.workspace-tools :deep(button){font-size:12px;padding:6px 8px}
-@media(max-width:600px){.workspace-tools :deep(.native-work-entry span),.workspace-tools :deep(.jobs-entry span){display:none}}
-/* 业务工具（已移入左侧栏）：去掉原有的整宽横排内边距，改为与侧栏一致的竖排按钮 */
-.nav__tools{display:flex;flex-direction:column;gap:6px}
-.nav__tools :deep(.jobs-entry),.nav__tools :deep(.evidence-entry){display:block;padding:0;border:0;font-size:12px}
-.nav__tools :deep(.jobs-entry span){display:block;margin-top:4px;font-size:11px;color:var(--text-dim)}
-.nav__tools :deep(button){width:100%;text-align:left;padding:8px 10px;border-radius:8px;font-size:12px}
-/* ---- 左侧导航 ---- */
-.nav {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: var(--sp-4) var(--sp-3);
-  position: sticky;
-  top: var(--sp-4);
-  max-height: calc(100vh - 32px);
-  overflow-y: auto;
-}
-.nav__brand {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: 15px;
-}
-.nav__mark {
-  color: var(--primary);
-  font-size: 18px;
-}
-.nav__new {
-  border: 1px solid var(--primary);
-  background: var(--primary);
-  color: var(--primary-contrast);
-  border-radius: var(--radius);
-  padding: 8px 0;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.nav__new:hover {
-  background: var(--primary-hover);
-}
-.nav__section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  /* 任务中心加入后内容变多：section 保持自然高度，由 nav 整体滚动，
-     避免被 flex 压缩后内容溢出叠画（视觉重叠 bug） */
-  flex-shrink: 0;
-}
-.nav__h {
-  margin: 0;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-faint);
-  letter-spacing: 0.05em;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-/* 分区标题本身是折叠开关：点标题折/展，符合侧栏区块的通用预期 */
-.nav__fold {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  border: none;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-weight: 600;
-  letter-spacing: inherit;
-  padding: 2px 0;
-  cursor: pointer;
-  text-align: left;
-}
-.nav__fold:hover {
-  color: var(--text-muted);
-}
-.nav__chev {
-  font-size: 9px;
-  width: 9px;
-}
-.nav__count {
-  font-size: 10px;
-  color: var(--text-faint);
-  background: var(--surface-2);
-  border-radius: 999px;
-  padding: 0 6px;
-  line-height: 15px;
-}
-.nav__add {
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1;
-  border-radius: var(--radius-sm);
-  padding: 2px 6px;
-  cursor: pointer;
-}
-.nav__add:hover:not(:disabled) {
-  color: var(--primary);
-  border-color: var(--primary);
-}
-.nav__add:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.nav__hint,
-.nav__err {
-  margin: 0;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-.nav__err {
-  color: var(--danger);
-}
-.nav__convs {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.nav__convs li {
-  display: flex;
-  align-items: stretch;
-  gap: 2px;
-}
-.conv {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
-  border: 1px solid transparent;
-  background: transparent;
-  border-radius: var(--radius-sm);
-  padding: 6px var(--sp-2);
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-}
-.conv:hover {
-  background: var(--surface-2);
-}
-.conv--on {
-  background: var(--surface-3);
-  border-color: var(--border-strong);
-}
-.conv__title {
-  width: 100%;
-  font-size: 13px;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.conv__time {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-.conv__del {
-  border: none;
-  background: transparent;
-  color: var(--text-faint);
-  font-size: 11px;
-  cursor: pointer;
-  padding: 0 4px;
-}
-.conv__del:hover {
-  color: var(--danger);
-}
-.nav__foot {
-  margin-top: auto;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-  border-top: 1px solid var(--border);
-  padding-top: var(--sp-3);
-}
-.nav__theme,
-.nav__actor {
-  display: inline-flex;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  overflow: hidden;
-  align-self: flex-start;
-}
-.theme__btn {
-  border: none;
-  background: var(--surface-2);
-  color: var(--text-muted);
-  font-size: 11px;
-  padding: 3px 10px;
-  cursor: pointer;
-}
-.theme__btn--on {
-  background: var(--primary);
-  color: var(--primary-contrast);
-}
-.nav__mask {
-  display: none;
-}
+.nav__mask{display:none}
+@media(max-width:900px){.nav__mask{display:block;position:fixed;inset:0;background:#0005;z-index:30}}
 
 /* ---- 主区 ---- */
 .chat {
@@ -1182,7 +709,12 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   flex-direction: column;
   gap: var(--sp-3);
   min-width: 0;
-  min-height: 60vh;
+  min-height: 0;
+  height: 100%;
+  padding: 8px 20px;
+  isolation: isolate;
+  position: relative;
+  z-index: 0;
   /* 会话显示区最大宽度：超宽屏上给两侧留白（导航侧与房间侧各让一点），
      一行文字过长会显著降低可读性，卡片也会被拉成难读的横条 */
   width: 100%;
@@ -1192,12 +724,14 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 /* 会话视图：列高锁定视口（顶部留出 app 的 padding-top），
    消息区内部滚动，composer 恒在视口底部（不随内容下移） */
 .chat--conv {
-  height: calc(var(--app-height,100dvh) - var(--sp-4));
+  height: 100%;
   min-height: 0;
 }
 .hero {
   text-align: center;
-  padding: clamp(24px, 14vh, 120px) var(--sp-2) 0;
+  padding: clamp(24px, 12vh, 100px) var(--sp-2) 0;
+  overflow-y: auto;
+  min-height: 0;
 }
 .hero__h {
   margin: 0 0 var(--sp-2);
@@ -1207,7 +741,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   margin: 0 auto var(--sp-5);
   max-width: 560px;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: calc(var(--ui-font-size) * 1.07692);
 }
 .hero__navtoggle {
   margin-bottom: var(--sp-4);
@@ -1215,7 +749,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 .hero__scope {
   margin: var(--sp-4) auto 0;
   max-width: 620px;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
 }
 .chat__head {
@@ -1230,20 +764,20 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   border: 1px solid var(--border-strong);
   background: var(--surface-2);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   border-radius: var(--radius-sm);
   padding: 3px 10px;
   cursor: pointer;
 }
 .chat__title {
   margin: 0;
-  font-size: 16px;
+  font-size: calc(var(--ui-font-size) * 1.23077);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .chat__count {
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
   flex: 0 0 auto;
 }
@@ -1251,7 +785,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 .chat__mode {
   margin-left: auto;
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   line-height: 1.6;
   color: var(--text-muted);
   background: var(--surface-2);
@@ -1267,7 +801,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 }
 .chat__err {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--danger);
 }
 /* 消息区独立滚动：输入栏在布局内，不悬浮遮挡内容（F26） */
@@ -1309,7 +843,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   border-radius: var(--radius-sm);
   background: var(--surface-2);
   padding: var(--sp-2) var(--sp-3);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   line-height: 1.6;
   color: var(--text-muted);
 }
@@ -1334,7 +868,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   border: none;
   background: transparent;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   cursor: pointer;
   padding: 0 2px;
   flex: 0 0 auto;
@@ -1358,7 +892,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   border: none;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   padding: 4px 14px;
   cursor: pointer;
 }
@@ -1386,7 +920,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   padding: var(--sp-4) var(--sp-3);
   position: sticky;
   top: var(--sp-4);
-  max-height: calc(100vh - 32px);
+  max-height: 100%;
   overflow-y: auto;
   min-width: 0;
   align-self: start;
@@ -1407,7 +941,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 }
 .side__h {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1416,7 +950,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   border: 1px solid var(--border-strong);
   background: var(--surface-2);
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
   border-radius: var(--radius-sm);
   width: 24px;
   height: 22px;
@@ -1432,13 +966,13 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 .side__expand {
   width: 28px;
   height: 26px;
-  font-size: 14px;
+  font-size: calc(var(--ui-font-size) * 1.07692);
 }
 .side__rail-label {
   border: none;
   background: transparent;
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   letter-spacing: 0.2em;
   writing-mode: vertical-rl;
   padding: var(--sp-2) 0;
@@ -1454,26 +988,6 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   .app {
     grid-template-columns: minmax(0, 1fr);
     gap: var(--sp-2);
-  }
-  .nav {
-    position: fixed;
-    inset: 0 auto 0 0;
-    width: min(320px, 86vw);
-    z-index: 20;
-    border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
-    transform: translateX(-102%);
-    transition: transform 0.18s ease-out;
-    max-height: none;
-  }
-  .nav--open {
-    transform: translateX(0);
-  }
-  .nav--open + .nav__mask {
-    display: block;
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.35);
-    z-index: 10;
   }
   .chat__navtoggle {
     display: inline-block;

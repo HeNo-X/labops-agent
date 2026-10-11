@@ -52,6 +52,7 @@ const caveat = computed(() =>
 const CHAT_ENGINE = 'dashscope' as const;
 const engineIsLlm = computed(() => props.engine === 'agnes' || props.engine === CHAT_ENGINE);
 const engineBadge = computed(() => {
+  if(props.engine==='scope')return '实验室范围引导';
   const m = props.model;
   if (props.engine === CHAT_ENGINE) return m ? `引擎：DashScope · ${m}` : '引擎：DashScope（聊天链）';
   if (props.engine === 'agnes') return m ? `引擎：Agnes · ${m}` : '引擎：Agnes';
@@ -59,6 +60,7 @@ const engineBadge = computed(() => {
   return props.sourceType === 'live' ? '引擎：确定性事实' : '引擎：演示（规则）';
 });
 const engineCaveat = computed(() => {
+  if(props.engine==='scope')return '固定范围提示；未查询业务数据或调用模型';
   if (props.engine === CHAT_ENGINE) return `聊天模式固定走 DashScope（阿里云百炼）多模型链${props.model ? `，本轮模型 ${props.model}` : ''}；工作模式走 Agnes`;
   if (props.engine === 'agnes') return `工作（任务）模式固定走 Agnes${props.model ? `，本轮模型 ${props.model}` : ''}`;
   if (props.engine === 'facts') return '由服务端已核验事实做确定性转换，未调用大模型';
@@ -68,7 +70,7 @@ const engineCaveat = computed(() => {
 
 <template>
   <span class="src">
-    <StatusTag :tone="tone" :label="`数据：${label}`" :glyph="glyph" :title="caveat" />
+    <StatusTag v-if="engine!=='scope'" :tone="tone" :label="`数据：${label}`" :glyph="glyph" :title="caveat" />
     <StatusTag
       v-if="engine !== null && engine !== undefined"
       :tone="engineIsLlm ? 'ok' : 'warn'"
@@ -76,7 +78,7 @@ const engineCaveat = computed(() => {
       :label="engineBadge"
       :title="engineCaveat"
     />
-    <span v-if="!compact" class="src__note">（{{ caveat }}）</span>
+    <span v-if="!compact&&engine!=='scope'" class="src__note">（{{ caveat }}）</span>
   </span>
 </template>
 
@@ -89,6 +91,6 @@ const engineCaveat = computed(() => {
 }
 .src__note {
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
 }
 </style>

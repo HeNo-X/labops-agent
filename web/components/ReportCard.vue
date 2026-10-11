@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 /**
  * 运营日报卡 —— create_operations_report 的结构化产物
  * ============================================================================
@@ -19,7 +20,7 @@ const rangeText = computed(() =>
 </script>
 
 <template>
-  <section class="report" aria-label="运营日报草稿">
+  <section class="report" :aria-label="tr('运营日报草稿')">
     <header class="report__head">
       <StatusTag tone="info" glyph="▤" label="运营日报草稿" />
       <span class="report__range">{{ rangeText }}</span>
@@ -30,12 +31,12 @@ const rangeText = computed(() =>
       <li v-for="m in report.metrics" :key="m.key" :data-status="m.status">
         <span class="report__label">{{ m.label }}</span>
         <span v-if="m.status === 'known'" class="report__value">{{ m.value }} {{ m.unit }}</span>
-        <span v-else class="report__unknown" :title="m.note">未知 · {{ m.note }}</span>
+        <span v-else class="report__unknown" :title="m.note">{{tr("未知 ·")}} {{ m.note }}</span>
       </li>
     </ul>
 
     <details class="report__prov">
-      <summary>统计口径与数据来源</summary>
+      <summary>{{tr("统计口径与数据来源")}}</summary>
       <ul class="report__notes">
         <li v-for="(e, i) in report.evidence" :key="i">[{{ e.section }}] {{ e.sourceLabel }}{{ e.note ? `（${e.note}）` : '' }}</li>
         <li v-for="(n, i) in report.notes" :key="`n${i}`">{{ n }}</li>
@@ -63,12 +64,12 @@ const rangeText = computed(() =>
 }
 .report__range {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
 }
 .report__id {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
 .report__metrics {
@@ -83,7 +84,7 @@ const rangeText = computed(() =>
   display: flex;
   align-items: baseline;
   gap: var(--sp-2);
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
   background: var(--surface-3);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -91,18 +92,18 @@ const rangeText = computed(() =>
 }
 .report__label {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
 }
 .report__value {
   font-family: var(--font-mono);
   font-weight: 700;
 }
 .report__unknown {
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
 }
 .report__prov {
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
 }
 .report__prov summary {
   cursor: pointer;

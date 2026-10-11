@@ -1,3 +1,4 @@
+import {classifyLabRequest,scopeAnswer} from './domain.ts';
 import {renderBusinessFacts} from '../business/fact-text.ts';
 import { planNativeDialogue, verifiedRecommendation } from '../tools/business.ts';
 import type { BusinessResult } from '../../shared/business.ts';
@@ -121,6 +122,17 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   const log = loggerFor(runId, { question: question.slice(0, 80), promptVersion: PROMPT_VERSION });
   const watch = Stopwatch0();
 
+  const persistedContext=input.sessionId?.startsWith('conv-')?loadContext(input.sessionId):null;
+  const remembered=input.sessionId?getSession(`${input.actor?.id||'anonymous'}:${businessScope(input.actor?.id).scopeKey}:${input.sessionId}`):null;
+  const decision=classifyLabRequest(question,Boolean(persistedContext?.labName||persistedContext?.task||remembered?.labName||remembered?.lastTask));
+  if(decision!=='query'){
+    if(input.signal?.aborted)return;
+    const clock=serverNow();
+    yield emit('run_started',{runId,...(input.sessionId?{sessionId:input.sessionId}:{}),question,engine:'scope',sourceType:'demo',serverNow:{...clock,timezone:'Asia/Shanghai'},resolvedTimeHint:{raw:null,date:null,source:'本轮仅提供范围引导'},term:{term:'未查询校历',termStart:null,weekNo:null,weekDeterminable:false,note:'未查询业务数据'},allowedTools:[]} satisfies RunStartedPayload);
+    const answer=scopeAnswer(decision);yield* streamText(answer,emit,input.signal);
+    if(!input.signal?.aborted)yield emit('run_completed',{answer,steps:0,toolCalls:0,ms:watch.ms,sourceType:'demo',engine:'scope',strategy:'scope_guidance'} satisfies RunCompletedPayload);
+    return;
+  }
   let ds: Dataset;
   let now: ServerNow;
   try {
@@ -695,6 +707,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   if (verifiedAnswers.length) {
     const explanation=verifiedRecommendation(modelFinal,businessFacts);
     answer = verifiedAnswers.join('\n\n')+(explanation?'\n\n'+explanation:'');
+  } else if (!lastToolFailure && !SMALLTALK_RE.test(a.question.trim())) {
+    answer='我还需要更明确的实验室查询条件。请说明房间、日期或要办理的事项，例如“E310 今天有哪些课？”。';
   } else if (!SMALLTALK_RE.test(a.question.trim())) {
     // 走到这里 ⇒ 本轮没有任何成功的工具调用（成功必进 verifiedAnswers）。
     // 旧实现用 lastToolSummary 兜底，它在该分支恒为 null ⇒ 永远只说「请明确日期、房间或所需操作」

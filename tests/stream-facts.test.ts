@@ -40,7 +40,7 @@ test('模型编造的课程不会进入答案；各轮token累加；多轮表格
     const answer=(follow.find(e=>e.type==='run_completed')!.payload as {answer:string}).answer;
     assert.equal(calls,2);assert.equal(answer.split('\n').filter(l=>l.startsWith('|')).length,10);
     const other=await gather(runAgent({question:'把刚才的查询结果改成两列表格',sessionId:'fact-session',actor:{...actor,id:'other'}}));
-    assert.ok(other.some(e=>e.type==='run_failed'));assert.ok(other.every(e=>e.type!=='run_completed'));
+    const isolated=other.find(e=>e.type==='run_completed')!.payload as {answer:string;toolCalls:number};assert.equal(isolated.toolCalls,0);assert.ok(!isolated.answer.includes('示例程序设计'));assert.ok(!isolated.answer.includes('|'));assert.equal(calls,2);assert.ok(other.every(e=>e.type!=='tool_result'));
   }finally{globalThis.fetch=original;}
 });
 test('贯穿模型请求的deadline在超时时中止，不发送完成事件',async()=>{

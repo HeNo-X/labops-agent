@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 /**
  * 任务轨迹 —— 只展示**可观察**的事件
  * ============================================================================
@@ -41,8 +42,8 @@ function labelOf(s: TraceStep): string {
 <template>
   <section class="trace" aria-labelledby="trace-h">
     <header class="trace__head">
-      <h2 id="trace-h">任务轨迹</h2>
-      <p class="trace__sub">只记录可观察的步骤（服务端事件），不含模型内部推理。</p>
+      <h2 id="trace-h">{{tr("任务轨迹")}}</h2>
+      <p class="trace__sub">{{tr("只记录可观察的步骤（服务端事件），不含模型内部推理。")}}</p>
     </header>
 
     <ol v-if="store.trace.length" class="steps">
@@ -56,21 +57,18 @@ function labelOf(s: TraceStep): string {
           </div>
           <p v-if="s.detail" class="step__detail">{{ s.detail }}</p>
           <details v-if="s.argsText || s.summaryFull" class="step__more">
-            <summary>调用参数与完整摘要</summary>
-            <p v-if="s.argsText" class="step__mono">参数：{{ s.argsText }}</p>
-            <p v-if="s.summaryFull" class="step__mono">摘要：{{ s.summaryFull }}</p>
+            <summary>{{tr("调用参数与完整摘要")}}</summary>
+            <p v-if="s.argsText" class="step__mono">{{tr("参数：")}}{{ s.argsText }}</p>
+            <p v-if="s.summaryFull" class="step__mono">{{tr("摘要：")}}{{ s.summaryFull }}</p>
           </details>
         </div>
       </li>
     </ol>
 
-    <p v-else class="trace__empty">
-      还没有任务。在下方命令栏输入一句话开始，例如「{{ store.exampleQuestions[0] }}」。
+    <p v-else class="trace__empty"> {{tr("还没有任务。在下方命令栏输入一句话开始，例如「")}}{{ store.exampleQuestions[0] }}」。
     </p>
 
-    <p v-if="store.runStatus === 'running'" class="trace__timer" aria-live="polite">
-      已用时 {{ (store.elapsedMs / 1000).toFixed(1) }} 秒…
-    </p>
+    <p v-if="store.runStatus === 'running'" class="trace__timer" aria-live="polite"> {{tr("已用时")}} {{ (store.elapsedMs / 1000).toFixed(1) }} {{tr("秒…")}} </p>
   </section>
 </template>
 
@@ -84,18 +82,18 @@ function labelOf(s: TraceStep): string {
 }
 .trace__head h2 {
   margin: 0 0 var(--sp-1);
-  font-size: 15px;
+  font-size: calc(var(--ui-font-size) * 1.15385);
 }
 .trace__sub {
   margin: 0 0 var(--sp-3);
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
 }
 .trace__empty {
   margin: 0;
   padding: var(--sp-4) 0;
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
 }
 .steps {
   list-style: none;
@@ -172,24 +170,24 @@ function labelOf(s: TraceStep): string {
   flex-wrap: wrap;
 }
 .step__name {
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
   font-weight: 600;
 }
 .step__ms {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
 .step__detail {
   margin: 3px 0 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-muted);
   word-break: break-word;
 }
 .step__more {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
 }
 .step__more summary {
   cursor: pointer;
@@ -211,7 +209,7 @@ function labelOf(s: TraceStep): string {
 }
 .trace__timer {
   margin: var(--sp-3) 0 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }

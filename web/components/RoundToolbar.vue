@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 /**
  * 轮次操作条（0.6.0）
  * ============================================================================
@@ -21,7 +22,7 @@ const emit = defineEmits<{ remove: []; rollback: []; edit: [] }>();
 
 <template>
   <div class="roundtool" :data-round="index">
-    <span class="roundtool__idx">第 {{ index }} 轮</span>
+    <span class="roundtool__idx">{{tr("第")}} {{ index }} {{tr("轮")}}</span>
     <button
       v-if="canRewind && actionable"
       type="button"
@@ -30,9 +31,7 @@ const emit = defineEmits<{ remove: []; rollback: []; edit: [] }>();
       :title="`回到第 ${index} 轮发起前（可一并回退本轮业务写入）`"
       :aria-label="`回档到第 ${index} 轮发起前`"
       @click="emit('rollback')"
-    >
-      回档
-    </button>
+    > {{tr("回档")}} </button>
     <button
       v-if="canRewind && actionable"
       type="button"
@@ -41,9 +40,7 @@ const emit = defineEmits<{ remove: []; rollback: []; edit: [] }>();
       :title="`修改第 ${index} 轮的提问并重新发起`"
       :aria-label="`修改第 ${index} 轮的提问并重新发起`"
       @click="emit('edit')"
-    >
-      修改
-    </button>
+    > {{tr("修改")}} </button>
     <button
       v-if="actionable"
       type="button"
@@ -52,9 +49,7 @@ const emit = defineEmits<{ remove: []; rollback: []; edit: [] }>();
       :title="`删除第 ${index} 轮的提问与回答（不影响其他轮次）`"
       :aria-label="`删除第 ${index} 轮`"
       @click="emit('remove')"
-    >
-      删除本轮
-    </button>
+    > {{tr("删除本轮")}} </button>
   </div>
 </template>
 
@@ -67,7 +62,7 @@ const emit = defineEmits<{ remove: []; rollback: []; edit: [] }>();
   min-height: 18px;
 }
 .roundtool__idx {
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
   margin-right: auto;
   letter-spacing: 0.02em;
@@ -76,7 +71,7 @@ const emit = defineEmits<{ remove: []; rollback: []; edit: [] }>();
   border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   line-height: 1.4;
   border-radius: var(--radius-sm);
   padding: 1px 8px;

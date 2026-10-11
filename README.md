@@ -26,7 +26,7 @@ index.html 为桌面/公共登录入口，mobile.html 为独立移动入口，�
 
 ## 移动、数据和办理
 
-mobile.html 五导航：工作台、助手、实验室、自动化、我的。首页使用轻量本人摘要，不调用模型；详情查询使用 History API 和后端对象权限。相机/相册证据、进度、重试同 requestId、通知 readAt、账户/主题、版式、任务续办共用现有接口。
+mobile.html 默认助手首屏，四项导航为助手、实验室、工作台、更多。历史、自动化、消息、资料和设置按需进入；工作台使用轻量本人摘要，不调用模型；详情查询使用 History API 和后端对象权限。相机/相册证据、进度、重试同 requestId、通知 readAt、个性化/常规/账户设置、任务续办共用现有接口。
 
 在室指标为上海当日同房间同主体逐条配对的有效签到记录数。重复签到保留，一次签退配一条；跨日不结转。真实空记录是 0，不可用是未知，异常记录有质量说明。动态开放、档案停用、临时停用、课程、钥匙与记录统计各自独立。未公开逐人签到明细。
 
@@ -38,6 +38,6 @@ mobile.html 五导航：工作台、助手、实验室、自动化、我的。�
 
 ## 验证与文档
 
-npm run check:rules、npm run build、npm test；指定 LABOPS_BROWSER_PATH 后 npm run test:all 串行执行全部浏览器套件。测试使用隔离原生账号、数据、确定性引擎。真实模型、真机、Nginx 并发和生产部署未执行。
+npm run check:rules、npm run build、npm test；指定 LABOPS_BROWSER_PATH 后 npm run test:all 串行执行全部浏览器套件。测试使用隔离原生账号、数据、确定性引擎。指定 LABOPS_NGINX_PATH 后 npm run test:nginx 可复跑 10 项本地 TLS/代理验收，需要 OpenSSL，自动清理临时账号/证书/服务。真实模型、真机、Docker/生产部署和校园出口容量未执行。
 
-当前新增契约见 [sync-mobile-contract.md](docs/sync-mobile-contract.md)，既有正式业务见 [unified-auth-scheduler.md](docs/unified-auth-scheduler.md)，轮次行为见 [会话分区与轮次操作](docs/会话分区与轮次操作-开发规划.md)，结果见 [开发与验收报告](../docs/DEVELOPMENT-ACCEPTANCE-20261007.md)。历史设计文档保留，冲突时以新版方案、当前契约和实现为准。
+当前新增契约见 [sync-mobile-contract.md](docs/sync-mobile-contract.md)，既有正式业务见 [unified-auth-scheduler.md](docs/unified-auth-scheduler.md)，轮次行为见 [会话分区与轮次操作](docs/会话分区与轮次操作-开发规划.md)，结果见 [0.8.0 开发与验收报告](../docs/DEVELOPMENT-ACCEPTANCE-0.8.0.md)。历史设计文档保留，冲突时以新版方案、当前契约和实现为准。

@@ -8,7 +8,7 @@
  *  评测结果与它绑定，否则"改了 prompt 之后变准了还是变差了"永远说不清。
  */
 
-export const PROMPT_VERSION = 'labops-0.6.0-sync-mobile-v1';
+export const PROMPT_VERSION = 'labops-0.8.0-personalized-domain-v1';
 
 export const MAX_QUESTION_CHARS = 500;
 
@@ -46,7 +46,7 @@ export interface SystemPromptParts {
   toolList: string;
   sourceTypeLabel: string;
   injectionSuspected: boolean;
-  /** true = 聊天模式：无工具、不能执行任务操作，输出自由对话 */
+  /** true = 聊天模式：无工具、不能执行任务操作，输出实验室只读查询与范围引导 */
   chatMode?: boolean;
 }
 
@@ -56,6 +56,7 @@ export function buildSystemPrompt(parts: SystemPromptParts): string {
     : '';
 
   return `你是启真实验室事务助手。当前模式：${parts.chatMode ? '聊天查询' : '任务办理'}。
+你仅服务实验室课表、房间、设备、钥匙、巡检交接、工单、通知、自动化和系统使用。非相关内容婉拒并说明能回应的实验室事项；不能因用户添加实验室字样就回答通用天气、文学、投资、旅游或编程问题。
 只使用下方清单声明的工具；清单由服务端模式权限生成。
 查询提供事实；prepare 工具仅保存待人工确认的提案，不执行实际业务。只有用户在确认卡上确认后才有业务效果。
 沙盒提案只影响独立沙盒。不得声称已经修改原实验室系统、通知已送达或已核实现场事实。

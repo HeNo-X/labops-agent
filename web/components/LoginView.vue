@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 import {responseError} from '../http';
 /**
  * LabOps 专用登录页 —— 移植自心灵共鸣舱 LogIn.html 的成熟角色动画实现
@@ -125,27 +126,27 @@ async function submit(): Promise<void> {
       <!-- 右栏：登录卡片（玻璃拟态） -->
       <section class="login-card">
         <div class="brand">
-          <h1>启真实验室助手</h1>
-          <div class="slogan">实 验 室 事 务 · 一 句 话 交 办</div>
+          <h1>{{tr("启真实验室助手")}}</h1>
+          <div class="slogan">{{tr("实 验 室 事 务 · 一 句 话 交 办")}}</div>
         </div>
 
         <div class="form-group">
-          <label class="field-label" for="username">账号</label>
+          <label class="field-label" for="username">{{tr("账号")}}</label>
           <input type="text" id="username" v-model="account" :placeholder="mode==='demo'?'演示账号':'请输入主系统账号'" autocomplete="username" @keyup.enter="submit">
         </div>
         <div class="form-group pwd-field" id="pwdGroup">
-          <label class="field-label" for="password">密码</label>
+          <label class="field-label" for="password">{{tr("密码")}}</label>
           <div class="pwd-field-inner">
             <input type="password" id="password" v-model="password" :placeholder="mode==='demo'?'演示密码':'请输入主系统密码'" autocomplete="current-password" @keyup.enter="submit">
-            <button type="button" class="pwd-toggle" id="pwdToggle" aria-label="显示或隐藏密码" aria-pressed="false">
-              <span class="t-show">显示</span><span class="t-hide">隐藏</span>
+            <button type="button" class="pwd-toggle" id="pwdToggle" :aria-label="tr('显示或隐藏密码')" aria-pressed="false">
+              <span class="t-show">{{tr("显示")}}</span><span class="t-hide">{{tr("隐藏")}}</span>
             </button>
           </div>
         </div>
         <div v-if="errMsg" id="pwdError" class="error-msg" role="alert">{{ errMsg }}</div>
 
-        <button class="login-btn" :disabled="submitting" @click="submit">{{submitting?'正在登录…':'登录'}}</button>
-        <p class="gate-note">{{mode==='demo'?'本地隔离演示模式':'使用主系统账号和密码 · 自动识别身份并连接业务数据'}}</p>
+        <button class="login-btn" :disabled="submitting" @click="submit">{{tr(submitting?'正在登录…':'登录')}}</button>
+        <p class="gate-note">{{tr(mode==='demo'?'本地隔离演示模式':'使用主系统账号和密码 · 自动识别身份并连接业务数据')}}</p>
       </section>
     </main>
   </div>
@@ -193,14 +194,14 @@ async function submit(): Promise<void> {
   margin-bottom: 22px;
 }
 .brand h1 {
-  font-size: 26px;
+  font-size: calc(var(--ui-font-size) * 2.0);
   font-weight: 600;
   letter-spacing: 1px;
   margin-bottom: 6px;
   color: var(--text);
 }
 .brand .slogan {
-  font-size: 14px;
+  font-size: calc(var(--ui-font-size) * 1.07692);
   letter-spacing: 2px;
   color: var(--text-faint);
 }
@@ -208,7 +209,7 @@ async function submit(): Promise<void> {
 .form-group { margin-bottom: 16px; }
 .field-label {
   display: block;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   font-weight: 600;
   letter-spacing: 0.04em;
   color: #a08d97;
@@ -220,7 +221,7 @@ async function submit(): Promise<void> {
   padding: 0 14px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  font-size: 14.5px;
+  font-size: calc(var(--ui-font-size) * 1.11538);
   color: var(--text);
   background: var(--surface-2);
   outline: none;
@@ -247,7 +248,7 @@ input[type='password']::-ms-clear { display: none; }
   border-radius: 8px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   cursor: pointer;
 }
 .pwd-toggle:hover { color: var(--text); background: var(--surface-3); }
@@ -256,7 +257,7 @@ input[type='password']::-ms-clear { display: none; }
 .pwd-toggle[aria-pressed='true'] .t-hide { display: inline; }
 .error-msg {
   color: var(--danger);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   margin: -6px 0 12px;
   min-height: 14px;
 }
@@ -267,7 +268,7 @@ input[type='password']::-ms-clear { display: none; }
   border-radius: 10px;
   background: var(--primary);
   color: var(--primary-contrast);
-  font-size: 15px;
+  font-size: calc(var(--ui-font-size) * 1.15385);
   font-weight: 600;
   letter-spacing: 0.5px;
   cursor: pointer;
@@ -280,7 +281,7 @@ input[type='password']::-ms-clear { display: none; }
 .gate-note {
   margin: 16px 0 0;
   text-align: center;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: #9c7f8c;
 }
 /* shake（登录失败时输入框抖动，配合角色悲伤态） */

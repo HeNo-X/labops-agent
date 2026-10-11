@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 /**
  * 轮次操作对话框（0.6.0）—— 回档 / 修改共用
  * ============================================================================
@@ -51,26 +52,24 @@ function confirm(): void {
   <div v-if="open" class="dlg__mask" @click.self="!busy && emit('cancel')">
     <div class="dlg" role="dialog" aria-modal="true" :aria-label="kind === 'rollback' ? '回档到本轮发起前' : '修改本轮并重新发起'">
       <h2 class="dlg__h">
-        {{ kind === 'rollback' ? `回档到第 ${roundIndex} 轮发起前` : `修改第 ${roundIndex} 轮并重新发起` }}
+        {{tr(kind === 'rollback' ? `回档到第 ${roundIndex} 轮发起前` : `修改第 ${roundIndex} 轮并重新发起`)}}
       </h2>
 
       <p class="dlg__p">
-        {{
-          kind === 'rollback'
+        {{tr(kind === 'rollback'
             ? `第 ${roundIndex} 轮及其之后的全部对话会被移除，会话上下文回到这一轮发起之前的状态。`
-            : `第 ${roundIndex} 轮及其之后的全部对话会被移除，然后用你修改后的内容重新发起这一轮。`
-        }}
+            : `第 ${roundIndex} 轮及其之后的全部对话会被移除，然后用你修改后的内容重新发起这一轮。`)}}
       </p>
 
       <label v-if="kind === 'edit'" class="dlg__field">
-        <span class="dlg__label">修改后的提问</span>
+        <span class="dlg__label">{{tr("修改后的提问")}}</span>
         <textarea
           ref="box"
           v-model="text"
           class="dlg__text"
           rows="4"
           :disabled="busy"
-          placeholder="修改这一轮要发送的内容…"
+          :placeholder="tr('修改这一轮要发送的内容…')"
           @keydown.ctrl.enter.prevent="confirm"
           @keydown.meta.enter.prevent="confirm"
         ></textarea>
@@ -78,25 +77,22 @@ function confirm(): void {
 
       <label class="dlg__check">
         <input v-model="revertEffects" type="checkbox" :disabled="busy" />
-        <span>同时回退本轮产生的业务写入</span>
+        <span>{{tr("同时回退本轮产生的业务写入")}}</span>
       </label>
-      <p class="dlg__note">
-        沙盒内的写入（工单、通知、停用、值班）会真的撤回并留档；
-        已提交到原系统的写入无法自动撤销，完成后会逐条列出，需人工在原系统处理。
-        {{ hasBusinessWrites ? '本轮牵涉业务办理，服务端会逐条核对并如实报告。' : '' }}
+      <p class="dlg__note"> {{tr("沙盒内的写入（工单、通知、停用、值班）会真的撤回并留档； 已提交到原系统的写入无法自动撤销，完成后会逐条列出，需人工在原系统处理。")}} {{tr(hasBusinessWrites ? '本轮牵涉业务办理，服务端会逐条核对并如实报告。' : '')}}
       </p>
 
       <p v-if="error" class="dlg__err" role="alert">{{ error }}</p>
 
       <div class="dlg__foot">
-        <button type="button" class="dlg__btn" :disabled="busy" @click="emit('cancel')">取消</button>
+        <button type="button" class="dlg__btn" :disabled="busy" @click="emit('cancel')">{{tr("取消")}}</button>
         <button
           type="button"
           class="dlg__btn dlg__btn--danger"
           :disabled="busy || (kind === 'edit' && !text.trim())"
           @click="confirm"
         >
-          {{ busy ? '处理中…' : kind === 'rollback' ? '确认回档' : '确认修改并重发' }}
+          {{tr(busy ? '处理中…' : kind === 'rollback' ? '确认回档' : '确认修改并重发')}}
         </button>
       </div>
     </div>
@@ -129,11 +125,11 @@ function confirm(): void {
 }
 .dlg__h {
   margin: 0;
-  font-size: 15px;
+  font-size: calc(var(--ui-font-size) * 1.15385);
 }
 .dlg__p {
   margin: 0;
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
   color: var(--text-muted);
   line-height: 1.6;
 }
@@ -143,14 +139,14 @@ function confirm(): void {
   gap: 4px;
 }
 .dlg__label {
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
 }
 .dlg__text {
   width: 100%;
   resize: vertical;
   font: inherit;
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
   line-height: 1.5;
   color: var(--text);
   background: var(--surface-2);
@@ -162,18 +158,18 @@ function confirm(): void {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
   color: var(--text);
 }
 .dlg__note {
   margin: 0;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   line-height: 1.6;
   color: var(--text-faint);
 }
 .dlg__err {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--danger);
 }
 .dlg__foot {
@@ -186,7 +182,7 @@ function confirm(): void {
   border: 1px solid var(--border-strong);
   background: var(--surface-2);
   color: var(--text);
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
   border-radius: var(--radius-sm);
   padding: 5px 16px;
   cursor: pointer;

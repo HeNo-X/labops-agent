@@ -155,7 +155,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     json(res, 200, {
       ok: true,
       service: 'labops-agent',
-      version:'0.6.0',build:process.env.BUILD_ID||'20261005-unified-chat-scheduler',contractVersion:3,
+      version:'0.8.0',build:process.env.BUILD_ID||'20261007-personalized-agent',contractVersion:3,
       stage:'unified-chat-persistent-scheduler',
       capability: runtimeCapabilities(),
       authMode:authMode(),

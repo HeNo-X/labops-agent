@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 /**
  * 人工确认卡 —— 只在**真实待确认写操作**存在时渲染（阶段 2B 接入）
  * ============================================================================
@@ -16,8 +17,8 @@ defineProps<{ /* 阶段 2B：这里将接收结构化的待确认动作草稿 */
 </script>
 
 <template>
-  <section class="confirm" role="alertdialog" aria-label="人工确认">
-    <p class="confirm__wait">待确认操作已到达，等待人工确认。（本区块将在阶段 2B 接入写操作时启用）</p>
+  <section class="confirm" role="alertdialog" :aria-label="tr('人工确认')">
+    <p class="confirm__wait">{{tr("待确认操作已到达，等待人工确认。（本区块将在阶段 2B 接入写操作时启用）")}}</p>
   </section>
 </template>
 
@@ -30,7 +31,7 @@ defineProps<{ /* 阶段 2B：这里将接收结构化的待确认动作草稿 */
 }
 .confirm__wait {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--warn);
 }
 </style>

@@ -62,8 +62,8 @@ async function record(name, fn) {
 let page;
 const roundCount = () => page.locator('.round').count();
 const userTexts = () => page.locator('.msg--user .msg__userbubble').allInnerTexts();
-/** 侧栏分区计数：折叠按钮旁边的 .nav__count */
-const sectionCount = (name) => page.locator(`.nav__fold:has-text("${name}") ~ .nav__count`).innerText().then(Number);
+/** 侧栏分区计数：折叠按钮旁边的 .sidebar-group h2>span */
+const sectionCount = (name) => page.locator(`.sidebar-group h2>button:first-child:has-text("${name}") ~ span`).innerText().then(Number);
 /** 发一条并等到回答落定（与其它浏览器用例同一套等待口径） */
 async function send(q) {
   const n = await page.locator('.msg--assistant').count();
@@ -113,14 +113,14 @@ try {
 
   // ---------------------------------------------------------------- W01
   await record('W01 侧栏把工作会话与聊天会话分成两个分区，各自计数与新建按钮', async () => {
-    assert.equal(await page.locator('.nav__fold:has-text("工作会话")').count(), 1);
-    assert.equal(await page.locator('.nav__fold:has-text("聊天会话")').count(), 1);
+    assert.equal(await page.locator('.sidebar-group h2>button:first-child:has-text("工作会话")').count(), 1);
+    assert.equal(await page.locator('.sidebar-group h2>button:first-child:has-text("聊天会话")').count(), 1);
     assert.equal(await page.getByRole('button', { name: '新建工作会话' }).count(), 1);
     assert.equal(await page.getByRole('button', { name: '新建聊天会话' }).count(), 1);
     assert.equal(await sectionCount('工作会话'), 0);
     assert.equal(await sectionCount('聊天会话'), 0);
-    assert.ok((await page.locator('.nav__section').filter({ hasText: '工作会话' }).innerText()).includes('还没有工作会话'));
-    assert.ok((await page.locator('.nav__section').filter({ hasText: '聊天会话' }).innerText()).includes('还没有聊天会话'));
+    assert.ok((await page.locator('.sidebar-group').filter({ hasText: '工作会话' }).innerText()).includes('暂无会话'));
+    assert.ok((await page.locator('.sidebar-group').filter({ hasText: '聊天会话' }).innerText()).includes('暂无会话'));
 
     // 工作模式发一条 → 只进工作分区
     await send('查询E310在2026-09-28的课表');
@@ -140,29 +140,29 @@ try {
 
   // ---------------------------------------------------------------- W02
   await record('W02 分区可折叠，折叠态跨刷新保持', async () => {
-    await page.locator('.nav__fold:has-text("聊天会话")').click();
+    await page.locator('.sidebar-group h2>button:first-child:has-text("聊天会话")').click();
     await page.waitForFunction(() => !document.querySelector('#nav-chat-list'));
     assert.equal(await page.locator('#nav-work-list li').count(), 1);
     await page.reload();
     await page.locator('#cmd').waitFor({ state: 'visible' });
     await page.waitForFunction(() => document.querySelectorAll('#nav-work-list li').length === 1);
     assert.equal(await page.locator('#nav-chat-list').count(), 0, '折叠状态必须被记住');
-    await page.locator('.nav__fold:has-text("聊天会话")').click();
+    await page.locator('.sidebar-group h2>button:first-child:has-text("聊天会话")').click();
     await page.waitForFunction(() => document.querySelectorAll('#nav-chat-list li').length === 1);
   });
 
   // ---------------------------------------------------------------- W03
   await record('W03 工作模式每轮有删除/回档/修改；聊天模式只有删除本轮', async () => {
-    const work = page.locator('.nav__fold:has-text("工作会话") ~ .nav__count');
+    const work = page.locator('.sidebar-group h2>button:first-child:has-text("工作会话") ~ span');
     assert.ok(work);
-    await page.locator('#nav-work-list li').first().locator('.conv').click();
+    await page.locator('#nav-work-list li').first().locator('.sidebar-conversation').click();
     await page.locator('.round').first().waitFor();
     await page.locator('.round').first().hover();
     await page.waitForFunction(() => getComputedStyle(document.querySelector('.round .roundtool')).opacity === '1');
     for (const label of ['删除第 1 轮', '回档到第 1 轮发起前', '修改第 1 轮的提问并重新发起']) {
       assert.equal(await page.locator('.round').first().getByRole('button', { name: label }).count(), 1, label);
     }
-    await page.locator('#nav-chat-list li').first().locator('.conv').click();
+    await page.locator('#nav-chat-list li').first().locator('.sidebar-conversation').click();
     await page.locator('.round').first().waitFor();
     assert.equal(await page.locator('.round').first().getByRole('button', { name: '删除第 1 轮' }).count(), 1);
     assert.equal(await page.locator('.round').first().getByRole('button', { name: '回档到第 1 轮发起前' }).count(), 0, '聊天模式不提供回档');
@@ -171,7 +171,7 @@ try {
 
   // ---------------------------------------------------------------- W04
   await record('W04 修改：弹窗预填原提问，改完重发后只剩新的这一轮', async () => {
-    await page.locator('#nav-work-list li').first().locator('.conv').click();
+    await page.locator('#nav-work-list li').first().locator('.sidebar-conversation').click();
     await page.locator('.round').first().waitFor();
     await roundAction(0, '修改第 1 轮的提问并重新发起');
     const dlg = page.getByRole('dialog');
@@ -262,10 +262,10 @@ try {
     await m.goto(base+'?desktop=1');
     await m.locator('#cmd').waitFor({ state: 'visible' });
     await m.locator('.chat__navtoggle').click();
-    await m.locator('.nav__fold:has-text("工作会话")').waitFor();
+    await m.locator('.sidebar-group h2>button:first-child:has-text("工作会话")').waitFor();
     assert.equal(await m.evaluate(() => Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth)), 0);
     // 挑一个"确实有消息"的工作会话：W07 回档后留下的空会话排在列表最前
-    await m.locator('#nav-work-list .conv:not([title*="（0 条消息"])').first().click();
+    await m.locator('#nav-work-list .sidebar-conversation:not([title*="（0 条消息）"])').first().click();
     await m.locator('.round').first().waitFor();
     // 触摸端没有 hover：操作条必须常显，否则功能等于不存在
     assert.equal(await m.locator('.round').first().locator('.roundtool').evaluate((el) => getComputedStyle(el).opacity), '1');

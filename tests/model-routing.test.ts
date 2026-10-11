@@ -56,9 +56,9 @@ async function run(question: string, sessionId: string, mode: 'chat' | 'task'): 
 }
 
 test('聊天模式：事件里带出 DashScope 链上实际生效的模型', async () => {
-  // 用寒暄类提问：本轮不需要工具，"模型只说话"这条路径才会正常收尾（否则按无依据失败）
-  resetScript([{ kind: 'text', text: '不客气！' }]);
-  const events = await run('谢谢', 'routing-chat', 'chat');
+  // 用实验室查询核对真实工具调用后的模型标识；寒暄由范围引导处理，不调用模型。
+  resetScript([{kind:'tool',name:'query_schedule',args:{labName:'E310',date:'2026-09-28'}},{kind:'text',text:'课表查询完成。'}]);
+  const events = await run('查询E310在2026-09-28的课表', 'routing-chat', 'chat');
   const started = events.find((e) => e.type === 'run_started');
   const done = events.find((e) => e.type === 'run_completed');
   assert.ok(started && done, events.map((e) => e.type).join(','));
@@ -67,8 +67,8 @@ test('聊天模式：事件里带出 DashScope 链上实际生效的模型', asy
 });
 
 test('工作模式：事件里带出 Agnes 实际生效的模型', async () => {
-  resetScript([{ kind: 'text', text: '不客气！' }]);
-  const events = await run('谢谢', 'routing-task', 'task');
+  resetScript([{kind:'tool',name:'query_schedule',args:{labName:'E310',date:'2026-09-28'}},{kind:'text',text:'课表查询完成。'}]);
+  const events = await run('查询E310在2026-09-28的课表', 'routing-task', 'task');
   const done = events.find((e) => e.type === 'run_completed');
   assert.ok(done, events.map((e) => e.type).join(','));
   assert.equal(done.payload['model'], STUB_MODELS.task);

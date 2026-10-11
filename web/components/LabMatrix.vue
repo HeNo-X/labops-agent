@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 /**
  * 实验室房间清单 —— 侧栏辅助，不是主角
  * ============================================================================
@@ -58,39 +59,33 @@ function ask(lab: Lab): void {
 </script>
 
 <template>
-  <section class="matrix" aria-labelledby="matrix-h">
-    <header class="matrix__head">
-      <h2 id="matrix-h">房间清单</h2>
-      <p class="matrix__sub">
-        按楼宇 / 楼层 / 房间号排布，共 <b>{{ store.allRooms.length }}</b> 间。点击房间回填查询问题。
-      </p>
-    </header>
+  <section class="matrix" :aria-label="tr('房间清单')">
 
     <p v-if="store.overviewError" class="matrix__err" role="alert">
       <StatusTag tone="danger" label="概览载入失败" />
       {{ store.overviewError }}
     </p>
 
-    <div v-if="!store.overviewLoaded" class="matrix__loading">正在载入房间清单…</div>
+    <div v-if="!store.overviewLoaded" class="matrix__loading">{{tr("正在载入房间清单…")}}</div>
 
     <template v-else>
       <div class="matrix__search">
-        <label class="sr-only" for="room-kw">搜索房间</label>
+        <label class="sr-only" for="room-kw">{{tr("搜索房间")}}</label>
         <input
           id="room-kw"
           v-model="keyword"
           type="search"
           class="matrix__kw"
-          placeholder="搜房号或位置，如 E310 / E区"
+          :placeholder="tr('搜房号或位置，如 E310 / E区')"
           autocomplete="off"
         />
       </div>
 
       <div class="matrix__groups">
         <div v-for="g in filteredGroups" :key="g.key" class="group">
-          <h3 class="group__title">
+          <h3 v-if="g.building!=='未标注楼宇'||g.floor!=='未标注楼层'" class="group__title">
             {{ g.building }} <span class="group__floor">{{ g.floor }}</span>
-            <span class="group__count">{{ g.rooms.length }} 间</span>
+            <span class="group__count">{{ g.rooms.length }} {{tr("间")}}</span>
           </h3>
           <ul class="rooms">
             <li v-for="lab in g.rooms" :key="lab.id">
@@ -103,14 +98,14 @@ function ask(lab: Lab): void {
               >
                 <span class="room__code">{{ lab.name }}</span>
                 <span class="room__meta">
-                  <span class="room__cap">容量 {{ lab.capacity }}</span>
+                  <span class="room__cap">{{tr("容量")}} {{ lab.capacity }}</span>
                   <StatusTag :tone="statusMeta(lab.status).tone" :glyph="statusMeta(lab.status).glyph" :label="statusMeta(lab.status).label" />
                 </span>
               </button>
             </li>
           </ul>
         </div>
-        <p v-if="!filteredGroups.length" class="matrix__loading">没有匹配「{{ keyword }}」的房间。</p>
+        <p v-if="!filteredGroups.length" class="matrix__loading">{{tr("没有匹配「")}}{{ keyword }}{{tr("」的房间。")}}</p>
       </div>
     </template>
   </section>
@@ -126,22 +121,22 @@ function ask(lab: Lab): void {
 }
 .matrix__head h2 {
   margin: 0 0 var(--sp-1);
-  font-size: 15px;
+  font-size: calc(var(--ui-font-size) * 1.15385);
 }
 .matrix__sub {
   margin: 0 0 var(--sp-3);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
 }
 .matrix__err {
   margin: 0 0 var(--sp-2);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--danger);
 }
 .matrix__loading {
   margin: 0;
   padding: var(--sp-3) 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
 }
 .matrix__search {
@@ -156,7 +151,7 @@ function ask(lab: Lab): void {
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
 }
 .matrix__kw:focus-visible {
   outline: 2px solid var(--primary-border);
@@ -170,7 +165,7 @@ function ask(lab: Lab): void {
 }
 .group__title {
   margin: 0 0 var(--sp-1);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-muted);
   display: flex;
   align-items: baseline;
@@ -221,7 +216,7 @@ function ask(lab: Lab): void {
 }
 .room__code {
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
   font-weight: 700;
 }
 .room__meta {
@@ -230,7 +225,7 @@ function ask(lab: Lab): void {
   gap: var(--sp-2);
 }
 .room__cap {
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
 </style>

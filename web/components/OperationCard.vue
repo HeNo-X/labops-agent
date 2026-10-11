@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import {t as tr} from "../i18n";
 /**
  * 办理单（提案）卡 —— ops.v1 的核心交互面
  * ============================================================================
@@ -126,7 +127,7 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
 </script>
 
 <template>
-  <section class="opcard" :data-state="state.state" aria-label="业务办理单">
+  <section class="opcard" :data-state="state.state" :aria-label="tr('业务办理单')">
     <header class="opcard__head">
       <StatusTag
         :tone="(STATE_META[state.state]?.tone ?? 'info') as 'ok' | 'warn' | 'danger' | 'info' | 'neutral'"
@@ -135,7 +136,7 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
       />
       <b class="opcard__title">{{ state.title }}</b>
       <span class="opcard__kind">{{ kindLabel(state.payloadKind) }} · v{{ state.version }}</span>
-      <span class="opcard__env" title="执行环境由服务端决定，界面只如实展示">沙盒演示</span>
+      <span class="opcard__env" :title="tr('执行环境由服务端决定，界面只如实展示')">{{tr("沙盒演示")}}</span>
     </header>
 
     <p class="opcard__summary">{{ state.summary }}</p>
@@ -151,44 +152,42 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
 
     <!-- 按类型展示关键对象 -->
     <div v-if="state.payloadKind === 'issue'" class="opcard__fields">
-      <div class="opcard__row"><span>房间</span><b>{{ (state.payloadView as Record<string, unknown>)['roomId'] }}</b></div>
-      <div class="opcard__row"><span>分类</span><b>{{ ISSUE_CATEGORY_LABELS[String((state.payloadView as Record<string, unknown>)['category'])] ?? (state.payloadView as Record<string, unknown>)['category'] }}</b></div>
-      <div class="opcard__row opcard__row--wrap"><span>描述</span><b>{{ (state.payloadView as Record<string, unknown>)['description'] }}</b></div>
+      <div class="opcard__row"><span>{{tr("房间")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['roomId'] }}</b></div>
+      <div class="opcard__row"><span>{{tr("分类")}}</span><b>{{ ISSUE_CATEGORY_LABELS[String((state.payloadView as Record<string, unknown>)['category'])] ?? (state.payloadView as Record<string, unknown>)['category'] }}</b></div>
+      <div class="opcard__row opcard__row--wrap"><span>{{tr("描述")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['description'] }}</b></div>
     </div>
     <div v-else-if="state.payloadKind === 'notification'" class="opcard__fields">
-      <div class="opcard__row"><span>标题</span><b>{{ (state.payloadView as Record<string, unknown>)['title'] }}</b></div>
-      <div class="opcard__row opcard__row--wrap"><span>正文</span><b>{{ (state.payloadView as Record<string, unknown>)['content'] }}</b></div>
-      <div class="opcard__row"><span>接收范围</span><b>{{ (state.payloadView as Record<string, unknown>)['audienceSummary'] }}（人数未知，沙盒无名册）</b></div>
+      <div class="opcard__row"><span>{{tr("标题")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['title'] }}</b></div>
+      <div class="opcard__row opcard__row--wrap"><span>{{tr("正文")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['content'] }}</b></div>
+      <div class="opcard__row"><span>{{tr("接收范围")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['audienceSummary'] }}{{tr("（人数未知，沙盒无名册）")}}</b></div>
     </div>
     <div v-else-if="state.payloadKind === 'closure'" class="opcard__fields">
-      <div class="opcard__row"><span>范围</span><b>{{ (state.payloadView as Record<string, unknown>)['roomId'] }} · {{ (state.payloadView as Record<string, unknown>)['startDate'] }} ~ {{ (state.payloadView as Record<string, unknown>)['endDate'] }} · {{ ((state.payloadView as Record<string, unknown>)['periodLabels'] as string[])?.join('、') }}</b></div>
-      <div class="opcard__row"><span>原因</span><b>{{ (state.payloadView as Record<string, unknown>)['reason'] }}</b></div>
-      <div class="opcard__row"><span>受影响</span><b>{{ (state.payloadView as Record<string, unknown>)['affectedLessons'] }} 条排课</b></div>
+      <div class="opcard__row"><span>{{tr("范围")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['roomId'] }} · {{ (state.payloadView as Record<string, unknown>)['startDate'] }} ~ {{ (state.payloadView as Record<string, unknown>)['endDate'] }} · {{ ((state.payloadView as Record<string, unknown>)['periodLabels'] as string[])?.join('、') }}</b></div>
+      <div class="opcard__row"><span>{{tr("原因")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['reason'] }}</b></div>
+      <div class="opcard__row"><span>{{tr("受影响")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['affectedLessons'] }} {{tr("条排课")}}</b></div>
       <ul v-if="((state.payloadView as Record<string, unknown>)['affectedSamples'] as string[])?.length" class="opcard__samples">
         <li v-for="(s, i) in ((state.payloadView as Record<string, unknown>)['affectedSamples'] as string[])" :key="i">{{ s }}</li>
       </ul>
     </div>
     <div v-else-if="state.payloadKind === 'duty_session'" class="opcard__fields">
       <div v-if="String((state.payloadView as Record<string, unknown>)['mode']) === 'start'" class="opcard__row">
-        <span>开始值班</span><b>{{ (state.payloadView as Record<string, unknown>)['roomId'] }}</b>
+        <span>{{tr("开始值班")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['roomId'] }}</b>
       </div>
       <template v-else>
-        <div class="opcard__row"><span>房间</span><b>{{ (state.payloadView as Record<string, unknown>)['roomId'] }}</b></div>
+        <div class="opcard__row"><span>{{tr("房间")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['roomId'] }}</b></div>
         <ul class="opcard__checklist">
           <li v-for="c in checklist" :key="c.key" :data-state="c.state">
             <span class="opcard__ckglyph" aria-hidden="true">{{ c.state === 'done' ? '✓' : c.state === 'abnormal' ? '✕' : '○' }}</span>
             <span class="opcard__cklabel">{{ c.label }}</span>
-            <span class="opcard__ckstate">{{ c.state === 'done' ? '已完成' : c.state === 'abnormal' ? '有异常' : '未确认' }}</span>
+            <span class="opcard__ckstate">{{tr(c.state === 'done' ? '已完成' : c.state === 'abnormal' ? '有异常' : '未确认')}}</span>
           </li>
         </ul>
-        <p v-if="String((state.payloadView as Record<string, unknown>)['mode']) === 'handover'" class="opcard__cknote">
-          清单状态以服务端提案为准（只读）。与实际不符？请拒绝本单，补充说明后重新生成。
-        </p>
+        <p v-if="String((state.payloadView as Record<string, unknown>)['mode']) === 'handover'" class="opcard__cknote"> {{tr("清单状态以服务端提案为准（只读）。与实际不符？请拒绝本单，补充说明后重新生成。")}} </p>
       </template>
     </div>
 
     <ul v-if="state.missingDependencies.length" class="opcard__deps">
-      <li v-for="(d, i) in state.missingDependencies" :key="i">未接入 · {{ d }}</li>
+      <li v-for="(d, i) in state.missingDependencies" :key="i">{{tr("未接入 ·")}} {{ d }}</li>
     </ul>
 
     <p v-if="!state.canExecute && state.state === 'awaiting_confirmation'" class="opcard__forbid" role="alert">
@@ -197,12 +196,12 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
 
     <!-- 回执 -->
     <div v-if="receipt" class="opcard__receipt" role="status">
-      <h4 class="opcard__rh">业务回执（以此为准，聊天文字不是凭据）</h4>
-      <div class="opcard__row"><span>业务单号</span><b class="opcard__mono">{{ receipt.operationId }}</b></div>
-      <div class="opcard__row"><span>状态</span><b>已生效 · {{ receipt.executionEnvironment === 'sandbox' ? '沙盒' : receipt.executionEnvironment }}</b></div>
-      <div class="opcard__row"><span>对象</span><b class="opcard__mono">{{ receipt.objects.map((o) => `${o.kind}:${o.id}`).join('，') }}</b></div>
-      <div class="opcard__row"><span>时间</span><b>{{ receipt.committedAt }}</b></div>
-      <div class="opcard__row"><span>执行身份</span><b>{{ receipt.actor.label }}（{{ receipt.actor.role }}）</b></div>
+      <h4 class="opcard__rh">{{tr("业务回执（以此为准，聊天文字不是凭据）")}}</h4>
+      <div class="opcard__row"><span>{{tr("业务单号")}}</span><b class="opcard__mono">{{ receipt.operationId }}</b></div>
+      <div class="opcard__row"><span>{{tr("状态")}}</span><b>{{tr("已生效 ·")}} {{tr(receipt.executionEnvironment === 'sandbox' ? '沙盒' : receipt.executionEnvironment)}}</b></div>
+      <div class="opcard__row"><span>{{tr("对象")}}</span><b class="opcard__mono">{{ receipt.objects.map((o) => `${o.kind}:${o.id}`).join('，') }}</b></div>
+      <div class="opcard__row"><span>{{tr("时间")}}</span><b>{{ receipt.committedAt }}</b></div>
+      <div class="opcard__row"><span>{{tr("执行身份")}}</span><b>{{ receipt.actor.label }}（{{ receipt.actor.role }}）</b></div>
       <p v-if="receipt.deliveryNote" class="opcard__rnote">{{ receipt.deliveryNote }}</p>
     </div>
 
@@ -211,13 +210,13 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
     <!-- 动作：仅在待确认 + 有权时出现 -->
     <div v-if="state.state === 'awaiting_confirmation' && state.canExecute && !receipt" class="opcard__actions">
       <button type="button" class="opcard__confirm" :disabled="busy" @click="decide('confirm')">
-        {{ busy ? '提交中…' : `确认执行（v${state.version}）` }}
+        {{tr(busy ? '提交中…' : `确认执行（v${state.version}）`)}}
       </button>
-      <button type="button" class="opcard__reject" :disabled="busy" @click="decide('reject')">拒绝</button>
-      <span class="opcard__ttl">过期时间 {{ new Date(state.expiresAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}，过期后需重新生成</span>
+      <button type="button" class="opcard__reject" :disabled="busy" @click="decide('reject')">{{tr("拒绝")}}</button>
+      <span class="opcard__ttl">{{tr("过期时间")}} {{ new Date(state.expiresAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}{{tr("，过期后需重新生成")}}</span>
     </div>
-    <p v-else-if="state.state === 'expired'" class="opcard__gone">本办理单已过期，请重新发起。</p>
-    <p v-else-if="state.state === 'rejected'" class="opcard__gone">本办理单已被拒绝，可重新描述需求生成新单。</p>
+    <p v-else-if="state.state === 'expired'" class="opcard__gone">{{tr("本办理单已过期，请重新发起。")}}</p>
+    <p v-else-if="state.state === 'rejected'" class="opcard__gone">{{tr("本办理单已被拒绝，可重新描述需求生成新单。")}}</p>
   </section>
 </template>
 
@@ -231,7 +230,7 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
 }
 .opcard[data-state='executed'] {
   border-left-color: var(--info-border, var(--primary));
@@ -243,11 +242,11 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
   flex-wrap: wrap;
 }
 .opcard__title {
-  font-size: 14px;
+  font-size: calc(var(--ui-font-size) * 1.07692);
 }
 .opcard__kind,
 .opcard__env {
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
   border: 1px dashed var(--border-strong);
   border-radius: 999px;
@@ -270,7 +269,7 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
 }
 .opcard__effectlabel::before {
   content: '▸ ';
@@ -291,7 +290,7 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
 .opcard__row {
   display: flex;
   gap: var(--sp-2);
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   align-items: baseline;
 }
 .opcard__row--wrap {
@@ -313,7 +312,7 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
   list-style: none;
   margin: 4px 0 0;
   padding: 0;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
 .opcard__checklist {
@@ -328,7 +327,7 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
 }
 .opcard__ckglyph {
   width: 14px;
@@ -338,24 +337,24 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
 .opcard__checklist li[data-state='abnormal'] .opcard__ckglyph { color: var(--danger); }
 .opcard__ckstate {
   margin-left: auto;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
 .opcard__cknote {
   margin: 4px 0 0;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
 .opcard__deps {
   list-style: none;
   margin: 0;
   padding: 0;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
 .opcard__forbid {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--danger);
 }
 .opcard__receipt {
@@ -369,12 +368,12 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
 }
 .opcard__rh {
   margin: 0 0 2px;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-muted);
 }
 .opcard__rnote {
   margin: 2px 0 0;
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
 .opcard__mono {
@@ -383,7 +382,7 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
 }
 .opcard__err {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--danger);
 }
 .opcard__actions {
@@ -398,7 +397,7 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
   color: var(--primary-contrast);
   border-radius: var(--radius-sm);
   padding: 6px 14px;
-  font-size: 13px;
+  font-size: calc(var(--ui-font-size) * 1.0);
   font-weight: 600;
   cursor: pointer;
 }
@@ -411,19 +410,19 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
   color: var(--text-muted);
   border-radius: var(--radius-sm);
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   cursor: pointer;
 }
 .opcard__reject:hover {
   color: var(--text);
 }
 .opcard__ttl {
-  font-size: 11px;
+  font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
 .opcard__gone {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
 }
 </style>

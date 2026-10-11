@@ -8,3 +8,5 @@ await bootstrapAuth();
 const app = createApp(App);
 app.use(createPinia());
 if(!routeEdition())app.mount('#app');
+
+import './styles/preferences.css';

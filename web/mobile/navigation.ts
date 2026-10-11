@@ -8,6 +8,6 @@ export function useMobileNavigation(initial:Target){
  function go(target:Target,replace=false){try{const safe=Targets.normalize(target);error.value='';sheet.value='';if(!replace)depth++;history[replace?'replaceState':'pushState']({labops:true,depth},'','/mobile.html?'+Targets.search(safe));route.value=safe;}catch(e){error.value=(e as Error).message;}}
  function openSheet(name:string){if(sheet.value)return;sheet.value=name;history.pushState({labops:true,depth,sheet:true},'',location.href);}
  function closeSheet(){if(sheet.value)history.back();}
- function back(){if(sheet.value){closeSheet();return;}if(depth>0)history.back();else go({view:route.value.view==='room'?'rooms':route.value.view==='job'?'automation':route.value.view==='notice'?'messages':route.value.view==='conversation'?'assistant':'home'},true);}
+ function back(){if(sheet.value){closeSheet();return;}if(depth>0)history.back();else go({view:route.value.view==='settings'?'profile':route.value.view==='sessions'?'assistant':route.value.view==='room'?'rooms':route.value.view==='job'?'automation':route.value.view==='notice'?'messages':route.value.view==='conversation'?'assistant':'home'},true);}
  return {route,error,sheet,go,back,openSheet,closeSheet};
 }

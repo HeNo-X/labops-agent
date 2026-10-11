@@ -17,6 +17,7 @@ import {importHistory} from './api/history-import.ts';
 import {handleNativeAuth,authMode} from './security/native-auth.ts';
 import { effectiveRole, handleBusinessApi, loadAuthorizedDataset } from './business/bridge.ts';
 import { withHttpIdentity } from './security/http.ts';
+import { CLIENT_API_REVISION } from './security/client-cors.ts';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -156,6 +157,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       ok: true,
       service: 'labops-agent',
       version:'0.8.0',build:process.env.BUILD_ID||'20261007-personalized-agent',contractVersion:3,
+      clientProtocol:1,clientApiRevision:CLIENT_API_REVISION,
       stage:'unified-chat-persistent-scheduler',
       capability: runtimeCapabilities(),
       authMode:authMode(),

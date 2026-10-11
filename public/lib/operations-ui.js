@@ -9,7 +9,7 @@
     const role=localStorage.getItem('labops.actorRole')||'admin';
     const token=localStorage.getItem('vol_user_token')||'';
     const url=raw?path:(bridge?'/api/business/proxy':'/api/integration')+path;
-    const res=await fetch(url,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(bridge?{'X-LabOps-Sandbox-Role':role}:{Authorization:'Bearer '+token})},...(body===undefined?{}:{body:JSON.stringify(bridge&&!raw?{...body,scopeKey}:body)})});
+    const res=await LabClient.fetch(url,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json',...(bridge?{'X-LabOps-Sandbox-Role':role}:{Authorization:'Bearer '+token})},...(body===undefined?{}:{body:JSON.stringify(bridge&&!raw?{...body,scopeKey}:body)})});
     const out=await res.json();if(!res.ok)throw new Error(out.message||out.error||'请求失败');return out;
   }
   async function work(fn){try{await fn();}catch(e){status(e.message,true);}}

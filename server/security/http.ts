@@ -1,3 +1,4 @@
+import {clientCors,allowedClientOrigins} from './client-cors.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { getDb } from '../persistence/db.ts';
@@ -24,13 +25,14 @@ const limit = (name: string, fallback: number) => Math.max(1, Number(process.env
 
 /** Demo identity is a random server-issued browser session, never a public shared role ID. */
 export async function withHttpIdentity(req: IncomingMessage, res: ServerResponse, next: () => Promise<void>): Promise<void> {
+  if(clientCors(req,res))return;
   const requestId=typeof req.headers['x-request-id']==='string'&&/^[A-Za-z0-9_-]{8,100}$/.test(req.headers['x-request-id'])?req.headers['x-request-id']:randomBytes(12).toString('hex');res.setHeader('X-Request-ID',requestId);
   return requestTrace.run(requestId,()=>authenticateRequest(req,res,next));
 }
 async function authenticateRequest(req:IncomingMessage,res:ServerResponse,next:()=>Promise<void>):Promise<void>{
   if (!req.url?.startsWith('/api/') || req.url.startsWith('/api/health') || req.url.startsWith('/api/agent/health')) return next();
   const origin = req.headers.origin;
-  const allowed = (process.env.LABOPS_ALLOWED_ORIGINS || '').split(',').filter(Boolean);
+  const allowed = [...allowedClientOrigins(), ...(process.env.LABOPS_ALLOWED_ORIGINS || '').split(',').map(s=>s.trim()).filter(Boolean)];
   if(origin){let host='';try{host=new URL(origin).host;}catch{return reject(res,403,'请求来源无效');}if((host!==req.headers.host||!origin.startsWith((process.env.LABOPS_SECURE_COOKIE==='1'?'https:':'http:')+'//'))&&!allowed.includes(origin))return reject(res,403,'请求来源不受信任');}
   const mode=authMode();
   if(!['demo','native'].includes(mode))return reject(res,503,'认证模式无效，请配置native（主系统统一登录）或明确的隔离demo');

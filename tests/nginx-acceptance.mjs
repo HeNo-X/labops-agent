@@ -21,6 +21,9 @@ const results = [];
 const tlsAgent = new https.Agent({keepAlive: true, maxSockets: 256, rejectUnauthorized: false});
 const serverTemplate = fs.readFileSync(path.join(agentRoot, 'deploy/nginx-labops.conf'), 'utf8');
 const proxyTemplate = fs.readFileSync(path.join(agentRoot, 'deploy/labops-proxy.conf'), 'utf8');
+const originMap = fs.readFileSync(path.join(root, 'deploy/nginx/qz-client-origins.conf'), 'utf8');
+const errorHeaders = path.join(root, 'deploy/nginx/qz-error-headers.conf');
+const errorTemplate = fs.readFileSync(path.join(root, 'deploy/nginx/qz-api-errors.conf'), 'utf8').replaceAll('/etc/nginx/snippets/qz-error-headers.conf', errorHeaders);
 const digest = data => crypto.createHash('sha256').update(data).digest('hex');
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 let logs = '', nginxProcess, probeServer, proxyPort, nativeBase, nginxVersion;
@@ -108,10 +111,13 @@ async function record(name, fn) {
 async function startProxy(upstreamPort) {
   await stop(nginxProcess);
   const proxyFile = path.join(temp, 'labops-proxy.conf');
+  const errorFile = path.join(temp, 'qz-api-errors.conf');
+  fs.writeFileSync(errorFile, errorTemplate);
   fs.writeFileSync(proxyFile, proxyTemplate.replace('http://127.0.0.1:8787', 'http://127.0.0.1:' + upstreamPort));
   const server = serverTemplate
     .replace('listen 8788 ssl http2;', `listen 127.0.0.1:${proxyPort} ssl http2;`)
     .replaceAll('/etc/nginx/snippets/labops-proxy.conf', proxyFile)
+    .replaceAll('/etc/nginx/snippets/qz-api-errors.conf', errorFile)
     .replace('/etc/nginx/ssl/lab/fullchain.pem', path.join(temp, 'certificate.pem'))
     .replace('/etc/nginx/ssl/lab/privkey.pem', path.join(temp, 'private.key'));
   const configFile = path.join(temp, 'nginx.conf');
@@ -126,6 +132,7 @@ http {
   fastcgi_temp_path "${temp}/fastcgi-temp";
   uwsgi_temp_path "${temp}/uwsgi-temp";
   scgi_temp_path "${temp}/scgi-temp";
+${originMap}
 ${server}
 }\n`);
   const syntax = spawnSync(nginx, ['-p', temp + '/', '-c', configFile, '-t'], {encoding: 'utf8'});

@@ -1,3 +1,4 @@
+import {clientToken,issueClientSession,readClientSession,revokeClientSession} from './client-sessions.ts';
 import crypto from 'node:crypto';
 import type {IncomingMessage,ServerResponse} from 'node:http';
 import {getDb} from '../persistence/db.ts';
@@ -22,6 +23,7 @@ export async function authenticateNative(req:IncomingMessage):Promise<NativeDele
  table();let token:string|undefined;
  const shared=req.url?.startsWith('/api/shared-chat/');
  if(shared){token=/^Bearer ([a-f0-9]{64})$/.exec(req.headers.authorization||'')?.[1];}
+ else if(req.headers.authorization){token=readClientSession(req).credential;}
  else{const id=cookie(req);const row=id?getDb().prepare('SELECT credential FROM native_auth_sessions WHERE tokenHash=? AND expiresAt>?').get(hash(id),Date.now()) as {credential:string}|undefined:undefined;if(row){try{token=decryptCredential(row.credential);}catch{return fail('LabOps登录凭证无法解密，请重新登录并核对持久化密钥',401);}}}
  if(!token)return fail('请使用主系统账号登录');
  const result=await nativeRemote('/api/auth/profile','GET',token);return {token,profile:principal(result['profile'],shared?'main_shared_chat':'full_labops'),sharedChat:Boolean(shared),channel:shared?'main_shared_chat':'full_labops'};
@@ -33,6 +35,7 @@ export async function withNativeDelegation(d:NativeDelegation,next:()=>Promise<v
 function setCookie(res:ServerResponse,value:string,seconds=604800){res.setHeader('Set-Cookie',`labops_session=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${seconds}${process.env.LABOPS_SECURE_COOKIE==='1'?'; Secure':''}`);}
 export async function handleNativeAuth(req:IncomingMessage,res:ServerResponse,p:string):Promise<boolean>{
  if(!p.startsWith('/api/auth/'))return false;
+ if(p.startsWith('/api/auth/client/'))return handleInstalledAuth(req,res,p);
  try{
   if(p==='/api/auth/session'&&req.method==='GET'){
    if(authMode()==='demo'){send(res,200,{mode:'demo',authenticated:true});return true;}
@@ -58,4 +61,56 @@ export async function handleNativeAuth(req:IncomingMessage,res:ServerResponse,p:
   setCookie(res,token);await withNativeDelegation({token:result['token'],profile},async()=>undefined);
   send(res,200,{authenticated:true,mode:'native',profile,conversationId:result['conversationId']||null,target:result['target']||null,channel:'full_labops',capabilities:{fullLabops:true,sharedChat:true,automation:true}});return true;
  }catch(e){send(res,(e as {status?:number}).status||502,{message:(e as Error).message,code:'native_auth_failed'});return true;}
+}
+
+/** Separate installed-client transport; keeps browser cookies and shared-chat semantics intact. */
+async function handleInstalledAuth(req:IncomingMessage,res:ServerResponse,p:string):Promise<boolean>{
+ try{
+  if(authMode()!=='native')return send(res,503,{message:'安装版需要主系统账号服务',code:'native_auth_required'}),true;
+  if(p==='/api/auth/client/session'&&req.method==='GET'){
+   if(!req.headers.authorization)return send(res,200,{mode:'native',authenticated:false,clientProtocol:1}),true;
+   if(!clientToken(req))return send(res,401,{mode:'native',authenticated:false,message:'客户端登录凭证格式无效'}),true;
+   const d=await authenticateNative(req),row=readClientSession(req);
+   return send(res,200,{mode:'native',authenticated:true,profile:d.profile,expiresAt:row.expiresAt,clientProtocol:1,channel:'full_labops'}),true;
+  }
+  if(p==='/api/auth/client/profile'&&['GET','PATCH'].includes(req.method||'')){
+   const d=await authenticateNative(req);let body:unknown;
+   if(req.method==='PATCH'){const input=await readJsonBody(req);if(!input.ok)return send(res,input.status,{message:input.message}),true;body=input.value;}
+   const result=await nativeRemote('/api/auth/profile',req.method!,d.token,body);
+   return send(res,200,result),true;
+  }
+  if(req.method!=='POST')return send(res,405,{message:'请求方法不支持'}),true;
+  if(p==='/api/auth/client/logout'){
+   try{const row=readClientSession(req,true);await nativeRemote('/api/auth/logout','POST',row.credential,{});}catch{/* Always revoke our local record. */}
+   revokeClientSession(req);return send(res,200,{ok:true}),true;
+  }
+  if(!['/api/auth/client/login','/api/auth/client/sso-exchange','/api/auth/client/change-password'].includes(p))return send(res,404,{message:'客户端认证入口不存在'}),true;
+  const input=await readJsonBody(req);if(!input.ok)return send(res,input.status,{message:input.message}),true;
+  if(!input.value||typeof input.value!=='object'||Array.isArray(input.value))return send(res,400,{message:'请求正文必须是 JSON 对象'}),true;
+  const body=input.value as Record<string,unknown>;
+  if(p==='/api/auth/client/change-password'){
+   const row=readClientSession(req,true);
+   if(typeof body.oldPassword!=='string'||typeof body.newPassword!=='string')return send(res,400,{message:'请输入原密码和新密码'}),true;
+   await nativeRemote('/api/auth/change-password','POST',row.credential,{oldPassword:body.oldPassword,newPassword:body.newPassword});
+   // Re-authentication is explicit; the limited password token never becomes a business token.
+   revokeClientSession(req);await nativeRemote('/api/auth/logout','POST',row.credential,{}).catch(()=>undefined);
+   return send(res,200,{ok:true,reauthenticate:true}),true;
+  }
+  const login=p.endsWith('/login');
+  if(login&&(typeof body.account!=='string'||typeof body.password!=='string'))return send(res,400,{message:'请输入主系统账号和密码'}),true;
+  if(!login&&(typeof body.ticket!=='string'||!/^[a-f0-9]{64}$/.test(body.ticket)))return send(res,400,{message:'登录票据无效'}),true;
+  const result=await nativeRemote(login?'/api/auth/login':'/api/auth/labops-exchange','POST',undefined,login?{account:body.account,password:body.password}:{ticket:body.ticket});
+  const credential=result.token;if(typeof credential!=='string')return fail('主系统未返回有效会话',502);
+  const raw=result.profile as Record<string,unknown>|undefined;
+  if(raw?.identity==='student'){await nativeRemote('/api/auth/logout','POST',credential,{}).catch(()=>undefined);return fail('学生账号请使用主系统，完整 LabOps 仅管理员与志愿者可用',403);}
+  if(raw?.mustChangePassword){
+   const limited=issueClientSession(credential,'password');
+   return send(res,200,{mode:'native',authenticated:false,status:'password_change_required',passwordChangeToken:limited.token,expiresAt:limited.expiresAt}),true;
+  }
+  let profile:NativeDelegation['profile'];try{profile=principal(raw);}catch(e){await nativeRemote('/api/auth/logout','POST',credential,{}).catch(()=>undefined);throw e;}
+  const session=issueClientSession(credential);
+  await withNativeDelegation({token:credential,profile},async()=>undefined);
+  send(res,200,{mode:'native',authenticated:true,accessToken:session.token,expiresAt:session.expiresAt,profile,clientProtocol:1,channel:'full_labops',conversationId:result.conversationId||null,target:result.target||null,capabilities:{fullLabops:true,sharedChat:true,automation:true}});
+ }catch(e){send(res,(e as {status?:number}).status||502,{message:(e as Error).message,code:'client_auth_failed'});}
+ return true;
 }

@@ -9,6 +9,7 @@ export function preferredLayout(input:DeviceInput,override:unknown,now=Date.now(
  return saved&&['mobile','desktop'].includes(String(saved.layout))&&typeof saved.until==='number'&&saved.until>now?saved.layout as Layout:detectedLayout(input);
 }
 export function chooseLayout():Layout{
+ if(window.LabClient?.isNative)return window.LabClient.config.edition;
  let override:unknown;try{override=JSON.parse(localStorage.getItem('labops.layout')||'null');}catch{/* No override. */}
  return preferredLayout({userAgent:navigator.userAgent,platform:navigator.platform,maxTouchPoints:navigator.maxTouchPoints,width:innerWidth},override);
 }

@@ -1,3 +1,4 @@
+import {clientFetch} from '../client';
 import {requestScope,clearRequests} from '../auth/request-scope';
 import {defineStore} from 'pinia';
 import {ref} from 'vue';
@@ -8,7 +9,7 @@ import {actorHeaders} from '../actor';
 import type {NativeActor} from '@shared/business';
 export async function businessApi<T>(path:string,body?:unknown):Promise<T>{
   if(body&&path.startsWith('proxy/')&&!['proxy/notifications/read','proxy/notifications/read-batch','proxy/reminder-preferences'].includes(path)){const id=useSessionStore().currentId;if(id)body={...(body as Record<string,unknown>),conversationId:id};}
-  const scope=requestScope();try{const res=await fetch('/api/business/'+path,{method:body===undefined?'GET':'POST',headers:{...actorHeaders(),'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.any([scope.signal,AbortSignal.timeout(15000)])});
+  const scope=requestScope();try{const res=await clientFetch('/api/business/'+path,{method:body===undefined?'GET':'POST',headers:{...actorHeaders(),'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.any([scope.signal,AbortSignal.timeout(15000)])});
   if(!res.ok)throw await responseError(res);const data=await res.json();if(!scope.current())throw new Error('账号范围已变化');return data as T;}finally{scope.done();}
 }
 export const useBusinessStore=defineStore('business',()=>{

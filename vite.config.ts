@@ -5,6 +5,7 @@ import { fileURLToPath, URL } from 'node:url';
 const SERVER_PORT = process.env.PORT || '8787';
 
 export default defineConfig({
+  base: process.env.QZ_CLIENT_BUILD === '1' ? './' : '/',
   plugins: [vue()],
   resolve: {
     alias: {

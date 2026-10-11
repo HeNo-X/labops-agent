@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {clientFetch,isInstalledClient} from '../client';
+
 import {t as tr} from "../i18n";
 import {responseError} from '../http';
 /**
@@ -25,6 +27,10 @@ declare global {
 
 const emit = defineEmits<{ done: [account: string] }>();
 const props=defineProps<{mode?:'native'|'demo'}>();
+// 安装版：登录页只保留一个低调的「连接设置」文字入口（原「应用设置」悬浮按钮已取消）；
+// 网页版 isInstalledClient() 恒为 false，不渲染该入口。
+const installed=isInstalledClient();
+function openAdvanced(): void { location.assign('/client/settings.html#advanced'); }
 const account = ref('');
 const password = ref('');
 const errMsg = ref('');
@@ -59,7 +65,7 @@ async function submit(): Promise<void> {
   if (!password.value) return fail('请输入密码');
   submitting.value = true;
   if(props.mode!=='demo'){
-    try{const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account:account.value.trim(),password:password.value})});if(!r.ok)throw await responseError(r);await r.json();password.value='';}
+    try{const r=await clientFetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account:account.value.trim(),password:password.value})});if(!r.ok)throw await responseError(r);await r.json();password.value='';}
     catch(e){submitting.value=false;return fail((e as Error).message);}
   }
   let entered = false;
@@ -147,6 +153,7 @@ async function submit(): Promise<void> {
 
         <button class="login-btn" :disabled="submitting" @click="submit">{{tr(submitting?'正在登录…':'登录')}}</button>
         <p class="gate-note">{{tr(mode==='demo'?'本地隔离演示模式':'使用主系统账号和密码 · 自动识别身份并连接业务数据')}}</p>
+        <button v-if="installed" type="button" class="conn-link" @click="openAdvanced">{{tr("连接设置")}}</button>
       </section>
     </main>
   </div>
@@ -284,6 +291,24 @@ input[type='password']::-ms-clear { display: none; }
   font-size: calc(var(--ui-font-size) * 0.84615);
   color: #9c7f8c;
 }
+/* 登录页低调文字入口：非悬浮按钮，只在安装版出现 */
+.conn-link {
+  display: block;
+  margin: 10px auto 0;
+  padding: 4px 8px;
+  border: 0;
+  background: none;
+  color: #a89aa2;
+  font: inherit;
+  font-size: calc(var(--ui-font-size) * 0.84615);
+  letter-spacing: 0.06em;
+  text-decoration: underline;
+  text-decoration-color: #d8ccd2;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.conn-link:hover,
+.conn-link:focus-visible { color: var(--primary); text-decoration-color: var(--primary); }
 /* shake（登录失败时输入框抖动，配合角色悲伤态） */
 .shake { animation: shake-anim 0.3s ease-in-out; }
 @keyframes shake-anim {

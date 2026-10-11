@@ -33,3 +33,6 @@ server/credentials/
 .evaluation/
 
 .review-shots*/
+
+# 本地备份（合并期 .pre-cloudapi.bak 等）
+*.bak

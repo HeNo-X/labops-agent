@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {clientFetch} from './client';
+
 /**
  * 会话工作台 —— 应用外壳（M2：左侧导航 + 连续消息流，F01/F23/F25）
  * ============================================================================
@@ -84,7 +86,7 @@ async function onLogin(account: string):Promise<void>{
   else await bootstrapAuth(true);
 }
 async function logout():Promise<void>{
-  sessionStorage.setItem('labops.manual-logout','1');activeToken='';cancel();session.clearPrivate();useEvidenceUpload().clearPrivate();business.clearPrivate();tasks.value=[];store.resetRun();store.clearOverview();for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);if(key?.startsWith('labops.native-draft:'))localStorage.removeItem(key);}clearAuth();await fetch('/api/auth/logout',{method:'POST'}).catch(()=>undefined);
+  sessionStorage.setItem('labops.manual-logout','1');activeToken='';cancel();session.clearPrivate();useEvidenceUpload().clearPrivate();business.clearPrivate();tasks.value=[];store.resetRun();store.clearOverview();for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);if(key?.startsWith('labops.native-draft:'))localStorage.removeItem(key);}clearAuth();await clientFetch('/api/auth/logout',{method:'POST'}).catch(()=>undefined);
   sessionStorage.removeItem('labops.auth');session.messages={};session.conversations=[];session.startDraft();store.resetRun();authed.value=false;
 }
 const { start, cancel } = useAgentStream();
@@ -156,7 +158,7 @@ const actor = ref<ActorRole>(actorRole());
 
 async function loadTasks(): Promise<void> {
   const owner=business.scopeKey;try {
-    const res = await fetch('/api/tasks', { headers: actorHeaders() });
+    const res = await clientFetch('/api/tasks', { headers: actorHeaders() });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const j = (await res.json()) as { tasks: TaskRow[] };
     if(owner!==business.scopeKey||!authed.value)return;tasks.value = j.tasks ?? [];
@@ -351,7 +353,7 @@ async function onCancel(): Promise<void> {
   if (session.currentId && store.runId) {
     try {
       await Promise.race([
-        fetch(`/api/runs/${encodeURIComponent(store.runId)}/cancel`, { method: 'POST', headers: actorHeaders() }),
+        clientFetch(`/api/runs/${encodeURIComponent(store.runId)}/cancel`, { method: 'POST', headers: actorHeaders() }),
         new Promise((r) => setTimeout(r, 800))
       ]);
     } catch {

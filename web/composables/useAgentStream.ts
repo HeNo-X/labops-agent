@@ -1,3 +1,4 @@
+import {clientFetch} from '../client';
 /**
  * SSE 事件流消费
  * ============================================================================
@@ -51,7 +52,7 @@ export function useAgentStream() {
     let durableTerminal=false;
 
     try {
-      const res = await fetch(
+      const res = await clientFetch(
         opts.conversationId
           ? `/api/conversations/${encodeURIComponent(opts.conversationId)}/messages`
           : '/api/agent/chat',

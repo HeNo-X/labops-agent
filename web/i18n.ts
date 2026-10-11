@@ -370,6 +370,20 @@ Object.assign(en,{
  "数据依据": "Source",
  "准备原始数据修正": "Prepare data correction",
  "本人确认资源修正到原系统": "Confirm resource correction",
- "原始数据修正历史": "Resource correction history"
+ "原始数据修正历史": "Resource correction history",
+ "高级设置": "Advanced",
+ "服务器地址与连接检查": "Server addresses and connection check",
+ "服务器地址由管理员提供。更换服务器会退出当前账号并清理本机业务缓存，需重新登录。": "Server addresses are provided by the administrator. Switching servers signs you out, clears the local business cache and requires signing in again.",
+ "主系统 API": "Main system API",
+ "LabOps API": "LabOps API",
+ "签到分享地址": "Public check-in address",
+ "保存并重新登录": "Save and sign in again",
+ "检查连接": "Check connection",
+ "连接设置": "Connection settings",
+ "正在检查…": "Checking…",
+ "正在保存…": "Saving…",
+ "主系统与 LabOps 均可连接。": "Both the main system and LabOps are reachable.",
+ "有 {count} 项未通过：请核对地址、网络连接与服务器证书。": "{count} check(s) failed: verify the addresses, network and server certificate.",
+ "地址未保存，请检查后重试。": "The address was not saved. Check it and try again."
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

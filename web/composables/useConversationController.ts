@@ -1,3 +1,4 @@
+import {clientFetch} from '../client';
 import {ref,watch} from 'vue';
 import {useRunStore} from '../stores/run';
 import {useSessionStore,type ChatMessage} from '../stores/session';
@@ -25,7 +26,7 @@ export function useConversationController(onAccepted?:(id:string)=>void){
   }catch(e){error.value=(e as Error).message;session.saveDraft(session.currentId||'__new',question);}
   finally{submitting.value=false;}
  }
- async function stop(){const id=run.runId;if(id)await fetch('/api/runs/'+encodeURIComponent(id)+'/cancel',{method:'POST',headers:actorHeaders()}).catch(()=>undefined);stream.cancel();}
+ async function stop(){const id=run.runId;if(id)await clientFetch('/api/runs/'+encodeURIComponent(id)+'/cancel',{method:'POST',headers:actorHeaders()}).catch(()=>undefined);stream.cancel();}
  function dispose(){token='';stream.cancel();activeConversation.value=null;submitting.value=false;}
  function retryText(message:ChatMessage){return message.text;}
  return {submitting,error,activeConversation,submit,stop,dispose,retryText};

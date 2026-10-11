@@ -1,3 +1,4 @@
+import {clientFetch} from '../client';
 import {ref} from 'vue';
 import Targets,{type Target} from '@shared/labops-targets.js';
 import {chooseLayout,saveLayout,type Layout} from './device-routing';
@@ -17,7 +18,7 @@ async function verify(){
   // The credential is removed BEFORE any network operation or edition redirect.
   if(location.hash)history.replaceState(history.state,'',location.pathname+location.search);
   let selected:Target;try{selected=urlTarget();}catch(e){selected={view:'home'};auth.error.value=(e as Error).message;}
-  const response=await fetch(ticket?'/api/auth/sso/exchange':'/api/auth/session',ticket?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket})}:{});
+  const response=await clientFetch(ticket?'/api/auth/sso/exchange':'/api/auth/session',ticket?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticket})}:{});
   if(!response.ok)throw await responseError(response);
   const data=await response.json();if(epoch!==generation)return;
   auth.mode.value=data.mode==='demo'?'demo':'native';
@@ -40,5 +41,5 @@ export function routeEdition():boolean{
  if(layout===current)return false;
  location.replace((layout==='mobile'?'/mobile.html':'/index.html')+(auth.defaultEntry.value?'':'?'+Targets.search(auth.target.value)));return true;
 }
-export function switchEdition(layout:Layout,target:Target=auth.target.value){saveLayout(layout);location.assign((layout==='mobile'?'/mobile.html':'/index.html')+'?'+Targets.search(target));}
+export function switchEdition(layout:Layout,target:Target=auth.target.value){if(window.LabClient?.isNative)return;saveLayout(layout);location.assign((layout==='mobile'?'/mobile.html':'/index.html')+'?'+Targets.search(target));}
 export function clearAuth(){generation++;auth.authenticated.value=false;auth.profile.value=null;auth.error.value='';initial=null;initializePreferences(null);sessionStorage.removeItem('labops.auth');}

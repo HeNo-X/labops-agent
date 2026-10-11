@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import {clientFetch} from '../client';
+
 import {t as tr} from "../i18n";
 /**
  * 办理单（提案）卡 —— ops.v1 的核心交互面
@@ -28,7 +30,7 @@ onMounted(async () => {
   // 活跃轮直接用事件里的提案；历史/已决策的卡向服务端核对权威状态
   if (props.receipt || props.proposal.state !== 'awaiting_confirmation') return;
   try {
-    const res = await fetch(`/api/proposals/${encodeURIComponent(props.proposal.proposalId)}`, { headers: actorHeaders() });
+    const res = await clientFetch(`/api/proposals/${encodeURIComponent(props.proposal.proposalId)}`, { headers: actorHeaders() });
     if (!res.ok) return;
     const j = (await res.json()) as { proposal: Proposal; receipt: OperationReceipt | null };
     state.value = j.proposal;
@@ -44,7 +46,7 @@ async function decide(decision: 'confirm' | 'reject'): Promise<void> {
   error.value = null;
   try {
     const clientRequestId = `dec-${globalThis.crypto?.randomUUID?.() ?? Date.now()}`;
-    const res = await fetch(`/api/tasks/${encodeURIComponent(state.value.taskId)}/decisions`, {
+    const res = await clientFetch(`/api/tasks/${encodeURIComponent(state.value.taskId)}/decisions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...actorHeaders() },
       body: JSON.stringify({
@@ -75,7 +77,7 @@ async function decide(decision: 'confirm' | 'reject'): Promise<void> {
       }
       error.value = `${j.message}`;
       // 版本/状态可能已变化：后台刷新一次权威状态
-      const r2 = await fetch(`/api/proposals/${encodeURIComponent(state.value.proposalId)}`, { headers: actorHeaders() }).catch(() => null);
+      const r2 = await clientFetch(`/api/proposals/${encodeURIComponent(state.value.proposalId)}`, { headers: actorHeaders() }).catch(() => null);
       if (r2?.ok) {
         const j2 = (await r2.json()) as { proposal: Proposal; receipt: OperationReceipt | null };
         state.value = j2.proposal;

@@ -1,3 +1,4 @@
+import {clientFetch} from '../client';
 /**
  * 任务状态机 —— 「运行生命周期」与「结果类型」正交拆分（工作台改造 P0 修复）
  * ============================================================================
@@ -632,7 +633,7 @@ export const useRunStore = defineStore('run', () => {
     overviewLoaded.value = false;
     overviewError.value = null;
     try {
-      const res = await fetch('/api/state', { headers: actorHeaders() });
+      const res = await clientFetch('/api/state', { headers: actorHeaders() });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = (await res.json()) as {
         sourceType: DataSourceType;

@@ -1,3 +1,4 @@
+import {clientFetch} from '../client';
 import {auth} from '../auth/bootstrap';import {actorRole} from '../actor';
 import {responseError} from '../http';
 import { actorHeaders } from '../actor';
@@ -193,7 +194,7 @@ export const useSessionStore = defineStore('session', () => {
     listLoading.value = true;
     listError.value = null;
     try {
-      const res = await fetch('/api/conversations', {headers: actorHeaders()});
+      const res = await clientFetch('/api/conversations', {headers: actorHeaders()});
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const j = (await res.json()) as { conversations: ConvSummary[] };
       if(generation!==listGeneration||identity!==epoch)return;
@@ -240,7 +241,7 @@ export const useSessionStore = defineStore('session', () => {
     if(!messages.value[id])messagesLoading.value=true;
     try{
       const cursor=syncCursors.get(id),q=cursor?'?'+new URLSearchParams(cursor):'';
-      const res=await fetch(`/api/conversations/${encodeURIComponent(id)}${q}`,{headers:actorHeaders(),signal:controller.signal});
+      const res=await clientFetch(`/api/conversations/${encodeURIComponent(id)}${q}`,{headers:actorHeaders(),signal:controller.signal});
       if(!res.ok)throw await responseError(res);
       const data=await res.json() as {mode?:'chat'|'task';messages:Record<string,unknown>[];messageIds?:string[];cursor?:string;revision?:string;reset?:boolean;activeRunId?:string|null};
       if(identity!==epoch)return;
@@ -271,7 +272,7 @@ export const useSessionStore = defineStore('session', () => {
    */
   async function ensureConversation(question: string, existingId: string | null, clientRequestId: string, mode: 'chat' | 'task' = 'task'): Promise<string> {
     if (existingId) return existingId;
-    const res = await fetch('/api/conversations', { method: 'POST', headers: { ...actorHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
+    const res = await clientFetch('/api/conversations', { method: 'POST', headers: { ...actorHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
     if (!res.ok) throw await responseError(res);
     const { id } = (await res.json()) as { id: string };
     saveCurrentId(id);
@@ -317,7 +318,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function removeConversation(id: string): Promise<void> {
-    const response=await fetch(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: actorHeaders() });
+    const response=await clientFetch(`/api/conversations/${encodeURIComponent(id)}`, { method: 'DELETE', headers: actorHeaders() });
     if(!response.ok)throw await responseError(response);
     delete messages.value[id];
     delete messagesErrors.value[id];
@@ -334,7 +335,7 @@ export const useSessionStore = defineStore('session', () => {
   async function applyRoundAction(id: string, path: string, init: RequestInit): Promise<RoundActionResult> {
     let payload: Record<string, unknown>;
     try {
-      const res = await fetch(path, init);
+      const res = await clientFetch(path, init);
       payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       if (!res.ok) {
         return { ok: false, message: String(payload['message'] ?? `HTTP ${res.status}`) };
@@ -375,7 +376,7 @@ export const useSessionStore = defineStore('session', () => {
   // 服务端 PATCH 同样返回 409 mode_locked。此处刻意不保留 setConversationMode，
   // 避免将来有人顺手把入口加回来而绕过服务端规则。
   async function renameConversation(id: string, title: string): Promise<void> {
-    const response=await fetch(`/api/conversations/${encodeURIComponent(id)}`, {
+    const response=await clientFetch(`/api/conversations/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { ...actorHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ title })

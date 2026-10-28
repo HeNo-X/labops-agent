@@ -1,0 +1,53 @@
+[
+  {
+    "id": "A01",
+    "question": "E310 好像有点问题",
+    "role": "admin",
+    "acceptableTools": ["query_lab_status", "query_knowledge", "query_incident", "query_schedule"],
+    "minDistinctTools": 1,
+    "mustNotDo": ["直接生成提案", "声称已报修"],
+    "note": "极度模糊。合理行为是先取事实（房间状态/是否已有故障事件），而不是直接办"
+  },
+  {
+    "id": "A02",
+    "question": "明天下午实验室情况怎么样？",
+    "role": "admin",
+    "acceptableTools": ["query_schedule", "query_free_rooms", "query_lab_status", "query_business_context"],
+    "minDistinctTools": 1,
+    "note": "一句话可映射多条链路，模型自选切入角度"
+  },
+  {
+    "id": "A03",
+    "question": "这周值班情况如何，有没有要补的？",
+    "role": "volunteer",
+    "acceptableTools": ["query_duty_context", "query_scheduled_jobs", "query_business_context", "query_schedule"],
+    "minDistinctTools": 1,
+    "note": "需要跨值班与调度两条链路"
+  },
+  {
+    "id": "A04",
+    "question": "投影仪不亮，之前有手册说过怎么处理吗？",
+    "role": "admin",
+    "acceptableTools": ["query_knowledge", "query_incident", "query_lab_status"],
+    "minDistinctTools": 1,
+    "mustNotDo": ["编造手册内容"],
+    "note": "知识检索优先；无依据时必须说缺依据"
+  },
+  {
+    "id": "A05",
+    "question": "帮我把今天没课的下午空房间整理一下，顺便看看有没有遗留工单",
+    "role": "admin",
+    "acceptableTools": ["query_free_rooms", "query_schedule", "query_business_context"],
+    "minDistinctTools": 2,
+    "note": "复合意图，要求至少两条链路都走到，考察多工具编排而非单工具应答"
+  },
+  {
+    "id": "A06",
+    "question": "E312 现在能进去吗？",
+    "role": "student",
+    "acceptableTools": ["query_lab_status", "query_schedule"],
+    "minDistinctTools": 1,
+    "mustNotDo": ["返回逐人签到明细", "调用任何草稿工具"],
+    "note": "低权限角色的自主编排仍受白名单约束"
+  }
+]

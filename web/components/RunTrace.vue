@@ -8,12 +8,25 @@ import {t as tr} from "../i18n";
  *  所以这里的每一行都来自真实 SSE 事件（run_started / tool_started / tool_result /
  *  run_completed / run_failed），没有任何一行是"假装模型在想"的内容。
  */
+import { computed } from 'vue';
 import { useRunStore } from '../stores/run';
 import type { TraceStep } from '../stores/run';
 import StatusTag from './StatusTag.vue';
 import type { Tone } from './ui-types';
 
 const store = useRunStore();
+
+/** 本轮由模型自主选择的工具序列（去重保序），用于说明"不是固定流水线" */
+const chosenTools = computed(() => {
+  const seen: string[] = [];
+  for (const s of store.trace) {
+    if (s.kind !== 'tool' || !s.title) continue;
+    const name = s.title.replace(/\s.*(?:开始|完成|失败|进行中).*/, '').trim();
+    if (!seen.includes(name)) seen.push(name);
+  }
+  return seen;
+});
+const toolSteps = computed(() => store.trace.filter((s) => s.kind === 'tool').length);
 
 function toneOf(s: TraceStep): Tone {
   if (s.status === 'failed') return 'danger';
@@ -65,6 +78,13 @@ function labelOf(s: TraceStep): string {
       </li>
     </ol>
 
+    <footer v-if="store.trace.length" class="trace__foot">
+      <p class="trace__note">
+        {{tr("本轮由模型在授权工具集内自主编排，共")}}{{ toolSteps }}{{tr("步；调用顺序与步数不是固定流水线。执行权始终在你手里。")}}
+      </p>
+      <p v-if="chosenTools.length" class="trace__tools">{{tr("本轮用到的工具：")}}{{ chosenTools.join("、") }}</p>
+    </footer>
+
     <p v-else class="trace__empty"> {{tr("还没有任务。在下方命令栏输入一句话开始，例如「")}}{{ store.exampleQuestions[0] }}」。
     </p>
 
@@ -88,6 +108,22 @@ function labelOf(s: TraceStep): string {
   margin: 0 0 var(--sp-3);
   color: var(--text-faint);
   font-size: calc(var(--ui-font-size) * 0.92308);
+}
+.trace__foot {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+.trace__note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: calc(var(--ui-font-size) * 0.92308);
+}
+.trace__tools {
+  margin: var(--sp-1) 0 0;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: calc(var(--ui-font-size) * 0.88462);
 }
 .trace__empty {
   margin: 0;

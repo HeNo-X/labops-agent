@@ -24,6 +24,7 @@
     "check:rules": "node scripts/sync-rules.mjs --check",
     "demo": "node scripts/run-review.mjs",
     "demo:seed": "node scripts/create-review-fixture.mjs",
+    "mock:vision": "node scripts/mock-vision-feed.mjs",
     "test:review-browser": "node tests/review-browser.mjs",
     "test:legacy:acceptance": "node tests/acceptance.ts",
     "test:legacy:browser": "node tests/browser.ts",

@@ -34,6 +34,8 @@
     "test:rounds-browser": "node tests/rounds-browser.mjs",
     "eval:release": "node scripts/evaluate-release.mjs",
     "eval:retrieval": "node scripts/evaluate-retrieval.mjs",
+    "mcp": "node server/mcp-server.ts",
+    "mcp:selftest": "node server/mcp-server.ts --self-test",
     "test:v6-browser": "node tests/v6-browser.mjs",
     "test:v7-browser": "node tests/v7-browser.mjs",
     "test:nginx": "node tests/nginx-acceptance.mjs",

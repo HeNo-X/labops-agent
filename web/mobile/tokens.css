@@ -1,0 +1,52 @@
+/* ============================================================================
+   移动端专用视觉令牌 —— 「软件感」呈现层（批次 A）
+   ============================================================================
+   与桌面 tokens.css 的关系：
+     · 基础变量（色板/字体/语义色/间距）继续用 styles/tokens.css；
+     · 本文件只在 .mobile-shell 作用域内声明移动端自己的圆角/阴影/动效刻度，
+       以及分层表面用的页面底色 —— 桌面端完全不受影响。
+   分层模型（对应方案 4.1）：
+     页面 surface-2 → 卡片 surface + 一级阴影 → 弹层 surface + 二级阴影
+   维护约定：新增视觉属性先在这里建令牌，再在 mobile.css 使用；
+     禁止在视图/组件里写死 px 阴影与时长。
+   ========================================================================== */
+
+.mobile-shell {
+  /* 圆角刻度 */
+  --m-radius-card: 14px;   /* 卡片 / 大按钮容器 */
+  --m-radius: 10px;        /* 按钮 / 输入 / 小卡 */
+  --m-radius-sm: 8px;      /* 行内元素 */
+  --m-radius-sheet: 20px;  /* 底部弹层顶部圆角 */
+  --m-radius-pill: 999px;
+
+  /* 阴影（分层表面；深色主题在下方覆盖为更深投影） */
+  --m-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 10px rgba(0, 0, 0, 0.04);
+  --m-shadow-float: 0 2px 6px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.10);
+  --m-shadow-seg: 0 1px 2px rgba(0, 0, 0, 0.10);
+
+  /* 分层表面：页面底与卡片面（浅色：灰底白卡；深色由 tokens 的 surface 体系天然反转） */
+  --m-page: var(--surface-2);
+  --m-card: var(--surface);
+  --m-tonal: var(--surface-3);
+  --m-hairline: color-mix(in srgb, var(--border) 72%, transparent);
+
+  /* 动效刻度（批次 B 起全量启用；本批次仅按压反馈/分段滑块/Toast 使用）
+     全部挂在 .mobile-shell 上，便于 reduced-motion 一键关闭 */
+  --m-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --m-press: 90ms;
+  --m-fast: 180ms;
+  --m-page-t: 240ms;
+  --m-sheet-t: 260ms;
+
+  /* 触达与间距 */
+  --m-touch: 44px;
+  --m-gap: 12px;
+  --m-page-x: 16px;
+}
+
+[data-theme='dark'] .mobile-shell {
+  /* 深色下阴影更重才可见；卡片靠 surface 提亮 + 投影区分层 */
+  --m-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 10px rgba(0, 0, 0, 0.30);
+  --m-shadow-float: 0 2px 6px rgba(0, 0, 0, 0.45), 0 8px 24px rgba(0, 0, 0, 0.50);
+  --m-shadow-seg: 0 1px 3px rgba(0, 0, 0, 0.5);
+}

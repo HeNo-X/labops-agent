@@ -62,4 +62,15 @@ test('V6 B16 主系统钥匙摘要和Agent真实文字同源',async()=>{const a=
 test('V6 C07/B14 手机共用正式工单预览→版本冲突→同编号回执',async()=>{const a=await login(),c=await a.call('/api/conversations',{mode:'task'}),body={kind:'issue.create',roomId:'fixture-e310',description:'隔离移动端工单测试',conversationId:c.data.id},p=await a.call('/api/business/proxy/workflow/preview',body);assert.equal(p.status,200);const bad=await a.call('/api/business/proxy/plans/commit',{planId:p.data.plan.id,version:999,conversationId:c.data.id});assert.equal(bad.status,409);const good=await a.call('/api/business/proxy/plans/commit',{planId:p.data.plan.id,version:1,conversationId:c.data.id});assert.equal(good.status,200);const again=await a.call('/api/business/proxy/plans/commit',{planId:p.data.plan.id,version:1,conversationId:c.data.id});assert.equal(again.data.receipt.operationId,good.data.receipt.operationId);const source=await main(),ctx=await source.call('/api/integration/context');assert.ok(ctx.data.issues.some((i:any)=>i.id===good.data.receipt.objects[0].id));});
 test('V6 C08 附件重复requestId返回同编号，改内容拒绝，签名伪造拒绝',async()=>{const a=await login(),body={targetKind:'room',targetId:'fixture-e310',fileName:'evidence.txt',mimeType:'text/plain',dataBase64:Buffer.from('移动端证据').toString('base64'),requestId:crypto.randomUUID()},one=await a.call('/api/business/proxy/evidence/attachments',body),two=await a.call('/api/business/proxy/evidence/attachments',body);assert.equal(one.status,200);assert.equal(two.data.attachment.id,one.data.attachment.id);assert.equal(two.data.replayed,true);assert.equal((await a.call('/api/business/proxy/evidence/attachments',{...body,dataBase64:Buffer.from('changed').toString('base64')})).status,409);assert.equal((await a.call('/api/business/proxy/evidence/attachments',{...body,requestId:crypto.randomUUID(),mimeType:'image/png'})).status,400);});
 test('V6 C02/C11/C12 两个入口、manifest和图标可访问，入口/API不缓存',async()=>{for(const p of ['/index.html','/mobile.html','/mobile.webmanifest','/mobile-icon-192.png','/mobile-icon-512.png']){const r=await request(base+p);assert.equal(r.status,200);if(p.endsWith('.html')){assert.match(r.headers.get('cache-control')||'',/no-cache|no-store/);assert.match(r.data,/assets/);}}const r=await request(base+'/mobile.webmanifest');assert.equal(r.data.start_url.split('?')[0],'/mobile.html');const a=await login(),s=await a.call('/api/auth/session');assert.match(s.headers.get('cache-control')||'',/no-store/);assert.equal((await request(base+'/server/index.ts')).status,403);});
-after(async()=>{await new Promise<void>(r=>agent.close(()=>r()));const exited=new Promise(r=>native.once('exit',r));native.kill('SIGTERM');await exited;fs.rmSync(temporary,{recursive:true,force:true});});
+/**
+ * Windows：临时目录可能被仍在运行的服务进程占用（本机常驻 dev/start 进程即会如此），
+ * 重试也拿不回来。清理失败只该泄漏一个临时目录，不该把已通过的测试判成红灯。
+ */
+function removeTemp(target: string) {
+  for (let i = 0; i < 10; i++) {
+    try { fs.rmSync(target, { recursive: true, force: true }); return; }
+    catch { const t = Date.now(); while (Date.now() - t < 100) { /* 稍等再试 */ } }
+  }
+  console.warn(`[teardown] 临时目录未清理（被占用，不影响结论）：${target}`);
+}
+after(async()=>{await new Promise<void>(r=>agent.close(()=>r()));const exited=new Promise(r=>native.once('exit',r));native.kill('SIGTERM');await exited;removeTemp(temporary);});

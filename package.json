@@ -36,7 +36,9 @@
     "test:v6-browser": "node tests/v6-browser.mjs",
     "test:v7-browser": "node tests/v7-browser.mjs",
     "test:nginx": "node tests/nginx-acceptance.mjs",
-    "test:v8-browser": "node tests/v8-browser.mjs"
+    "test:v8-browser": "node tests/v8-browser.mjs",
+    "pack:audit": "python ../tools/audit-package.py",
+    "pack:submit": "python ../tools/package-labops-agent.py"
   },
   "dependencies": {
     "@vue/devtools-api": "8.2.1",

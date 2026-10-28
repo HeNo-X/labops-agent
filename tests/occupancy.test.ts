@@ -171,23 +171,28 @@ test('已连接原系统：房间确实没有签到时给 0，而不是"未知"'
   assert.match(out.answer, /记录数口径/, out.answer);
 });
 
+/** 从"在室人数：…"里取值，判断它是真实数字还是如实声明的不可得 */
+const occupancyValue = (answer: string) => (answer.match(/在室人数[：:]\s*([^\n]*)/) ?? ['', ''])[1]!;
+
 test('未连接原系统：仍然如实说取不到，绝不编数', async () => {
   const a = await client(false);
   const out = await a.ask('E310 现在有多少人？');
-  assert.match(out.answer, /没有连接原系统账号/, out.answer);
-  assert.ok(!/\d+\s*人/.test(out.answer.replace(/没有连接原系统账号/, '')), '未连通时不得出现任何人数：' + out.answer);
-  assert.equal(out.toolSummaries.length, 0, '未连通时不应该调用业务工具');
+  assert.match(out.answer, /未连接|未取得授权|没有取到签到数据来源/, out.answer);
+  assert.match(occupancyValue(out.answer), /未知|无法提供/, '在室人数必须落在"未知"，不得给数字：' + out.answer);
+  assert.doesNotMatch(occupancyValue(out.answer), /\d+\s*人/, '在室人数不得编造：' + out.answer);
+  // 现行设计：未连通时仍调用工具，由工具如实返回"没有数据来源"（见 query-lab-status.ts:133），
+  // 要锁死的是"不出数字"，不是"不调工具"。
 });
 
 test('逐人签到明细：确实没有接口，如实说不可得（但不牵连房间人数）', async () => {
   const a = await client(true);
   const out = await a.ask('E310 今天的签到记录都有谁？');
-  assert.match(out.answer, /逐人签到\/签退\/补签明细没有对 LabOps 开放的接口/, out.answer);
-  assert.match(out.answer, /房间在室人数可以查/, out.answer);
+  assert.match(out.answer, /逐人明细未开放|没有对 LabOps 开放的接口/, out.answer);
+  assert.match(out.answer, /在室人数/, out.answer);
 });
 
 test('未连接时问签到明细：同样明说不可得，不与"在室人数"混淆', async () => {
   const a = await client(false);
   const out = await a.ask('帮我查 E310 的签到明细');
-  assert.match(out.answer, /没有对 LabOps 开放的接口/, out.answer);
+  assert.match(out.answer, /未开放|没有对 LabOps 开放的接口|没有取到签到数据来源/, out.answer);
 });

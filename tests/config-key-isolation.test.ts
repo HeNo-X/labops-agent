@@ -18,7 +18,9 @@ import { fileURLToPath } from 'node:url';
 // @ts-expect-error 测试入口是普通 JS，无构建产物；只用到它导出的两个函数
 import { sanitizedEnv } from '../scripts/run-tests.mjs';
 
-const CANARY = 'sk-CANARY-DO-NOT-USE-IN-REAL-CALLS-0123456789';
+// 刻意不用 `sk-` 前缀：作品包审计器会拦任何 sk- 形态字符串（宁误拦不漏放），
+// 测试替身没必要长得像真凭据。
+const CANARY = 'CANARY-NOT-A-REAL-KEY-0123456789abcdef';
 const root = fileURLToPath(new URL('..', import.meta.url));
 
 test('净化函数摘掉全部三把模型 Key，其它变量原样保留', () => {

@@ -207,6 +207,9 @@ export const useRunStore = defineStore('run', () => {
     if (d) list.push(`${room} ${d} 有哪些课？`);
     list.push(`${other} 现在开放吗？`);
     list.push(`明天下午第二大节哪些实验室空着？`);
+    // 首屏示例原本全是只读查询，评委看不到本项目最有区分度的"提案→本人确认"链路。
+    // 这里补一条办理类示例，并在界面注明它只会生成待确认提案、不会直接改数据。
+    list.push(`${room} 投影仪没有信号，帮我报修`);
     list.push(`那 ${other} 呢？`);
     return list;
   });

@@ -76,6 +76,16 @@ export interface AppConfig {
     temperature: number;
     enableThinking: boolean;
   };
+  /**
+   * 模型熔断：连续失败达阈值后让该模型冷却一段时间，避免每轮都白等一次。
+   * 只统计"未吐出内容前"的失败，见 server/llm/circuit.ts。
+   */
+  circuit: {
+    enabled: boolean;
+    failureThreshold: number;
+    cooloffMs: number;
+    maxCooloffMs: number;
+  };
   agent: {
     /** 单次任务最多几步（工具调用 + 收尾）。硬上限，不允许无界循环（C5） */
     maxSteps: number;
@@ -144,6 +154,12 @@ export function getConfig(): AppConfig {
       baseUrl: str('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/+$/, ''),
       models: str('DASHSCOPE_MODELS', 'deepseek-v4-flash-0731,qwen3.8-max,qwen3.8-2.4t-a95b,deepseek-v4-pro-0813,kimi-k3,qwen3.8-27b,glm-5.3')
         .split(',').map((s) => s.trim()).filter(Boolean)
+    },
+    circuit: {
+      enabled: bool('LLM_CIRCUIT_ENABLED', true),
+      failureThreshold: int('LLM_CIRCUIT_THRESHOLD', 3, 1, 10),
+      cooloffMs: int('LLM_CIRCUIT_COOLLOFF_MS', 20000, 1000, 600000),
+      maxCooloffMs: int('LLM_CIRCUIT_MAX_COOLLOFF_MS', 300000, 5000, 3600000)
     },
     agent: {
       maxSteps: int('AGENT_MAX_STEPS', 6, 1, 12),

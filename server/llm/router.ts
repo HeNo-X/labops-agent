@@ -11,6 +11,7 @@
  *  · 未配置时返回空数组 → 上层按既有的 demo 规则引擎兜底，不会静默假装用了大模型。
  */
 import { getConfig } from '../config.ts';
+import { selectableProviders, recordFailure, recordSuccess, circuitStatus } from './circuit.ts';
 import { streamChat, AgnesError, type AgnesStreamEvent, type StreamOptions } from './agnes.ts';
 import type { Logger } from '../obs/trace.ts';
 
@@ -90,9 +91,15 @@ export async function* streamChatWithFallback(
     );
   }
 
+  // 冷却中的模型直接跳过；全链都在冷却时按原链放行（熔断不得成为新的不可用来源）
+  const { ready, skipped, allCooling } = selectableProviders(list);
+  if (skipped.length) {
+    log?.warn('llm_circuit_skip', { mode, skipped, allCooling });
+  }
+
   let lastError: unknown = null;
-  for (let i = 0; i < list.length; i += 1) {
-    const provider = list[i]!;
+  for (let i = 0; i < ready.length; i += 1) {
+    const provider = ready[i]!;
     onAttempt?.(provider);
     let emitted = false;
     try {
@@ -100,19 +107,30 @@ export async function* streamChatWithFallback(
         emitted = true;
         yield ev;
       }
+      recordSuccess(provider);
       return;
     } catch (err) {
       lastError = err;
-      if (emitted) throw err; // 已经吐过内容 → 不换模型，直接把错误抛给上层
+      if (emitted) {
+        // 已经吐过内容 → 不换模型，直接把错误抛给上层；
+        // 也**不记熔断**：中途断流多半与本次回答有关，不该让该模型替后续所有请求背锅
+        throw err;
+      }
+      recordFailure(provider);
       log?.warn('llm_provider_failed', {
         mode,
         provider: provider.name,
         model: provider.model,
         attempt: i + 1,
-        of: list.length,
+        of: ready.length,
         error: (err as Error)?.message ?? String(err)
       });
     }
   }
-  throw lastError ?? new AgnesError('llm_unavailable', '大模型链上全部模型均不可用。', null, true);
+  throw lastError ?? new AgnesError('llm_unavailable', '大模型链上模型均不可用。', null, true);
+}
+
+/** 熔断现状（不含密钥）—— 供 /api/agent/health 与界面提示"某模型暂时跳过" */
+export function circuitHealth(mode: 'chat' | 'task') {
+  return { mode, providers: circuitStatus(providersForMode(mode)) };
 }

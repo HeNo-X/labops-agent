@@ -66,7 +66,8 @@ export const RESERVED_RUN_EVENT_TYPES = ['run_cancelled', 'thinking'] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number] | (typeof RESERVED_RUN_EVENT_TYPES)[number];
 
-/** 每个事件的统一信封。seq 单调递增，供前端去重与乱序重排。 */
+/** 每个事件的统一信封。seq 单调递增，前端据此**丢弃已见过的旧事件**（见 shared/sse.js）；
+ *  不做乱序重排 —— 迟到的小 seq 直接丢，因此上层依赖"终态事件必达"而非"顺序可恢复"。 */
 export interface RunEvent<T extends RunEventType = RunEventType, P = unknown> {
   /** 同一事件流内从 0 单调递增 */
   seq: number;

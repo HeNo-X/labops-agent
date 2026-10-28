@@ -253,7 +253,10 @@ export function listConversations(limit = 100): ConversationRow[] {
     .prepare(
       `SELECT c.id, c.title, c.lastActivityAt, c.mode,
               (SELECT COUNT(*) FROM messages m WHERE m.conversationId = c.id) AS messageCount,
-              (SELECT m2.text FROM messages m2 WHERE m2.conversationId = c.id ORDER BY m2.ordinal DESC LIMIT 1) AS preview
+              (SELECT CASE WHEN json_extract(m2.meta,'$.headline') IS NOT NULL
+                           THEN json_extract(m2.meta,'$.headline')
+                           ELSE substr(m2.text,1,80) END
+                 FROM messages m2 WHERE m2.conversationId = c.id ORDER BY m2.ordinal DESC LIMIT 1) AS preview
          FROM conversations c
         WHERE c.deletedAt IS NULL AND (? IS NULL OR c.ownerId = ?)
         ORDER BY c.lastActivityAt DESC

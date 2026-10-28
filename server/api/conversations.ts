@@ -520,6 +520,8 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         sourceType,
         ms: elapsedMs,
         toolCalls,
+        // U07：一行结论摘要（工具 summary），会话列表预览优先取它，避免拼入业务口径长文
+        headline:(toolCalls as Array<{ok?:boolean|null;summary?:string}>).filter(t=>t.ok&&typeof t.summary==='string'&&t.summary).at(-1)?.summary??null,
         error: failedError,
         clientRequestId,
         usage: completedPayload?.['usage'] ?? null,

@@ -1,7 +1,8 @@
 import { isBusinessConnected, effectiveRole } from '../business/bridge.ts';
 import { runKnowledge } from './knowledge.ts';
+import { runAnalyzeEvidenceImage } from './analyze-evidence-image.ts';
 import { prepareSchedule, queryDuty, queryBusiness, prepareWorkflow, queryIncident, prepareIncident,queryScheduled,prepareScheduled } from './business.ts';
-import type { KnowledgeResult, BusinessPlanResult } from '../../shared/types.ts';
+import type { KnowledgeResult, BusinessPlanResult, EvidenceObservationResult } from '../../shared/types.ts';
 /**
  * 工具注册表 —— JSON Schema + 白名单 + 参数类型校验 + 人话摘要
  * ============================================================================
@@ -81,6 +82,7 @@ export type ToolExecution =
   | { ok: true; resultKind: 'operations_report'; result: OperationsReportResult; summary: string }
   | { ok: true; resultKind:'knowledge'; result:KnowledgeResult; summary:string }
   | { ok: true; resultKind:'business_plan'; result:BusinessPlanResult; summary:string }
+  | { ok: true; resultKind:'evidence_observation'; result:EvidenceObservationResult; summary:string }
   | { ok: false; code: string; message: string; suggestions: string[]; summary: string };
 
 // ===========================================================================
@@ -442,6 +444,7 @@ export const REGISTRY: RegisteredTool[] = [
   {spec:{name:'query_scheduled_jobs',description:'读取当前账号的定时规则、已保存执行结果或明日准备包。',parameters:{type:'object',properties:{view:{type:'string',enum:['rules','results','preparation']}},additionalProperties:false},danger:false},execute:queryScheduled,effect:'read'},
   {spec:{name:'prepare_scheduled_job',description:'仅预览固定模板定时规则，未来3次时间、样例、对象和效果必须让本人确认。不能调用确认接口；不能设置脚本、任意URL、自动调课或自动验收。普通用户仅能提醒自己。',parameters:{type:'object',properties:{action:{type:'string',enum:['create','change','pause','resume','archive','run_now']},jobId:{type:'string'},expectedVersion:{type:'integer'},reason:{type:'string'},spec:{type:'object',properties:{name:{type:'string'},kind:{type:'string',enum:['daily_report','tomorrow_courses','duty_reminder','due_followup','weekly_report','resource_risk','closure_expiry','notice_reminder']},timezone:{type:'string',enum:['Asia/Shanghai']},trigger:{type:'object',properties:{type:{type:'string',enum:['daily','weekly','once','duty','cron']},time:{type:'string'},weekdays:{type:'array',items:{type:'integer'}},at:{type:'string'},minutesBefore:{type:'integer'},expression:{type:'string'}},required:['type'],additionalProperties:false},calendarPolicy:{type:'string',enum:['all_days','teaching_days']},params:{type:'object'},recipients:{type:'array',items:{type:'object'}},approvedEffects:{type:'array',items:{type:'string',enum:['report','inbox']}}},required:['kind','trigger'],additionalProperties:false}},additionalProperties:false},danger:false},execute:prepareScheduled,effect:'draft'},
   {spec:{name:'query_knowledge',description:'检索当前软件操作说明，返回版本、生效日期与段落引用；未导入学校制度或厂家手册时明确缺依据。',parameters:{type:'object',properties:{query:{type:'string'}},required:['query'],additionalProperties:false},danger:false},execute:runKnowledge,effect:'read'},
+  {spec:{name:'analyze_evidence_image',description:'把**已上传到原系统的证据照片**送视觉模型做初判，返回结构化观察（设备类型、可见征象、铭牌可见文字、严重度初判、置信度、画面无法确认的事项）。只读：不创建工单、不推进任何业务状态、不替代人工验收。只能分析 attachmentIds 指向的已存在附件（先经 query 或上传拿到编号），**不接受图片内容本身**；未连接原系统或未配置视觉模型时会如实返回拿不到，此时不得凭文件名或猜测描述照片内容。回答"这张照片说明什么""照片里是什么故障"时用本工具，不要自行编造画面细节。',parameters:{type:'object',properties:{attachmentIds:{type:'array',items:{type:'string',pattern:'^attachment-[a-f0-9-]{36}$'},description:'要分析的照片编号，来自附件上传或列表结果'},focus:{type:'string',maxLength:200,description:'可选：本次想确认的可见现象，如"指示灯状态""屏幕是否有裂纹"'}},required:['attachmentIds'],additionalProperties:false},danger:false},execute:runAnalyzeEvidenceImage,effect:'read'},
   {spec:{name:'query_duty_context',description:'查询经原系统登录验证的本人正式排班，未连接或未配置时明确无法确定；不从历史签到猜测。',parameters:{type:'object',properties:{},additionalProperties:false},danger:false},execute:queryDuty,effect:'read'},
   {spec:{name:'prepare_schedule_adjustment',description:'为原系统管理员比较指定日期调课候选或保存待确认方案。先用 query_schedule 获取 timetableId。未给目标时返回候选；仅符合已核实约束才可保存。确认必须由用户在LabOps消息卡点击，本工具不执行调课。',parameters:{type:'object',properties:{date:{type:'string'},timetableId:{type:'string'},taskId:{type:'string'},candidateSetId:{type:'string'},supersedePlanId:{type:'string'},toLabId:{type:'string'},toPeriodKey:{type:'string',enum:[...PERIOD_KEYS]},reason:{type:'string'}},required:['date','timetableId'],additionalProperties:false},danger:false},execute:prepareSchedule,effect:'draft'},
   { spec: QUERY_SCHEDULE_SPEC, execute: executeQuerySchedule, effect: 'read' },

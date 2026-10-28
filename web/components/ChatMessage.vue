@@ -22,6 +22,8 @@ import BusinessPlanCard from './BusinessPlanCard.vue';
 import {useSessionStore} from '../stores/session';
 import OperationCard from './OperationCard.vue';
 import ReportCard from './ReportCard.vue';
+import EvidenceObservationCard from './EvidenceObservationCard.vue';
+import type { EvidenceObservationResult } from '@shared/types';
 import type { Tone } from './ui-types';
 
 const props = defineProps<{ msg: ChatMessage }>();
@@ -53,6 +55,7 @@ const reportArtifacts = computed(() =>
 );
 
 const knowledgeArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind==='knowledge').map(t=>t.result as KnowledgeResult));
+const evidenceArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind==='evidence_observation'&&t.result).map(t=>({key:t.toolCallId,result:t.result as EvidenceObservationResult})));
 const businessArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind==='business_plan'&&t.result).map(t=>({key:t.toolCallId,result:t.result as BusinessPlanResult})));
 
 const isUser = computed(() => props.msg.role === 'user');
@@ -200,6 +203,7 @@ const engineTitle = computed(() => {
         @decided="emit('decided')"
       />
       <ReportCard v-for="a in reportArtifacts" :key="a.key" :report="a.report" />
+      <EvidenceObservationCard v-for="a in evidenceArtifacts" :key="'evo-'+a.key" :result="a.result" />
       <TaskResult v-for="a in queryArtifacts" :key="a.key" :artifact="{ kind: a.kind, result: a.result }" :engine="(msg.engine as EngineType | null | undefined)" />
       </template><p v-if="msg.error" class="msg__err" role="alert"> {{tr("失败原因：")}}{{ msg.error.code }} {{ msg.error.message }}<span v-if="msg.error.hint" class="msg__errhint">{{tr("建议：")}}{{ msg.error.hint }}</span>
       </p>

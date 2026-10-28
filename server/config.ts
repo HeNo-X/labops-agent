@@ -82,6 +82,20 @@ export interface AppConfig {
     /** 单次任务墙钟上限 */
     wallClockMs: number;
   };
+  /**
+   * 视觉理解（多模态证据）。独立于任务/聊天两条主链路：
+   * 主链路的模型不接图，图只走这一条受控通道，产出结构化观察而非自由文本。
+   * 默认复用 DashScope 端点与 Key，但**模型名单独配**（聊天链那 7 个是纯文本模型）。
+   * 未配置 Key ⇒ 工具如实返回"视觉未启用"，绝不用规则引擎冒充看图结果。
+   */
+  vision: {
+    apiKey: string;
+    model: string;
+    baseUrl: string;
+    timeoutMs: number;
+    maxImages: number;
+    maxImageBytes: number;
+  };
   data: {
     /** true ⇒ 直接读真实 state.json（实时数据），仅本地/校内演示 */
     live: boolean;
@@ -135,6 +149,14 @@ export function getConfig(): AppConfig {
       maxSteps: int('AGENT_MAX_STEPS', 6, 1, 12),
       wallClockMs: int('AGENT_WALL_CLOCK_MS', 60000, 5000, 600000)
     },
+    vision: {
+      apiKey: str('VISION_API_KEY') || str('DASHSCOPE_API_KEY'),
+      model: str('VISION_MODEL', 'qwen-vl-max-latest'),
+      baseUrl: str('VISION_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/+$/, ''),
+      timeoutMs: int('VISION_TIMEOUT_MS', 30000, 3000, 120000),
+      maxImages: int('VISION_MAX_IMAGES', 3, 1, 8),
+      maxImageBytes: int('VISION_MAX_IMAGE_BYTES', 3 * 1024 * 1024, 1024, 8 * 1024 * 1024)
+    },
     data: {
       live: bool('LIVE_DATA', false),
       liveStatePath: str('LABOPS_LIVE_STATE', path.join(SERVER_DIR, 'data', 'live', 'state.json')),
@@ -162,6 +184,7 @@ export function describeConfig(c: AppConfig): string[] {
     `模型分流        : 任务模式→Agnes${c.agnes.apiKey ? '' : '（未配置，回落规则引擎）'}；聊天模式→DashScope`,
     `DashScope 聊天链: ${c.dashscope.apiKey ? c.dashscope.models.join(' → ') + '（按序 fallback）' : '未配置 → 聊天模式回落规则引擎'}`,
     `步数/墙钟上限   : ${c.agent.maxSteps} 步 / ${c.agent.wallClockMs} ms`,
+    `视觉理解        : ${c.vision.apiKey ? `${c.vision.model} @ ${c.vision.baseUrl}（单次最多 ${c.vision.maxImages} 图）` : '未配置 → 证据照片不入模，工具如实说明不可得'}`,
     `认证模式        : ${process.env.LABOPS_AUTH_MODE||'native'}`,
     ...((process.env.LABOPS_AUTH_MODE||'native')==='native'?['业务身份        : 主系统登录验证并自动委托，每次请求核验实际角色与班级']: [
       `实时数据开关    : ${c.data.live ? '开（LIVE_DATA=1，直接读 state.json）' : '关（脱敏快照）'}`,

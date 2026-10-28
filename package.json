@@ -16,7 +16,7 @@
     "start": "node server/index.ts",
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
     "seed": "node seed/make-snapshot.ts",
-    "test": "node --test --test-concurrency=1 tests/*.test.ts",
+    "test": "node scripts/run-tests.mjs",
     "test:acceptance": "node --test tests/bridge-http.test.ts tests/stream-facts.test.ts",
     "test:browser": "node tests/review-browser.mjs",
     "test:all": "npm run check:rules && npm run build && npm test && npm run test:review-browser && npm run test:next-browser && npm run test:v4-browser && npm run test:v5-browser && npm run test:rounds-browser && npm run test:v6-browser && npm run test:v7-browser && npm run test:v8-browser",

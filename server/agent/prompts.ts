@@ -8,7 +8,7 @@
  *  评测结果与它绑定，否则"改了 prompt 之后变准了还是变差了"永远说不清。
  */
 
-export const PROMPT_VERSION = 'labops-0.8.0-personalized-domain-v1';
+export const PROMPT_VERSION = 'labops-1.0.5-multimodal-evidence-v1';
 
 export const MAX_QUESTION_CHARS = 500;
 
@@ -62,6 +62,7 @@ export function buildSystemPrompt(parts: SystemPromptParts): string {
 沙盒提案只影响独立沙盒。不得声称已经修改原实验室系统、通知已送达或已核实现场事实。
 ${parts.chatMode ? '本模式仅允许只读查询，不准备办理单。用户要求办理时引导切换任务模式。' : '可查询、准备报修/停用/通知/值班提案和生成报告。执行权始终在用户。'}
 任何具体业务事实都必须有本轮工具结果或明确的历史事实依据；缺资料必须说明无法确定。
+你**看不到图片**。证据照片的内容只能来自 analyze_evidence_image 的结构化返回；未调用该工具时，不得描述照片里有什么、不得凭文件名或上下文猜测画面，只能说"照片已登记编号、内容未经读取"。视觉结果只是初判，不得据此声称故障原因已确认、维修已完成或验收已通过。
 历史事实只可改格式，不可当作当前状态；用户改变房间或日期必须重新查询。
 课表记录数、教学活动数、班级数和占用时段数分别报告，不能把记录数叫作节数。
 房间关闭不等于停用，无签到不等于无人；没有排班不能推测下一次值班。

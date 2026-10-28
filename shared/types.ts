@@ -129,7 +129,7 @@ export interface ToolStartedPayload {
 }
 
 /** 结构化结果的类别。前端据此选择渲染器，不再假设所有工具都返回课表 */
-export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan';
+export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation';
 
 export interface ToolResultPayload {
   step: number;
@@ -144,7 +144,7 @@ export interface ToolResultPayload {
   /** 结果类别，决定前端用哪个渲染器 */
   resultKind?: ToolResultKind;
   /** 结构化结果，前端只接受这一份（绝不插入模型返回的任意 HTML） */
-  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult;
+  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult | EvidenceObservationResult;
   error?: { code: string; message: string };
 }
 
@@ -413,3 +413,25 @@ export interface ScheduleQueryResult {
 
 export interface KnowledgeResult {summary:string;scope:string;hits:Array<{id:string;title:string;version:string;effectiveFrom:string;source:string;url:string;paragraphs:Array<{locator:string;text:string}>}>}
 export type BusinessPlanResult = import('./business.ts').BusinessResult;
+
+/**
+ * 证据照片的 AI 视觉初判。刻意与"人工验收结论"分开：
+ * notHumanVerification 恒为 true，前端必须据此显示声明，后端也不得拿它推进任何业务状态。
+ */
+export interface EvidenceObservationResult {
+  provenance: { sourceLabel: string; queryTime: string; sourceRevision: string; coverage: string };
+  scope: string;
+  model: string;
+  ms: number;
+  attachments: Array<{ id: string; fileName: string; mimeType: string; sha256: string; uploadedAt: string }>;
+  skipped?: string[];
+  observation: {
+    deviceType: string;
+    visibleSymptoms: string[];
+    nameplateText: string;
+    severityGuess: 'unknown' | 'minor' | 'moderate' | 'severe';
+    confidence: number;
+    whatNotVisible: string[];
+  };
+  notHumanVerification: true;
+}

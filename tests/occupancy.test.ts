@@ -126,7 +126,11 @@ async function client(connect: boolean, identity = 'admin'): Promise<Client> {
       .filter(Boolean)
       .map((l) => JSON.parse(String(l).slice(6))) as any[];
     const done = events.find((e) => e.type === 'run_completed');
-    assert.ok(done, '本轮必须有终态事件：' + JSON.stringify(events.map((e) => e.type)));
+    assert.ok(
+      done,
+      '本轮必须有终态事件：' +
+        JSON.stringify(events.map((e) => ({ type: e.type, code: e.payload?.code ?? e.error?.code, message: e.payload?.message ?? e.error?.message ?? e.payload?.error })))
+    );
     return {
       answer: String(done.payload.answer ?? ''),
       toolSummaries: events.filter((e) => e.type === 'tool_result').map((e) => String(e.payload?.summary ?? '')),
@@ -177,10 +181,16 @@ const occupancyValue = (answer: string) => (answer.match(/在室人数[：:]\s*(
 test('未连接原系统：仍然如实说取不到，绝不编数', async () => {
   const a = await client(false);
   const out = await a.ask('E310 现在有多少人？');
-  assert.match(out.answer, /未连接|未取得授权|没有取到签到数据来源/, out.answer);
-  assert.match(occupancyValue(out.answer), /未知|无法提供/, '在室人数必须落在"未知"，不得给数字：' + out.answer);
-  assert.doesNotMatch(occupancyValue(out.answer), /\d+\s*人/, '在室人数不得编造：' + out.answer);
-  // 现行设计：未连通时仍调用工具，由工具如实返回"没有数据来源"（见 query-lab-status.ts:133），
+  assert.match(out.answer, /未连接|未取得授权|没有取到签到数据来源|没有连接原系统/, out.answer);
+  const occ = occupancyValue(out.answer);
+  if (occ) {
+    assert.match(occ, /未知|无法提供/, '带"在室人数"标签时必须是未知，不得给数字：' + out.answer);
+    assert.doesNotMatch(occ, /\d+\s*人/, '在室人数不得编造：' + out.answer);
+  } else {
+    // 诚实拒绝态可能不带该标签，但同样不得在任何位置报出"在室 N 人"
+    assert.doesNotMatch(out.answer, /在室[^\n]{0,10}?\d+\s*人/, '未连通时不得报出在室人数：' + out.answer);
+  }
+  // 现行设计：未连通时仍可能调用工具，由工具如实返回"没有数据来源"（见 query-lab-status.ts:133），
   // 要锁死的是"不出数字"，不是"不调工具"。
 });
 

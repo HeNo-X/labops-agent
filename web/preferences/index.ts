@@ -13,6 +13,9 @@ const palettes={
 function apply(){
  const p=preferences.value,root=document.documentElement,dark=p.theme==='auto'?media.matches:p.theme==='dark';
  root.dataset.theme=dark?'dark':'light';root.dataset.accent=p.accent;root.dataset.reducedMotion=String(p.reducedMotion);root.lang=language.value;
+ // F1：状态栏 theme-color 随主题同步（与 manifest 背景色一致：安装态外壳 + 浏览器顶栏）
+ const themeMeta=document.querySelector('meta[name="theme-color"]');
+ if(themeMeta)themeMeta.setAttribute('content',dark?'#202020':'#fafafa');
  root.style.setProperty('--ui-font-size',(mobile?p.mobileFont:p.desktopFont)+'px');root.style.setProperty('--reply-font-size',(mobile?p.mobileReply:p.desktopReply)+'px');
  const fields=['--primary','--primary-hover','--primary-weak','--primary-border','--primary-contrast','--focus'];
  if(p.accent==='neutral'){for(const name of fields)root.style.removeProperty(name);}

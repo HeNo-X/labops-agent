@@ -22,6 +22,7 @@ import type { ChatMessage as ChatMessageData, Round, RoundEffects } from './stor
 import { useAgentStream } from './composables/useAgentStream';
 import LabMatrix from './components/LabMatrix.vue';
 import AgentSidebar from './components/AgentSidebar.vue';
+import PlanPane from './components/PlanPane.vue';
 import SettingsDialog from './components/SettingsDialog.vue';
 import {preferences} from './preferences';
 import {t as tr} from './i18n';
@@ -108,6 +109,11 @@ function showLatest(){nearBottom.value=true;newMessages.value=false;scrollFollow
 const navOpen = ref(false);
 /** 右侧房间侧边栏：宽屏默认展开，窄屏默认收起；用户选择持久化（停靠式，可收起为窄轨） */
 const roomsOpen = ref(window.innerWidth >= 1280);
+// PC-2 右栏视图互斥：'rooms'=房间清单（默认），'plan'=办理单钉住面板
+const sideView = ref<'rooms' | 'plan'>('rooms');
+watch(sideView, (v) => {
+  if (v === 'plan' && !roomsOpen.value) toggleRooms(true);
+});
 try {
   const saved = localStorage.getItem('labops.rooms');
   if (saved === 'open' && window.innerWidth > 900) roomsOpen.value = true;
@@ -181,6 +187,22 @@ function switchRole(r: ActorRole): void {
   void loadTasks();
 }
 
+/** PC-2：右栏办理单"查看会话位置" → 滚动到对应消息并短暂高亮 */
+function locateMessage(messageId: string): void {
+  if (!messageId) return;
+  const el = msgsEl.value?.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`) ?? msgsEl.value?.querySelector('.msg--assistant:last-of-type');
+  if (el instanceof HTMLElement) {
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.add('is-located');
+    window.setTimeout(() => el.classList.remove('is-located'), 1800);
+  }
+}
+/** PC-2：待确认方案到达（0→≥1）→ 右栏自动钉住为办理单视图 */
+function onPlanArrived(messageId: string): void {
+  if (window.innerWidth > 900) sideView.value = 'plan';
+  if (messageId) locateMessage(messageId);
+}
+
 function openTask(conversationId: string | null): void {
   if (conversationId && session.conversations.some((c) => c.id === conversationId)) {
     void session.openConversation(conversationId);
@@ -250,7 +272,10 @@ async function onSubmit(q: string): Promise<void> {
   const clientRequestId = session.uid('req');
   let convId: string | null = session.currentId;
   try {
-    convId = await session.ensureConversation(q, convId, clientRequestId, draftMode.value);
+    // PC-4：首句语义路由 —— 办理动词升级为任务会话，否则聊天查询（与移动端一致）
+    const opsHint = /(办理|提交|报修|停用|发布|通知|值班|排班|工单|申请)/.test(q);
+    const mode: ConvMode = opsHint ? 'task' : 'chat';
+    convId = await session.ensureConversation(q, convId, clientRequestId, mode);
   } catch (e) {
     session.listError = `创建会话失败：${(e as Error).message}`;
     submitting.value = false;
@@ -557,46 +582,23 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
       <div v-if="!session.currentId || session.currentMessages.length === 0" class="hero">
         <button type="button" class="chat__navtoggle hero__navtoggle" @click="navOpen = !navOpen">{{tr("会话")}}</button>
 
-        <div class="mode-seg mode-seg--hero" role="group" :aria-label="tr('会话模式')">
-          <button
-            type="button"
-            class="mode-seg__btn"
-            :class="{ 'mode-seg__btn--on': draftMode === 'chat' }"
-            :aria-pressed="draftMode === 'chat'"
-            :title="tr('聊天查询：可读取数据，不准备办理单')"
-            @click="draftMode = 'chat'"
-          > {{tr("聊天")}} </button>
-          <button
-            type="button"
-            class="mode-seg__btn"
-            :class="{ 'mode-seg__btn--on': draftMode === 'task' }"
-            :aria-pressed="draftMode === 'task'"
-            :title="tr('任务工作台：查询数据、生成办理单并执行')"
-            @click="draftMode = 'task'"
-          > {{tr("任务")}} </button>
-        </div>
+        <!-- PC-4：去掉前置模式二选一 —— 与移动端同语义：开口即问。
+             首句含"办理/提交/停用/通知/报修"等办理动词 → 任务会话；其余 → 聊天查询。
+             任务能力并未藏起来：侧栏"新会话"仍可显式选模式，办理动词也会自动升级。 -->
+        <h1 class="hero__h">{{tr("交代一件实验室任务")}}</h1>
 
-        <template v-if="draftMode === 'task'">
-          <h1 class="hero__h">{{tr("交代一件实验室任务")}}</h1>
-
-          <CommandBar v-model:draft="draft" variant="hero" :submitting="submitting" @submit="onSubmit" @cancel="onCancel" />
-
-        </template>
-        <template v-else>
-          <h1 class="hero__h">{{tr("查询实验室")}}</h1>
-
-          <CommandBar
-            v-model:draft="draft"
-            variant="hero"
-            :submitting="submitting"
-            :examples="false"
-            :placeholder="tr('查询课表、房间状态、钥匙或操作说明…')"
-            :submit-label="tr('发送')"
-            @submit="onSubmit"
-            @cancel="onCancel"
-          />
-
-        </template>
+        <CommandBar
+          v-model:draft="draft"
+          variant="hero"
+          :submitting="submitting"
+          :examples="true"
+          :placeholder="tr('例如：E310 今天有哪些课？ / 帮我提交 D526 报修…')"
+          @submit="onSubmit"
+          @cancel="onCancel"
+        />
+        <p class="hero__scope">
+          {{tr("提问与查询直接开始；要生成办理单时会自动进入任务会话。")}}
+        </p>
       </div>
 
       <!-- 连续消息流 -->
@@ -643,22 +645,26 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
       </template>
     </main>
 
-    <!-- 右侧：房间清单（停靠式侧边栏，可收起为窄轨） -->
-    <aside class="side" :class="{ 'side--collapsed': !roomsOpen }" :aria-label="tr('实验室房间')">
+    <!-- 右侧：房间清单 / 办理单（PC-2 互斥共用同一停靠轨道） -->
+    <aside class="side" :class="{ 'side--collapsed': !roomsOpen }" :aria-label="tr(sideView === 'plan' ? '办理单' : '实验室房间')">
       <template v-if="roomsOpen">
         <header class="side__head">
-          <h2 class="side__h">{{tr("实验室房间")}}</h2>
+          <div class="side__tabs" role="tablist" :aria-label="tr('右栏视图')">
+            <button type="button" role="tab" :aria-selected="sideView === 'rooms'" :class="{ 'is-on': sideView === 'rooms' }" @click="sideView = 'rooms'">{{tr("房间")}}</button>
+            <button type="button" role="tab" :aria-selected="sideView === 'plan'" :class="{ 'is-on': sideView === 'plan' }" @click="sideView = 'plan'">{{tr("办理单")}}</button>
+          </div>
           <button
             type="button"
             class="side__toggle"
-            :title="tr('收起房间清单')"
-            :aria-label="tr('收起房间清单')"
+            :title="tr('收起右栏')"
+            :aria-label="tr('收起右栏')"
             @click="toggleRooms(false)"
           >
             »
           </button>
         </header>
-        <LabMatrix @ask="onPickRoom" />
+        <LabMatrix v-if="sideView === 'rooms'" @ask="onPickRoom" />
+        <PlanPane v-else @locate="locateMessage" @plan-arrived="onPlanArrived" />
       </template>
       <template v-else>
         <button
@@ -704,6 +710,37 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 
 .nav__mask{display:none}
 @media(max-width:900px){.nav__mask{display:block;position:fixed;inset:0;background:#0005;z-index:30}}
+/* PC-2：右栏 tab 组与"定位高亮" */
+.side__tabs{display:inline-flex;border:1px solid var(--border);border-radius:999px;overflow:hidden}
+.side__tabs button{border:0;background:var(--surface-2);color:var(--text-muted);font-size:calc(var(--ui-font-size) * 0.84615);padding:3px 12px;cursor:pointer}
+.side__tabs button.is-on{background:var(--primary);color:var(--primary-contrast)}
+.chat__msgs .msg.is-located{outline:2px solid var(--primary);outline-offset:4px;border-radius:8px;transition:outline-color .3s}
+/* PC-3 微动效：卡片 hover 提亮 + 微浮（仅真 hover 设备，触屏自动禁用） */
+@media (hover: hover) {
+  .chat__msgs .native-card:hover,
+  .chat__msgs .res:hover {
+    background: var(--surface-2);
+    transform: translateY(-1px);
+    transition: background 0.12s ease-out, transform 0.12s ease-out;
+  }
+}
+/* PC-3 弹层开关淡入缩放 */
+.sidebar-account-menu,
+.sidebar-row-menu {
+  animation: pc-pop 0.16s ease-out;
+}
+@keyframes pc-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-account-menu,
+  .sidebar-row-menu {
+    animation: none;
+  }
+}
 
 /* ---- 主区 ---- */
 .chat {
@@ -815,6 +852,31 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   gap: var(--sp-5);
   padding: var(--sp-2) 2px var(--sp-4);
   min-height: 0;
+}
+/* PC-3 阅读宽度分级：正文文本列收窄（约中文 62 字/行，降低长答案阅读疲劳），
+   结构化卡片/提案卡仍可占满 --chat-max（卡片需要宽度）。 */
+/* 正文列：MarkdownText 渲染为 .safe-markdown（GPT 重构后的正文包装），
+   历史遗留的 .msg__text 一并覆盖，双保险 */
+/* :deep() —— safe-markdown 是 MarkdownText 子组件根，scoped 选择器须穿透才能命中 */
+.chat__msgs :deep(.msg--assistant .safe-markdown),
+.chat__msgs .msg__text,
+.chat__msgs .msg__userbubble,
+.chat__msgs .msg__pending,
+.chat__msgs .msg__err {
+  max-width: var(--chat-text-max, 880px);
+  margin-inline: auto;
+  width: 100%;
+}
+.chat__msgs .msg--user {
+  align-items: center;
+}
+.chat__msgs .msg--assistant .msg__ahead {
+  max-width: var(--chat-text-max, 880px);
+  margin-inline: auto;
+  width: 100%;
+}
+.chat__msgs .msg--assistant > *:not(.msg__text):not(.msg__ahead):not(.msg__pending):not(.msg__err) {
+  /* 结果卡/提案卡/工具卡保持全宽 */
 }
 /* 轮次容器：一轮 = 一条提问 + 其回答；操作条默认隐形，hover/聚焦浮现。
    触摸设备没有 hover —— 常显（否则功能等于不存在）。 */

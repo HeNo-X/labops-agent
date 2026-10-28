@@ -152,8 +152,8 @@ const engineTitle = computed(() => {
       <div class="msg__ahead">
         <span class="msg__who">Agent</span>
         <StatusTag :tone="statusMeta.tone" :glyph="statusMeta.glyph" :label="statusMeta.label" />
-        <span v-if="engineLabel" class="msg__engine" :title="engineTitle">{{ engineLabel }}</span>
-        <span v-if="msg.ms" class="msg__ms">{{ msg.ms }} ms</span>
+        <!-- PC-4：引擎与耗时收敛为一枚徽标，细节移入 hover 提示 -->
+        <span v-if="engineLabel || msg.ms" class="msg__engine" :title="engineTitle + (msg.ms ? ` · ${msg.ms} ms` : '')">i</span>
         <button v-if="msg.text && !isUser" type="button" class="msg__copy" @click="copyAnswer">
           {{tr(copied ? '已复制' : '复制')}}
         </button>
@@ -244,6 +244,20 @@ const engineTitle = computed(() => {
 .msg__ms {
   font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
+}
+/* PC-4：元数据徽标 —— 小圆 i，hover 有指针与边框反馈 */
+.msg__engine {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  font-style: italic;
+  font-size: calc(var(--ui-font-size) * 0.69231);
+  cursor: help;
+  user-select: none;
 }
 .msg__copy {
   margin-left: auto;

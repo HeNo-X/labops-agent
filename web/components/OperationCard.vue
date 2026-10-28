@@ -17,6 +17,7 @@ import { computed, onMounted, ref } from 'vue';
 import type { OperationReceipt, Proposal } from '@shared/operations-contract';
 import StatusTag from './StatusTag.vue';
 import { actorHeaders } from '../actor';
+import { useFeedback } from '../mobile/feedback';
 
 const props = defineProps<{ proposal: Proposal; receipt?: OperationReceipt | null }>();
 const emit = defineEmits<{ decided: [] }>();
@@ -42,6 +43,17 @@ onMounted(async () => {
 
 async function decide(decision: 'confirm' | 'reject'): Promise<void> {
   if (busy.value) return;
+  // U02：移动端确认先弹底部摘要层（拇指区主按钮）；桌面维持卡内直提
+  if (decision === 'confirm' && document.querySelector('.mobile-shell')) {
+    const feedback = useFeedback();
+    const ok = await feedback.confirmSheet({
+      title: tr('确认执行该办理单？'),
+      message: [state.value.title, state.value.summary.split(/[。；\n]/)[0]].filter(Boolean).join('\n').slice(0, 140),
+      confirmLabel: tr('确认执行'),
+      cancelLabel: tr('再想想')
+    });
+    if (!ok) return;
+  }
   busy.value = true;
   error.value = null;
   try {

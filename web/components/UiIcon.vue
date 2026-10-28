@@ -6,7 +6,7 @@ const paths:Record<string,string>={
  work:'M9 5V3h6v2 M3 6h18v14H3z M3 11h18 M10 11v3h4v-3',
  incident:'M12 3 2 21h20z M12 9v5 M12 17v1',
  room:'M4 21V4h16v17 M8 8h2 M14 8h2 M8 12h2 M14 12h2 M10 21v-5h4v5',
- clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 7v5l3 2',
+ clock:'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18 M12 7v5l3 2',check:'m5 13 4 4L19 7',
  send:'M3 3 22 12 3 21l4-9z M7 12h15',evidence:'M6 3h8l4 4v14H6z M9 12h6 M9 16h6',
  file:'M6 3h8l4 4v14H6z M14 3v5h4 M9 12h6 M9 16h6',
  chat:'M4 4h16v12H9l-5 4z M8 8h8 M8 12h5',

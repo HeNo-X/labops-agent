@@ -12,9 +12,13 @@ import {t as tr} from "../i18n";
  *  安全约束：组件只接受经过校验的结构化数据，不插入模型返回的任意 HTML；
  *  模型文本一律走 `{{ }}` 插值（自动转义）。
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useRunStore } from '../stores/run';
 import { PERIODS } from '@shared/periods';
+
+// U12：移动端课表明细默认收起（前 2 节 + 展开），桌面保持全量（验收口径不变）
+const mobileEdition = Boolean(typeof document !== 'undefined' && document.querySelector('.mobile-shell'));
+const lessonsExpanded = ref(false);
 import type { EngineType, FreeRoomsResult, LabStatusResult, ScheduleQueryResult } from '@shared/types';
 import StatusTag from './StatusTag.vue';
 import SourceBadge from './SourceBadge.vue';
@@ -197,7 +201,7 @@ const freeList = computed(() => {
       </div>
 
       <ul class="lessons">
-        <li v-for="(l, i) in r.lessons" :key="`${l.timetableId}-${i}`" class="lesson">
+        <li v-for="(l, i) in (mobileEdition && !lessonsExpanded ? r.lessons.slice(0, 2) : r.lessons)" :key="`${l.timetableId}-${i}`" class="lesson">
           <div class="lesson__time">
             <span class="lesson__period">{{ l.periodLabel }}</span>
             <span class="lesson__clock">{{ l.startTime }}–{{ l.endTime }}</span>
@@ -215,6 +219,14 @@ const freeList = computed(() => {
           </div>
         </li>
       </ul>
+      <button
+        v-if="mobileEdition && r.lessons.length > 2"
+        type="button"
+        class="res__lessons-toggle"
+        @click="lessonsExpanded = !lessonsExpanded"
+      >
+        {{ lessonsExpanded ? tr('收起明细') : tr(`展开全部 ${r.lessons.length} 节`) }}
+      </button>
     </div>
 
     <!-- 数据依据：默认折叠 -->
@@ -386,6 +398,15 @@ const freeList = computed(() => {
 </template>
 
 <style scoped>
+.res__lessons-toggle {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  color: var(--primary, #16708a);
+  font-size: 13px;
+  padding: 4px 0;
+  cursor: pointer;
+}
 .res {
   border-top: 1px dashed var(--border);
   padding-top: var(--sp-3);

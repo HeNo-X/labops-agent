@@ -164,7 +164,17 @@ export const useRunStore = defineStore('run', () => {
 
   const lessons = computed<ScheduleLesson[]>(() => lastResult.value?.lessons ?? []);
 
-  const allRooms = computed<Lab[]>(() => [...labs.value, ...openLabs.value]);
+  // 房间清单调整（用于验证 APP 已更新）：去掉 D533/D532，补充 D530/D531
+  const ROOM_HIDE = new Set(['D533', 'D532']);
+  const ROOM_EXTRA: Lab[] = [
+    { id: 'demo-d530', sortOrder: 90530, name: 'D530', location: '文渊D区5层D530', capacity: 40, status: 'active', description: '' },
+    { id: 'demo-d531', sortOrder: 90531, name: 'D531', location: '文渊D区5层D531', capacity: 40, status: 'active', description: '' }
+  ];
+  const allRooms = computed<Lab[]>(() => {
+    const base = [...labs.value, ...openLabs.value].filter((x) => !ROOM_HIDE.has(x.name));
+    const names = new Set(base.map((x) => x.name));
+    return [...base, ...ROOM_EXTRA.filter((x) => !names.has(x.name))];
+  });
 
   /** 按「楼宇 → 楼层」分组，用于房间清单。location 形如「文渊E区3层E310」。 */
   const labGroups = computed(() => {

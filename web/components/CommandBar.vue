@@ -12,7 +12,9 @@ import {t as tr} from "../i18n";
  */
 import { computed } from 'vue';
 import { useRunStore } from '../stores/run';
+import { useVoiceInput } from '../composables/useVoiceInput';
 import StatusTag from './StatusTag.vue';
+import UiIcon from './UiIcon.vue';
 
 // ⚠️ Boolean prop 必须显式给默认值：Vue 对未传入的 Boolean 类型 prop 会直接置为
 // false（而不是 undefined），不写 withDefaults 会让 `examples?: boolean` 的
@@ -62,6 +64,43 @@ function useExample(q: string): void {
   emit('submit', q);
 }
 
+// ---- 语音输入：与移动端 MobileConversation 同一 composable、同一套错误码文案 ----
+const voice = useVoiceInput();
+const voiceHint = computed(() => {
+  const code = voice.errorCode.value;
+  if (!code || code === 'aborted') return '';
+  const messages: Partial<Record<string, string>> = {
+    unsupported: tr('当前浏览器不支持录音'),
+    insecure: tr('语音输入需要 HTTPS 或 localhost 环境'),
+    denied: tr('麦克风权限被拒绝，请在浏览器地址栏允许后重试'),
+    no_device: tr('未检测到可用麦克风'),
+    busy: tr('已有录音在进行'),
+    network: tr('网络异常，转写失败'),
+    not_configured: tr('语音识别未配置：请在服务端 .env 设置 ASR_API_KEY'),
+    rate_limited: tr('语音转写已达每小时配额，请稍后再试'),
+    upstream: tr('识别服务暂不可用，请稍后重试'),
+    empty: tr('没有听清，请靠近一点再说一次'),
+    unknown: tr('语音识别失败，请重试')
+  };
+  return messages[code] || '';
+});
+
+async function onVoice(): Promise<void> {
+  const state = voice.status.value;
+  if (state === 'idle') {
+    await voice.start();
+    return;
+  }
+  if (state === 'recording') {
+    const recognized = await voice.stop();
+    // 识别结果并入草稿而非覆盖：用户可能已经打了一半
+    if (recognized) text.value = text.value ? `${text.value.replace(/\s+$/, '')} ${recognized}` : recognized;
+  }
+}
+function onVoiceCancel(): void {
+  voice.cancel();
+}
+
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
@@ -88,8 +127,37 @@ function onKeydown(e: KeyboardEvent): void {
       </button>
     </div>
 
+    <div
+      v-if="voice.working.value"
+      class="bar__voice"
+      role="status"
+      aria-live="polite"
+    >
+      <span class="bar__voice-dot" aria-hidden="true"></span>
+      <b>{{ tr(voice.status.value === 'transcribing' ? '识别中…' : voice.status.value === 'requesting' ? '等待麦克风…' : '正在聆听') }}</b>
+      <span class="bar__voice-time">{{ Math.floor(voice.seconds.value) }}s / 60s</span>
+      <button type="button" class="bar__voice-cancel" @click="onVoiceCancel">{{ tr('取消') }}</button>
+    </div>
+
     <div class="bar__row">
       <label class="sr-only" for="cmd">{{tr("输入你的实验室问题")}}</label>
+      <!--
+        录音期间按钮**不能隐藏**：onVoice() 的 recording 分支负责"停止并转写"，
+        若此处用 !voice.working 把它藏掉，该分支就成了死代码 —— 用户只能取消，
+        录完的话拿不回来（浏览器实测复现）。改由 working 时高亮表达状态。
+      -->
+      <button
+        v-if="voice.supported.value"
+        type="button"
+        class="bar__mic"
+        :class="{ 'is-active': voice.working.value }"
+        :disabled="busy"
+        :aria-label="tr(voice.status.value === 'recording' ? '停止录音并识别' : '语音输入')"
+        :title="tr(voice.status.value === 'recording' ? '停止录音并识别' : '语音输入')"
+        @click="onVoice"
+      >
+        <UiIcon name="mic" />
+      </button>
       <textarea
         id="cmd"
         ref="inputEl"
@@ -97,7 +165,7 @@ function onKeydown(e: KeyboardEvent): void {
         class="bar__input"
         :rows="isHero ? 2 : 1"
         :placeholder="props.placeholder ?? '输入实验室问题或要办理的事项…'"
-        :disabled="busy"
+        :disabled="busy || voice.working.value"
         @keydown="onKeydown"
       />
       <button v-if="!busy" type="button" class="bar__btn" :disabled="!canSubmit" @click="submit">
@@ -105,6 +173,8 @@ function onKeydown(e: KeyboardEvent): void {
       </button>
       <button v-else type="button" class="bar__btn bar__btn--ghost" @click="emit('cancel')">{{tr("停止")}}</button>
     </div>
+
+    <p v-if="voiceHint" class="bar__voice-hint" role="alert">{{ voiceHint }}</p>
 
     <div v-if="busy" class="bar__hint">
       <StatusTag v-if="busy" tone="info" glyph="◌" :label="props.submitting && !store.inputLocked ? '正在提交…' : '任务执行中'" :title="tr('正在处理，请稍候')" />
@@ -139,6 +209,80 @@ function onKeydown(e: KeyboardEvent): void {
 .bar--hero .bar__btn {
   min-height: 56px;
   font-size: calc(var(--ui-font-size) * 1.15385);
+}
+/* 语音输入：细线 + 轻投影，不用渐变/发光（与全站一致的克制风格） */
+.bar__mic {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 40px;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.bar__mic:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.bar__mic:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+/* 录音中：用边框与前景色变化表达，不加发光（全站禁用辉光风格） */
+.bar__mic.is-active {
+  color: var(--warn);
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+.bar__voice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: calc(var(--ui-font-size) * 0.92308);
+}
+.bar__voice-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  flex: 0 0 auto;
+}
+.bar__voice-time {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.bar__voice-cancel {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: calc(var(--ui-font-size) * 0.88462);
+  cursor: pointer;
+}
+.bar__voice-hint {
+  margin: var(--sp-2) 0 0;
+  color: var(--danger);
+  font-size: calc(var(--ui-font-size) * 0.88462);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .bar__voice-dot {
+    animation: bar-voice-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes bar-voice-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
 }
 .bar__examples {
   display: flex;

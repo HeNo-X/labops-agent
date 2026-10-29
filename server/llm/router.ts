@@ -111,6 +111,9 @@ export async function* streamChatWithFallback(
       return;
     } catch (err) {
       lastError = err;
+      // 用户取消不是模型故障：既不记熔断，也不该继续把链上其余模型逐个"试一遍"
+      // （signal 已 abort，后面每个都会秒抛秒记账，取消 3 次就能把健康模型冷却掉）
+      if (opts.signal?.aborted || (err as AgnesError)?.code === 'run_cancelled') throw err;
       if (emitted) {
         // 已经吐过内容 → 不换模型，直接把错误抛给上层；
         // 也**不记熔断**：中途断流多半与本次回答有关，不该让该模型替后续所有请求背锅

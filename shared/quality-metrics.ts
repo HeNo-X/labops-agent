@@ -14,14 +14,18 @@
  *  真实模型评测与规则引擎评测复用同一套判据，且可离线复算。
  */
 
+/**
+ * ⚠ 这些模式一律不用 `\b` 收尾：JS 里汉字不属于 \w，"30 秒"中 秒 前的 \b 不成立，
+ *   曾导致时长数字没被剔除、幻觉率虚高。改用"后面不接数字/字母"的显式判断。
+ */
 const IGNORED_NUMBER_CONTEXTS = [
   /§\s*\d+/g, // 段落定位符
-  /\bv\d+(\.\d+)*\b/gi, // 版本号
-  /\b\d{4}-\d{2}-\d{2}\b/g, // 日期
-  /\b\d{1,2}:\d{2}(:\d{2})?\b/g, // 时间
-  /\b\d+\s*[秒分钟小时天]\b/g, // 时长描述
-  /\b\d+(?:\.\d+)?%/g, // 百分比形式的置信度自述
-  /\b\d+\s*条(记录|排课|通知|工单)?\b/g // 由工具直接给出的计数句式
+  /(?<![\w.])v\d+(?:\.\d+)*/gi, // 版本号
+  /\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?/g, // 日期与日期时间
+  /(?<![\w:])\d{1,2}:\d{2}(?::\d{2})?(?![\w:])/g, // 时间
+  /(?<![\w.])\d+(?:\.\d+)?\s*(?:秒|分钟|小时|天|周|次|步|ms|s)(?![\w.])/g, // 时长/步数自述
+  /(?<![\w.])\d+(?:\.\d+)?\s*%(?![\w.])/g, // 百分比形式的置信度自述
+  /(?<![\w.])\d+\s*条(?:记录|排课|通知|工单|课程|安排|项)?(?![\w.])/g // 工具直接给出的计数
 ];
 
 /** 从工具事实里收集"允许出现在回答中的数字"集合 */
@@ -81,11 +85,24 @@ export interface CitationResult {
   bad: Array<{ ref: string; reason: string }>;
 }
 
-/** 引用判定：§N 不得超过该文档段落数，文档 id 必须在本轮命中集内 */
+/**
+ * 引用判定：§N 不得超过该文档段落数，文档 id 必须在本轮命中集内。
+ *
+ * ⚠ `docTotals` 必须传：自段落级检索改造后，`hits[].paragraphs` 只含**命中的
+ *   部分段落**（≤4 条）。拿它的长度当"该文档总段数"，会把模型合法引用的
+ *   §5/§7 判成越界，让引用准确率系统性虚低。不传时退化为"以命中段落最大
+ *   §N 为下界"，只判明显越界。
+ */
 export function checkCitations(
   answer: string,
-  hits: Array<{ id: string; paragraphs: Array<{ locator: string }> }>
+  hits: Array<{ id: string; paragraphs: Array<{ locator: string }> }>,
+  docTotals?: Record<string, number>
 ): CitationResult {
+  const totalOf = (id: string, hitParagraphs: Array<{ locator: string }>): number => {
+    if (docTotals?.[id] !== undefined) return docTotals[id];
+    const seen = hitParagraphs.reduce((mx, p) => Math.max(mx, Number(String(p.locator).replace(/\D/g, '')) || 0), 0);
+    return Math.max(seen, hitParagraphs.length);
+  };
   const bad: Array<{ ref: string; reason: string }> = [];
   let checked = 0;
   const byId = new Map(hits.map((h) => [h.id, h]));
@@ -100,9 +117,9 @@ export function checkCitations(
       continue;
     }
     const n = Number(para);
-    const total = byId.get(key)!.paragraphs.length;
+    const total = totalOf(key, byId.get(key)!.paragraphs);
     if (!Number.isInteger(n) || n < 1 || n > total) {
-      bad.push({ ref: m[0], reason: `段落序号越界（该文档 ${total} 段）` });
+      bad.push({ ref: m[0], reason: `段落序号越界（该文档至少 ${total} 段）` });
     }
   }
   // 只写 §N 不写文档时，至少要求该序号在任一命中文档里存在。

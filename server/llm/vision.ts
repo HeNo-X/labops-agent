@@ -115,7 +115,9 @@ export async function analyzeImages(
   if (!images.length) throw new VisionError('vision_no_image', '没有可分析的图像', false);
   if (images.length > c.maxImages) throw new VisionError('vision_too_many_images', `单次最多分析 ${c.maxImages} 张照片`, false);
 
-  const endpoint = new URL('/chat/completions', c.baseUrl + '/');
+  // 与 agnes.ts 一致用字符串拼接：`new URL('/chat/completions', base)` 的绝对路径
+  // 会**丢掉 baseUrl 的路径前缀**（compatible-mode/v1 → 直接 404），实测踩过。
+  const endpoint = new URL(c.baseUrl + '/chat/completions');
   assertSafeEndpoint(endpoint);
   const startedAt = Date.now();
   const controller = new AbortController();

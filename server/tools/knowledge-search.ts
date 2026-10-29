@@ -29,31 +29,49 @@ export interface ScoredChunk {
   via: Array<'keyword' | 'bm25'>;
 }
 
-/** 相邻双字切分；ASCII/数字词保持完整，避免把 "AES-256" 切碎 */
+/**
+ * 相邻**重叠**双字切分；ASCII/数字词保持完整。
+ * "课程管理与值班" → 课程 程管 管理与…值 值班
+ *
+ * ⚠ 早先的实现是"当前字 + 更早那个字"，实测只产出非重叠对
+ *   （"妈妈来了"→ 只有 "妈来"），导致文档里"值班"永远生成不出 bigram、
+ *   BM25 路对奇数偏移的词稳定漏召回。这里按中文串整段生成，避免再犯。
+ * 字符类只列区间、不夹裸 `-`：`[一-鿿-]` 会被解析成字面连字符，
+ *   曾把 "A-B学" 切出脏 token。
+ */
+const CJK = /[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff]/;
+const LATIN = /[a-z0-9]/;
+
 export function cjkBigrams(text: string): string {
   const out: string[] = [];
-  const run: string[] = [];
-  const flush = () => {
-    if (!run.length) return;
-    out.push(run.join(''));
-    run.length = 0;
+  let run = '';
+  let latin = '';
+  const flushLatin = () => {
+    if (latin) {
+      out.push(latin);
+      latin = '';
+    }
+  };
+  const flushRun = () => {
+    if (run.length === 1) out.push(run);
+    for (let i = 0; i + 1 < run.length; i++) out.push(run.slice(i, i + 2));
+    run = '';
   };
   for (const ch of text.toLowerCase()) {
-    if (/[一-鿿-ヿ]/.test(ch)) {
-      flush();
-      out.push(ch);
-      // 双字组合：当前字与前一中文相邻字
-      const prev = out.length >= 2 ? out[out.length - 2] : '';
-      if (/^[一-鿿-ヿ]$/.test(prev) && prev !== ch) out.push(prev + ch);
-    } else if (/[a-z0-9]/.test(ch)) {
-      run.push(ch);
+    if (CJK.test(ch)) {
+      flushLatin();
+      run += ch;
+    } else if (LATIN.test(ch)) {
+      flushRun();
+      latin += ch;
     } else {
-      flush();
+      flushRun();
+      flushLatin();
     }
   }
-  flush();
-  // 中文单字对检索无区分度，只保留双字与拉丁词
-  return out.filter((t) => t.length >= 2 || /^[a-z0-9]+$/.test(t)).join(' ');
+  flushRun();
+  flushLatin();
+  return out.join(' ');
 }
 
 interface Index {

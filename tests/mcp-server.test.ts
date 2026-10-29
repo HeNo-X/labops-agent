@@ -108,6 +108,30 @@ test('角色由服务端环境变量决定，客户端传 role 无效', async ()
   assert.ok(body.payload.hits.some((h) => h.id === 'schedule-adjustment'), '服务端设为 admin 时应能检索到');
 });
 
+test('回归：每个暴露的只读工具都要真能跑（ctx 缺 dataset 时曾一调即抛）', async () => {
+  const list = await talk(handshake);
+  const names = list.get(2)!.result!.tools!.map((t) => t.name);
+  const args: Record<string, unknown> = {};
+  for (const name of names) args[name] = {};
+  // 需要必填参数的工具给最小合法入参
+  args.query_schedule = { date: '2026-10-29', labName: 'E310' };
+  args.query_lab_status = { labName: 'E310' };
+  args.query_free_rooms = { date: '2026-10-29' };
+  args.query_knowledge = { query: '调课' };
+  args.query_business_context = { view: 'issues' };
+  args.analyze_evidence_image = { attachmentIds: ['attachment-00000000-0000-4000-8000-000000000000'] };
+  const msgs: unknown[] = [...handshake];
+  names.forEach((n, i) => msgs.push({ jsonrpc: '2.0', id: 100 + i, method: 'tools/call', params: { name: n, arguments: args[n] ?? {} } }));
+  const r = await talk(msgs);
+  for (const [i, n] of names.entries()) {
+    const res = r.get(100 + i)!.result!;
+    const text = res.content?.[0]?.text ?? '';
+    // 允许业务性的"取不到/未连接/未配置"（那是如实回答），但不允许内部异常
+    assert.ok(!/tool_internal_error|Cannot read properties|is not a function|undefined/.test(text),
+      `${n} 内部异常：${text.slice(0, 160)}`);
+  }
+});
+
 test('未知方法返回 JSON-RPC 错误而不是崩溃', async () => {
   const r = await talk([{ jsonrpc: '2.0', id: 9, method: 'resources/list' }]);
   assert.equal(r.get(9)!.error?.code, -32601);

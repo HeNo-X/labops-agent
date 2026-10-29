@@ -29,6 +29,7 @@ process.env.VISION_API_KEY = 'test-vision-key-never-leaves-localhost';
 interface Captured {
   body: Record<string, unknown>;
   headers: Record<string, string | string[] | undefined>;
+  url: string;
 }
 const captured: Captured[] = [];
 /** 由测试逐个塞入；取完即消费，保证每个用例拿到自己那份剧本 */
@@ -38,7 +39,7 @@ const visionSrv = http.createServer((req, res) => {
   let raw = '';
   req.on('data', (c) => (raw += c));
   req.on('end', () => {
-    captured.push({ body: JSON.parse(raw) as Record<string, unknown>, headers: req.headers });
+    captured.push({ body: JSON.parse(raw) as Record<string, unknown>, headers: req.headers, url: req.url ?? '' });
     const next = replies.shift() ?? { json: { choices: [{ message: { content: '{}' } }] } };
     res.writeHead(next.status ?? 200, { 'Content-Type': 'application/json' });
     res.end(next.text ?? JSON.stringify(next.json ?? {}));
@@ -91,6 +92,18 @@ after(() => {
   } catch {
     /* Windows 下可能被占用，泄漏临时目录不影响结论 */
   }
+});
+
+test('回归：baseUrl 带路径前缀时不得被 new URL 绝对路径吃掉', async () => {
+  // `new URL('/chat/completions', base)` 会把 base 的 pathname 整段替换掉，
+  // 默认配置（…/compatible-mode/v1）下必然 404。此前测试用无前缀的本地替身，掩盖了它。
+  captured.length = 0;
+  replies = [{ json: { choices: [{ message: { content: '{"deviceType":"x"}' } }] } }];
+  await analyzeImages([{ mimeType: 'image/png', dataBase64: PNG_1PX }], '', undefined, {
+    baseUrl: `http://127.0.0.1:${visionPort}/compatible-mode/v1`
+  });
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0]!.url, '/compatible-mode/v1/chat/completions', '路径前缀必须保留');
 });
 
 test('照片真的进入模型：请求体含 image_url data URL，且带 Authorization', async () => {

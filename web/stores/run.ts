@@ -58,6 +58,9 @@ export interface TraceStep {
   argsText?: string;
   /** 工具步骤：完整摘要（可展开明细；时间线上只显示 detail 一行短结论） */
   summaryFull?: string;
+  /** 该步骤对应的**真实工具名**。标题是给人看的中文（失败时统一为"查询未成功"），
+   *  任何需要按工具聚合的展示都必须用它，不能从中文标题反推。 */
+  tool?: string;
 }
 
 export interface ServerNowInfo {
@@ -257,6 +260,7 @@ export const useRunStore = defineStore('run', () => {
             id: `s${ev.seq}`,
             kind: 'tool',
             title: toolTitle(p.tool),
+            tool: p.tool,
             detail: `调用工具 ${p.tool}${args ? `（${args}）` : ''}`,
             argsText: args || '（无参数）',
             status: 'running'
@@ -277,6 +281,7 @@ export const useRunStore = defineStore('run', () => {
             id: `s${ev.seq}`,
             kind: 'tool',
             title: p.ok ? toolTitle(p.tool) : '查询未成功',
+            tool: p.tool,
             detail: p.ok ? p.summary : `${p.error?.code ?? 'error'}：${p.error?.message ?? ''}`,
             summaryFull: p.ok ? p.summary : undefined,
             status: p.ok ? 'done' : 'failed',

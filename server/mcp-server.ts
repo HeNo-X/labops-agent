@@ -17,8 +17,9 @@
  *  运行：LABOPS_MCP_ROLE=admin node server/mcp-server.ts
  *  自检：node server/mcp-server.ts --self-test
  */
-import { REGISTRY } from './tools/registry.ts';
+import { REGISTRY, executeTool } from './tools/registry.ts';
 import { serverNow, isValidDateString } from './time/term.ts';
+import { loadAuthorizedDataset } from './business/bridge.ts';
 
 const PROTOCOL_FALLBACK = '2025-06-18';
 const SERVER_INFO = { name: 'labops-agent', version: '1.0.4.0' };
@@ -49,11 +50,21 @@ async function callTool(name: string, args: Record<string, unknown>) {
   }
   const role = mcpRole();
   try {
-    // 时间基准：默认服务端当下；显式给合法日期则以其为基准（不接受客户端塞任意对象）
+    // ctx 必须与 HTTP 链路同构：原先缺 dataset，query_schedule / query_lab_status /
+    // query_free_rooms 一调即抛（实测 Cannot read properties of undefined (reading 'labs')）。
+    const dataset = await loadAuthorizedDataset();
     const d = args['date'];
     const now = isValidDateString(d) ? serverNow(new Date(d + 'T12:00:00+08:00')) : serverNow();
-    const ctx = { now, actor: { role }, mode: 'task' } as never;
-    const result = await tool.execute(args ?? {}, ctx);
+    const ctx = {
+      dataset,
+      now,
+      actor: { id: `mcp-${role}`, role, label: 'MCP 客户端' } as never,
+      conversationId: null,
+      mode: 'task' as const
+    };
+    // 走 executeTool 而不是 tool.execute：保留模式守卫，以及"已连原系统时沙盒工具
+    // 不得混入"的范围检查 —— MCP 不是绕过这些的第二入口。
+    const result = await executeTool(name, args ?? {}, ctx);
     const text = result.ok
       ? JSON.stringify({ summary: result.summary, resultKind: (result as { resultKind?: string }).resultKind, payload: (result as { result?: unknown }).result })
       : JSON.stringify({ summary: result.summary, code: result.code, message: result.message, suggestions: result.suggestions });

@@ -23,6 +23,21 @@ test('CJK 双字切分：两字词成为可检索单元，拉丁词不被切碎'
   assert.ok(!t.split(' ').some((x) => /^[一-鿿]$/.test(x)), '单字无区分度，不应作为 token');
 });
 
+test('回归：双字必须**重叠**生成（旧实现只出非重叠对，"值班"永远召不回）', () => {
+  const toks = cjkBigrams('课程管理与值班').split(' ');
+  assert.ok(toks.includes('课程') && toks.includes('程管') && toks.includes('管理'), '应逐字滑动生成');
+  assert.ok(toks.includes('值班'), '奇数偏移处的词也必须能被生成 —— 这是旧实现的漏召根因');
+  // 重复字不得产生空 token（旧实现 prev!==ch 会把"妈妈"整对丢掉）
+  const dup = cjkBigrams('妈妈来了').split(' ');
+  assert.ok(dup.includes('妈妈') && dup.includes('来了'), '重复相邻字要正常出词');
+  assert.ok(!dup.includes(''), '不得产生空 token');
+});
+
+test('回归：连字符不得被当作汉字切出脏 token', () => {
+  const toks = cjkBigrams('A-B学').split(' ');
+  assert.ok(!toks.some((t) => t.startsWith('-')), '旧字符类 [一-鿿-] 把裸 - 当汉字，会产出 "-学"');
+});
+
 test('两字中文短查询能命中对应文档（unicode61 直挂的场景）', () => {
   const hits = searchChunks('调课', 'admin', '2026-10-29', docs, 4);
   assert.ok(hits.length > 0, '「调课」不应零命中');

@@ -16,13 +16,15 @@ import type { Tone } from './ui-types';
 
 const store = useRunStore();
 
-/** 本轮由模型自主选择的工具序列（去重保序），用于说明"不是固定流水线" */
+/**
+ * 本轮由模型自主选择的工具序列（去重保序），用于说明"不是固定流水线"。
+ * ⚠ 必须用 step.tool（真实工具名），不能从 step.title 反推 —— 标题是给人看的
+ *   中文，失败时统一为"查询未成功"，拿它当工具名会把这句提示原样列出来。
+ */
 const chosenTools = computed(() => {
   const seen: string[] = [];
   for (const s of store.trace) {
-    if (s.kind !== 'tool' || !s.title) continue;
-    const name = s.title.replace(/\s.*(?:开始|完成|失败|进行中).*/, '').trim();
-    if (!seen.includes(name)) seen.push(name);
+    if (s.kind === 'tool' && s.tool && !seen.includes(s.tool)) seen.push(s.tool);
   }
   return seen;
 });

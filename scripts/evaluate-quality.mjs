@@ -37,6 +37,10 @@ const { runAgent } = await import('../server/agent/run.ts');
 const { requestIdentity } = await import('../server/security/context.ts');
 const { PROMPT_VERSION } = await import('../server/agent/prompts.ts');
 const { checkHallucination, checkCitations, summarize } = await import('../shared/quality-metrics.ts');
+// 引用判定需要**文档真实段落总数**：hits 现在只带命中的部分段落，
+// 拿它的长度当分母会把合法引用的 §5/§7 判成越界。
+const { documents: knowledgeDocs } = await import('../server/tools/knowledge.ts');
+const docTotals = Object.fromEntries(knowledgeDocs().map((d) => [d.id, d.paragraphs.length]));
 const cfg = getConfig();
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
 const git = (args) => {
@@ -86,7 +90,7 @@ if (modelConfigured) {
       .filter((p) => p.resultKind === 'knowledge')
       .flatMap((p) => p.result?.hits ?? []);
     const hallucination = checkHallucination(answer, toolResults.map((p) => ({ result: p.result })));
-    const citation = knowledgeHits.length ? checkCitations(answer, knowledgeHits) : { checked: 0, bad: [] };
+    const citation = knowledgeHits.length ? checkCitations(answer, knowledgeHits, docTotals) : { checked: 0, bad: [] };
     // 拒答/澄清的判据取自 domain.ts:17 的固定措辞与 prompts.ts:83 的 REFUSAL_PREFIX，
     // 而不是宽泛的"不能/无法" —— 后者会把正常回答误判成拒答，让拦截率虚高。
     const redirected = /超出了实验室助手的服务范围/.test(answer);

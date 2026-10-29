@@ -27,7 +27,7 @@ import { handleConversations } from './api/conversations.ts';
 import { handleTasksApi } from './api/tasks.ts';
 import { loadDataset, verifySnapshotIntegrity } from './data/store.ts';
 import { runtimeCapabilities } from './agent/run.ts';
-import { engineForMode, modelPlan } from './llm/router.ts';
+import { engineForMode, modelPlan, circuitHealth } from './llm/router.ts';
 import { loggerFor } from './obs/trace.ts';
 import { PROMPT_VERSION } from './agent/prompts.ts';
 
@@ -161,6 +161,9 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       stage:'unified-chat-persistent-scheduler',
       capability: runtimeCapabilities(),
       authMode:authMode(),
+      // 熔断现状：哪个模型正被暂时跳过、还剩多久。放在 health 而非 state，
+      // 因为它描述的是**上游健康**，与当前账号能看到什么数据无关，也不需要授权。
+      circuitByMode: { chat: circuitHealth('chat').providers, task: circuitHealth('task').providers },
       data: ds?{
         sourceType: ds.sourceType,
         sourceLabel: ds.sourceLabel,

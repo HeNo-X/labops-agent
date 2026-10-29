@@ -1,47 +1,35 @@
 <script setup lang="ts">
-import {t as tr} from "../i18n";
-import UiIcon from './UiIcon.vue';
-import {useModal} from '../composables/useModal';
-import {ref,watch,onMounted,onUnmounted} from 'vue';
-import {useBusinessStore,businessApi} from '../stores/business';import {useSessionStore} from '../stores/session';
-import ScheduledSpecForm from './ScheduledSpecForm.vue';import {copySpec,newSpec,type ScheduledSpec} from '../business/scheduled-form';import type {Target} from '@shared/labops-targets.js';
-import {useVisibleRefresh} from '../composables/useVisibleRefresh';
-const props=defineProps<{readonly?:boolean;inline?:boolean;jobId?:string;navigation?:boolean;iconOnly?:boolean}>(),emit=defineEmits<{navigate:[Target]}>(),business=useBusinessStore(),session=useSessionStore();
-type Job={id:string;ownerId:string;version:number;status:string;displayStatus?:string;spec:ScheduledSpec;nextRunAt:string|null;lastRunAt?:string;lastRunStatus?:string;canViewDetails:boolean;canManage:boolean};
-type Plan={id:string;action:string;jobId:string;spec:ScheduledSpec;futureOccurrences:Array<{at:string;local:string}>;sample:{text:string};effects:string[];expiresAt:string;beforeSpec?:ScheduledSpec|null;changes?:Array<{field:string;before:unknown;after:unknown}>};
-type Detail={job:Job;runs:Array<{id:string;occurrenceLocal:string;status:string;attempt:number;error?:string;sourceRevision?:string;frozenPayload:Array<{output:{text:string}}>;resultRefs:unknown[]}>;audit:unknown[]};
-type Pref={enabled:boolean;quietStart:string;quietEnd:string;categories:string[];maxPerDay:number;maxPerEvent:number;minIntervalMinutes:number};
-const open=ref(Boolean(props.inline)),busy=ref(false),error=ref(''),jobs=ref<Job[]>([]),templates=ref<Record<string,string>>({}),plan=ref<Plan>(),detail=ref<Detail>(),results=ref<Array<{id:string;title:string;text:string}>>([]),preference=ref<Pref>(),spec=ref(newSpec(business.profile?.username||'')),editing=ref<Job>(),formOpen=ref(!props.inline),pack=ref('');
-const states:Record<string,string>={active:'运行中',completed:'单次规则已完成',paused:'已暂停',suspended:'连续失败 · 已暂停',archived:'已归档',needs_authorization:'需重新授权',pending:'待执行',running:'执行中',success:'已保存',failed:'失败 · 可回查',skipped:'已跳过',unknown:'正在对账'};
-useModal(open,'.jobs-panel',()=>!props.inline);
-const date=(value:string|null|undefined)=>value?new Date(value).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'}):'无';
-function triggerText(s:ScheduledSpec){const t=s.trigger;return t.type==='duty'?'正式班次前 '+t.minutesBefore+' 分钟':t.type==='once'?date(String(t.at)):t.type==='cron'?'Cron '+t.expression:(t.type==='weekly'?'每周 '+String(t.weekdays):'每日')+' '+t.time;}
-const recipientsText=(s:ScheduledSpec)=>s.recipients.map(r=>r.kind==='user'?r.userId:r.kind==='role'?'角色 '+r.role:'班级 '+r.className).join('、');
-async function work(fn:()=>Promise<void>){if(busy.value)return;const scope=business.scopeKey;busy.value=true;error.value='';try{await fn();}catch(e){if(scope===business.scopeKey)error.value=(e as Error).message;}finally{busy.value=false;}}
-async function refresh(){const scope=business.scopeKey,[list,prefs,saved]=await Promise.all([businessApi<{jobs:Job[];templates:Record<string,string>}>('proxy/scheduled-jobs'),businessApi<{preference:Pref}>('proxy/reminder-preferences'),businessApi<{results:typeof results.value}>('proxy/scheduled-results')]);if(scope!==business.scopeKey)return;jobs.value=list.jobs;templates.value=list.templates;preference.value=prefs.preference;results.value=saved.results;if(props.jobId)detail.value=await businessApi<Detail>('proxy/scheduled-jobs/'+props.jobId);}
-async function show(){open.value=true;if(!plan.value){spec.value=newSpec(business.profile?.username||'');editing.value=undefined;formOpen.value=true;}await work(refresh);}
-function edit(job?:Job){if(props.readonly)return;if(props.inline)session.startDraft();editing.value=job;spec.value=job?copySpec(job.spec):newSpec(business.profile?.username||'');formOpen.value=true;plan.value=undefined;}
-async function preview(action='create',job?:Job){if(props.readonly){error.value='请新建工作会话或进入工作台设置规则';return;}await work(async()=>{const selected=job||editing.value,actual=action==='create'&&selected?'change':action;if(props.inline)session.startDraft();const full=copySpec(spec.value);full.name=full.name||templates.value[full.kind]||full.kind;plan.value=(await businessApi<{plan:Plan}>('proxy/scheduled-jobs/preview',{scopeKey:business.scopeKey,action:actual,...(selected?{jobId:selected.id,expectedVersion:selected.version}:{}),...(['create','change'].includes(actual)?{spec:full}:{}),reason:'本人在规则表单核对完整参数和效果'})).plan;});}
-async function confirm(){if(props.readonly||!plan.value)return;await work(async()=>{const result=await businessApi<{job:Job}>('proxy/scheduled-jobs/confirm',{scopeKey:business.scopeKey,planId:plan.value!.id});plan.value=undefined;editing.value=undefined;formOpen.value=false;await refresh();if(props.inline){detail.value=await businessApi<Detail>('proxy/scheduled-jobs/'+result.job.id);emit('navigate',{view:'job',jobId:result.job.id});}});}
-async function inspect(job:Job){if(!job.canViewDetails)return;if(props.inline){emit('navigate',{view:'job',jobId:job.id});return;}await work(async()=>{detail.value=await businessApi('proxy/scheduled-jobs/'+job.id);});}
-async function savePreference(){if(!preference.value)return;await work(async()=>{await businessApi('proxy/reminder-preferences',{...preference.value,scopeKey:business.scopeKey});await refresh();});}
-async function preparation(){await work(async()=>{pack.value=(await businessApi<{result:{text:string}}>('proxy/preparation-pack')).result.text;});}
-function target(event:Event){const selected=(event as CustomEvent<Target>).detail;if(selected.view==='automation'||selected.jobId){open.value=true;void work(async()=>{await refresh();if(selected.jobId)detail.value=await businessApi('proxy/scheduled-jobs/'+selected.jobId);});}}
-onMounted(()=>{window.addEventListener('labops-target',target);if(props.inline)void work(refresh);});onUnmounted(()=>window.removeEventListener('labops-target',target));watch(()=>props.jobId,()=>{if(detail.value?.job.id===props.jobId)return;detail.value=undefined;void refresh().catch(e=>error.value=(e as Error).message);});
-useVisibleRefresh(refresh,()=>open.value&&!formOpen.value&&!plan.value&&!busy.value);
-watch(()=>business.scopeKey,()=>{if(!props.inline)open.value=false;plan.value=undefined;detail.value=undefined;results.value=[];jobs.value=[];preference.value=undefined;editing.value=undefined;pack.value='';});watch(()=>props.readonly,()=>plan.value=undefined);
+/**
+ * 定时任务面板（兼容壳）
+ * ============================================================================
+ *  对外**保持原有 props / emits 完全不变**，内部换成重构后的 AutomationPanel。
+ *
+ *  为什么这么做：本组件是 PC 与移动端**唯一的**自动挂载点 ——
+ *    · PC ：components/AgentSidebar.vue  → <ScheduledJobsPanel :navigation :icon-only />
+ *    · 移动：mobile/MobileApp.vue        → <ScheduledJobsPanel :inline :job-id />
+ *  保持壳不变，两端都自动拿到新形态，且不可能出现"改了一端忘了另一端"。
+ */
+import AutomationPanel from './automation/AutomationPanel.vue';
+import type { Target } from '@shared/labops-targets.js';
+
+defineProps<{
+  readonly?: boolean;
+  inline?: boolean;
+  jobId?: string;
+  navigation?: boolean;
+  iconOnly?: boolean;
+}>();
+
+const emit = defineEmits<{ navigate: [Target] }>();
 </script>
+
 <template>
- <div v-if="business.connected&&!inline" class="jobs-entry"><button type="button" :class="{'nav-tool':navigation}" :aria-label="tr('定时任务与提醒')" :title="tr('自动化')" @click="show"><UiIcon v-if="navigation" name="clock"/><span v-if="!iconOnly">{{tr(navigation?'自动化':'定时任务与提醒')}}</span></button></div>
- <Teleport to="body" :disabled="inline"><div v-if="open&&business.connected" :class="inline?'jobs-inline':'jobs-mask'" @click.self="!inline&&(open=false)"><section class="jobs-panel" :role="inline?undefined:'dialog'" :aria-modal="inline?undefined:true" :aria-label="tr('定时任务与提醒')"><header><b>{{tr(jobId?'规则详情':'定时任务与提醒')}}</b><button :disabled="busy" @click="work(refresh)">{{tr("刷新")}}</button><button v-if="!inline" :aria-label="tr('关闭定时任务')" @click="open=false">{{tr("关闭")}}</button></header><p v-if="busy" role="status">{{tr("正在读取 / 保存…")}}</p><p v-if="error" role="alert">{{error}}</p><p v-if="readonly">{{tr("当前只查询规则与结果。修改请新建工作会话或进入工作台。")}}</p>
- <template v-if="!jobId"><div v-for="job in jobs" :key="job.id" class="jobs-row"><b>{{job.spec.name}} · {{states[job.displayStatus||job.status]||job.status}} · v{{job.version}}</b><p>{{templates[job.spec.kind]||job.spec.kind}} · {{job.spec.timezone}} · {{triggerText(job.spec)}} · {{tr(job.spec.calendarPolicy==='teaching_days'?'仅教学日':'按规则日期')}}</p><p>{{job.ownerId}} {{tr("· 接收")}} {{recipientsText(job.spec)}} {{tr("· 下次")}} {{date(job.nextRunAt)}}</p><button :disabled="!job.canViewDetails" @click="inspect(job)">{{tr("结果与审计")}}</button><template v-if="!readonly&&job.canManage&&job.status!=='archived'"><button @click="edit(job)">{{tr("修改")}}</button><button @click="preview(job.status==='active'?'pause':'resume',job)">{{tr(job.status==='active'?'暂停':'恢复')}}</button><button @click="preview('run_now',job)">{{tr("立即执行")}}</button><button @click="preview('archive',job)">{{tr("归档")}}</button></template></div><p v-if="!busy&&!jobs.length">{{tr("当前授权范围暂无规则。")}}</p><button v-if="!readonly&&(inline||!formOpen)" @click="edit()">{{tr("新增规则")}}</button></template>
- <section v-if="detail" class="jobs-detail"><h3>{{detail.job.spec.name}} · {{states[detail.job.displayStatus||detail.job.status]||detail.job.status}}</h3><p>{{detail.job.id}} · v{{detail.job.version}} {{tr("· 所有者")}} {{detail.job.ownerId}}</p><p>{{tr(detail.job.canManage?'可由本人管理':'当前仅有查看详情权限，不能接管或修改此规则')}}</p><details><summary>{{tr("完整规则参数")}}</summary><pre>{{JSON.stringify(detail.job.spec,null,2)}}</pre></details><div v-if="!readonly&&detail.job.canManage&&jobId" class="button-row"><button @click="edit(detail.job)">{{tr("修改")}}</button><button @click="preview(detail.job.status==='active'?'pause':'resume',detail.job)">{{tr(detail.job.status==='active'?'暂停':'恢复')}}</button><button @click="preview('run_now',detail.job)">{{tr("立即执行")}}</button><button @click="preview('archive',detail.job)">{{tr("归档")}}</button></div><h3>{{tr("执行记录")}}</h3><div v-for="r in detail.runs" :key="r.id" class="jobs-row"><b>{{r.occurrenceLocal}} · {{states[r.status]||r.status}}</b><p>{{r.id}} {{tr("· 尝试")}} {{r.attempt}} · {{r.error||''}}</p><details><summary>{{tr("冻结结果与业务回执")}}</summary><p>{{tr("来源版本")}} {{tr(r.sourceRevision||'未生成')}}</p><pre v-for="(f,i) in r.frozenPayload" :key="i">{{f.output.text}}</pre><pre>{{JSON.stringify(r.resultRefs,null,2)}}</pre></details></div><p v-if="!detail.runs.length">{{tr("此规则尚无执行记录。")}}</p><details><summary>{{tr("规则审计")}}</summary><pre>{{JSON.stringify(detail.audit,null,2)}}</pre></details></section>
- <ScheduledSpecForm v-if="formOpen&&!readonly" v-model="spec" :templates="templates" :busy="busy" :editing="Boolean(editing)" :stepwise="inline" @preview="preview()" @cancel="formOpen=false;editing=undefined;plan=undefined"/>
- <section v-if="plan" class="jobs-preview"><h3>{{tr("核对后确认：")}}{{plan.action}} · {{plan.spec.name}}</h3><p>{{tr("时区")}} {{plan.spec.timezone}} {{tr("· 效果")}} {{plan.effects.join('、')}} {{tr("· 有效至")}} {{date(plan.expiresAt)}}</p><p>{{tr("接收对象")}} {{JSON.stringify(plan.spec.recipients)}}</p><h4 v-if="plan.changes?.length">{{tr("修改前 → 修改后")}}</h4><div v-for="change in plan.changes||[]" :key="change.field"><b>{{change.field}}</b><pre>{{JSON.stringify(change.before,null,2)}} → {{JSON.stringify(change.after,null,2)}}</pre></div><details open><summary>{{tr("本次完整参数")}}</summary><pre>{{JSON.stringify(plan.spec,null,2)}}</pre></details><ol><li v-for="occurrence in plan.futureOccurrences" :key="occurrence.at">{{occurrence.local}}（UTC {{occurrence.at}}）</li></ol><p v-if="!plan.futureOccurrences.length">{{tr("无已安排的未来时间；此方案仅执行所选管理动作。")}}</p><pre>{{plan.sample.text}}</pre><button :disabled="busy||readonly" @click="confirm">{{tr("本人确认此规则操作")}}</button><button @click="plan=undefined">{{tr("取消")}}</button></section>
- <section v-if="!jobId"><h3>{{tr("已保存的事实结果")}}</h3><details v-for="result in results" :key="result.id"><summary>{{result.title}} · {{result.id}}</summary><pre>{{result.text}}</pre></details><p v-if="!results.length&&!busy">{{tr("尚无当前账号可读的事实结果。")}}</p><button :disabled="busy" @click="preparation">{{tr("查看下次使用准备包")}}</button><pre v-if="pack">{{pack}}</pre></section>
- <form v-if="preference&&!jobId" class="jobs-form" @submit.prevent="savePreference"><h3>{{tr("本人提醒偏好")}}</h3><label><input v-model="preference.enabled" type="checkbox">{{tr("启用站内提醒")}}</label><label>{{tr("静默开始")}}<input v-model="preference.quietStart" type="time"></label><label>{{tr("静默结束")}}<input v-model="preference.quietEnd" type="time"></label><label>{{tr("每日上限")}}<input v-model.number="preference.maxPerDay" type="number" min="1" max="50"></label><label>{{tr("同一依据最多提醒次数")}}<input v-model.number="preference.maxPerEvent" type="number" min="1" max="20"></label><label>{{tr("最短间隔（分钟）")}}<input v-model.number="preference.minIntervalMinutes" type="number" min="0" max="1440"></label><label v-for="(label,key) in templates" :key="key"><input v-model="preference.categories" type="checkbox" :value="key">{{tr(label)}}</label><button :disabled="busy||readonly">{{tr("保存本人偏好")}}</button></form>
- </section></div></Teleport>
+  <AutomationPanel
+    :readonly="readonly"
+    :inline="inline"
+    :job-id="jobId"
+    :navigation="navigation"
+    :icon-only="iconOnly"
+    @navigate="(target) => emit('navigate', target)"
+  />
 </template>
-<style>
-.jobs-entry{display:flex;gap:12px;align-items:center;padding:6px 20px;font-size:calc(var(--ui-font-size) * 0.92308);border-bottom:1px solid var(--border)}.jobs-mask{position:fixed;inset:0;z-index:100;background:#0006;padding:4dvh 16px;display:flex;justify-content:center}.jobs-panel{width:min(940px,100%);max-height:90dvh;overflow:auto;padding:20px;background:var(--surface);color:var(--text);border-radius:8px;box-sizing:border-box}.jobs-inline .jobs-panel{width:100%;max-height:none;overflow:visible;padding:0;border-radius:0}.jobs-panel header{display:flex;gap:12px;align-items:center}.jobs-panel header b{margin-right:auto}.jobs-panel button{border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);padding:8px 12px;border-radius:6px;cursor:pointer}.jobs-panel button:disabled{opacity:.5}.jobs-row,.jobs-preview{border:1px solid var(--border);padding:12px;border-radius:6px;margin:12px 0}.jobs-row button{margin:4px}.jobs-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;border-block:1px solid var(--border);padding:16px 0;margin:16px 0}.jobs-form h3,.jobs-form p{grid-column:1/-1}.jobs-form label{display:grid;gap:8px;font-size:calc(var(--ui-font-size) * 1.07692);min-width:0}.jobs-form input,.jobs-form select{border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);padding:8px;border-radius:6px;max-width:100%;min-width:0;box-sizing:border-box}.jobs-form input[type=checkbox]{width:18px}.jobs-panel pre{white-space:pre-wrap;overflow-wrap:anywhere;font-family:var(--font-serif);font-size:calc(var(--ui-font-size) * 1.07692);line-height:1.7}.jobs-panel [role=alert]{color:var(--danger)}@media(max-width:768px){.jobs-form{grid-template-columns:minmax(0,1fr)}.jobs-panel button{min-height:44px}}
-</style>

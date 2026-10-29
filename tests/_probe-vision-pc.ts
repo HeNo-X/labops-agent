@@ -119,6 +119,33 @@ if (opened) {
   const meta = (await page.locator('.builtin__meta').innerText().catch(() => '')).replace(/\s+/g, ' ');
   check('显示朝向与分辨率等信息', /朝向/.test(meta) && /分辨率/.test(meta), meta.slice(0, 90));
 
+  // ---- 镜像显示：默认勾选 + 真的翻转 + 取消后复原 ----
+  const mirrorBox = page.locator('.builtin__mirror input[type="checkbox"]');
+  const hasMirrorBox = (await mirrorBox.count()) > 0;
+  check('前置摄像头出现「镜像显示」开关', hasMirrorBox, hasMirrorBox ? '' : '未找到 .builtin__mirror');
+  if (hasMirrorBox) {
+    check('镜像显示默认勾选', await mirrorBox.first().isChecked(), `checked=${await mirrorBox.first().isChecked()}`);
+
+    const readTransform = () =>
+      page.evaluate(() => {
+        const v = document.querySelector('.builtin__stage video') as HTMLVideoElement | null;
+        return v ? getComputedStyle(v).transform : 'none';
+      });
+
+    const onTransform = await readTransform();
+    check('默认已镜像（transform 为负缩放）', /matrix\(-1/.test(onTransform), `transform=${onTransform}`);
+
+    await mirrorBox.first().uncheck();
+    await page.waitForTimeout(300);
+    const offTransform = await readTransform();
+    check('取消勾选后恢复非镜像', !/matrix\(-1/.test(offTransform), `transform=${offTransform}`);
+
+    await mirrorBox.first().check();
+    await page.waitForTimeout(300);
+    const backTransform = await readTransform();
+    check('重新勾选后再次镜像（开关可逆）', /matrix\(-1/.test(backTransform), `transform=${backTransform}`);
+  }
+
   const hasFlip = await page.locator('.builtin__actions button', { hasText: /切换为/ }).count();
   // 假设备只有 1 个摄像头 → 按设计**不该**出现切换按钮（多一个按不动的按钮是负体验）。
   // 多摄像头设备才会出现，那条分支由 cameraCount > 1 守卫。

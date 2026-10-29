@@ -22,6 +22,16 @@ const props = defineProps<{ compact?: boolean }>();
 const camera = useCamera();
 const videoEl = ref<HTMLVideoElement | null>(null);
 
+/**
+ * 镜像显示：**默认开启**。
+ * 理由：前置摄像头看人是"照镜子"的直觉，不镜像会让人左右手反向、看着别扭。
+ * 但镜像只对前置有意义 —— 后置对着的是真实场景，镜像会让画面与实物左右相反，
+ * 属于误导。所以开关保留（切回前置时继续生效），后置时禁用并说明原因。
+ */
+const mirror = ref(true);
+const isFront = computed(() => (camera.actualFacing.value ?? camera.facing.value) === 'user');
+const mirrorActive = computed(() => mirror.value && isFront.value);
+
 const nextFacingLabel = computed(() => (camera.facing.value === 'user' ? '后置' : '前置'));
 const facingLabel = computed(() => {
   const actual = camera.actualFacing.value ?? camera.facing.value;
@@ -50,11 +60,27 @@ async function openCamera(): Promise<void> {
     <p v-if="camera.failure.value" class="builtin__error" role="alert">{{ tr(camera.failure.value.message) }}</p>
 
     <div class="builtin__stage" :class="{ 'is-live': camera.active.value }">
-      <video ref="videoEl" autoplay playsinline muted :aria-label="tr('内置摄像头实时画面')" />
+      <video
+        ref="videoEl"
+        :class="{ 'is-mirrored': mirrorActive }"
+        autoplay
+        playsinline
+        muted
+        :aria-label="tr('内置摄像头实时画面')"
+      />
       <p v-if="!camera.active.value" class="builtin__idle">
         <UiIcon name="camera" />
         <span>{{ tr('摄像头未开启') }}</span>
       </p>
+    </div>
+
+    <div v-if="camera.active.value" class="builtin__mirror">
+      <label>
+        <input v-model="mirror" type="checkbox" :disabled="!isFront" />
+        <span>{{ tr('镜像显示') }}</span>
+      </label>
+      <span v-if="!isFront" class="builtin__mirror-hint">{{ tr('后置摄像头对着真实场景，不镜像') }}</span>
+      <span v-else class="builtin__mirror-hint">{{ tr('前置预览左右翻转，符合照镜子的直觉') }}</span>
     </div>
 
     <dl v-if="camera.active.value" class="builtin__meta">
@@ -164,6 +190,37 @@ async function openCamera(): Promise<void> {
 }
 .builtin__stage.is-live video {
   display: block;
+}
+/* 镜像只翻转画面本身，不影响页面上的文字与按钮 */
+.builtin__stage video.is-mirrored {
+  transform: scaleX(-1);
+}
+.builtin__mirror {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.builtin__mirror label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  cursor: pointer;
+}
+.builtin__mirror input {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+.builtin__mirror input:disabled {
+  cursor: not-allowed;
+}
+.builtin__mirror-hint {
+  font-size: 11px;
+  color: var(--text-faint);
 }
 .builtin__idle {
   margin: 0;

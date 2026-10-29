@@ -55,7 +55,7 @@ const LINKS = [
       {{ tr('离线时保留当前输入；恢复后刷新会话或同一方案编号。保存失败时先保留回答，不会自动重发或重复办理。') }}
     </p>
     <p>{{ tr('聊天会话只查询；正式办理请新建工作会话或进入实验室工作台。删除对话不撤销已提交业务。') }}</p>
-    <p>LabOps 1.0.4.0 · Asia/Shanghai</p>
+    <p>LabOps 1.0.4.5 · Asia/Shanghai</p>
   </details>
 
   <button class="mobile-danger" @click="emit('logout')">{{ tr('退出登录') }}</button>

@@ -23,6 +23,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describeConfig, getConfig, PROJECT_ROOT } from './config.ts';
 import { handleAgentChat, readJsonBody } from './api/agent-chat.ts';
+import { handleTranscribe } from './api/transcribe.ts';
+import { handleVisionApi } from './api/vision-api.ts';
 import { handleConversations } from './api/conversations.ts';
 import { handleTasksApi } from './api/tasks.ts';
 import { loadDataset, verifySnapshotIntegrity } from './data/store.ts';
@@ -156,7 +158,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     json(res, 200, {
       ok: true,
       service: 'labops-agent',
-      version:'1.0.4.0',build:process.env.BUILD_ID||'20261027-ux-overhaul',contractVersion:3,
+      version:'1.0.4.5',build:process.env.BUILD_ID||'20261027-ux-overhaul',contractVersion:3,
       clientProtocol:1,clientApiRevision:CLIENT_API_REVISION,
       stage:'unified-chat-persistent-scheduler',
       capability: runtimeCapabilities(),
@@ -213,6 +215,23 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return;
     }
     await handleAgentChat(req, res);
+    return;
+  }
+
+  // 语音输入：录音 → 文本（模型只接在 server/llm/asr.ts；未配置 Key 时如实 503）
+  if (p === '/api/agent/transcribe') {
+    if (req.method !== 'POST') {
+      json(res, 405, { error: 'method_not_allowed', message: '请用 POST' });
+      return;
+    }
+    await handleTranscribe(req, res);
+    return;
+  }
+
+  // 视觉边缘上报与查询：report 由 HMAC 自鉴权（security/http.ts 豁免登录），
+  // 其余子路径沿用统一登录身份。数据面见 server/vision/monitor.ts。
+  if (p.startsWith('/api/vision/')) {
+    await handleVisionApi(req, res, p, url.searchParams);
     return;
   }
 

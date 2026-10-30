@@ -468,7 +468,11 @@ Object.assign(en,{
  '待处理筛选':'Task filters',
  '今天没有待办':'Nothing due today',
  '队列清爽。需要时可以直接查实验室，或开一个工作会话。':'The queue is clear. You can check a lab or start a work chat.',
- '数据依据':'Data basis'
+ '数据依据':'Data basis',
+ '筛选':'Filter',
+ '按登记、服务与排课筛选。':'Filter by registration, service and timetable.',
+ '条课':' classes',
+ '课表未知':'Timetable unknown'
 });
 // PC 端过程呈现与人在环路（相位机 / 轮次折叠 / 工具展示 / 命令面板）
 Object.assign(en,{
@@ -505,6 +509,29 @@ Object.assign(en,{
  '未执行，等你确认':'Not applied — waiting for your confirmation',
  '结构化观察，非人工核验':'Structured observation, not a human verification',
  '完整日报见下方卡片':'The full report is in the card below',
- '内容已截断，完整依据见结果卡或引用链接':'Content truncated — see the result card or citation link for the full source'
+ '内容已截断，完整依据见结果卡或引用链接':'Content truncated — see the result card or citation link for the full source',
+ // 命令面板（T7）
+ '命令面板':'Command palette',
+ '搜索命令或会话':'Search commands or chats',
+ '搜索命令或会话（> 只看命令，# 只看会话）':'Search commands or chats (> commands only, # chats only)',
+ '命令范围':'Command scope',
+ '建议':'Suggested',
+ '前往':'Go to',
+ '设置项':'Settings',
+ '最近会话':'Recent chats',
+ '没有匹配的命令':'No matching commands',
+ '此范围暂无内容':'Nothing in this scope yet',
+ '↑↓ 选择 · Enter 执行 · Esc 关闭':'↑↓ to move · Enter to run · Esc to close',
+ 'Ctrl/Cmd+K 打开或关闭本面板':'Ctrl/Cmd+K opens or closes this palette',
+ '聚焦会话搜索':'Focus chat search',
+ '新建会话':'New chat',
+ '打开设置':'Open settings',
+ '打开运维台':'Open operations console',
+ '打开视觉面板':'Open vision panel',
+ '打开自动化面板':'Open automation panel',
+ '停止当前任务':'Stop the current task',
+ '切换演示身份为管理员':'Switch demo role to administrator',
+ '切换演示身份为志愿者':'Switch demo role to volunteer',
+ '切换演示身份为学生':'Switch demo role to student'
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {t as tr} from "../i18n";
-import {computed,nextTick,onMounted,onUnmounted,ref} from 'vue';
+import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue';
+import {sidebarSearchRequest} from '../lib/sidebar-focus';
 import {useSessionStore} from '../stores/session';import {useBusinessStore} from '../stores/business';import {useRunStore} from '../stores/run';
 import {useSidebar} from '../composables/useSidebar';import {useCollection} from '../composables/useCollection';
 import {useModal} from '../composables/useModal';
@@ -21,7 +22,11 @@ const todosToday=computed(()=>props.tasks.filter(t=>t.status!=='awaiting_confirm
 const groups=computed(()=>[{key:'work' as const,label:'工作会话',mode:'task' as const,list:session.workConversations},{key:'chat' as const,label:'聊天会话',mode:'chat' as const,list:session.chatConversations}].map(group=>({...group,list:group.list.filter(c=>!query.value||[c.title,c.preview||''].join(' ').toLowerCase().includes(query.value.toLowerCase())).slice().sort((a,b)=>Number(pins.ids.value.includes(b.id))-Number(pins.ids.value.includes(a.id)))})));
 const name=computed(()=>business.profile?.username||'演示账户'),role=computed(()=>({admin:'管理员',volunteer:'志愿者',student:'学生'}[business.profile?.identity||props.actor]));
 async function focusSearch(){if(layout.collapsed.value)layout.toggle();await nextTick();search.value?.focus();}
-function shortcut(event:KeyboardEvent){if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();void focusSearch();}if(event.key==='Escape'){accountOpen.value=false;more.value='';emit('close');}}
+// T7：Ctrl/Cmd+K 的唯一监听者是命令面板；这里只响应"聚焦会话搜索"请求，
+// 功能不减、路径只有一条，绝不会出现两个组件抢同一个快捷键。
+const searchRequest=sidebarSearchRequest();
+watch(searchRequest,()=>{void focusSearch();});
+function shortcut(event:KeyboardEvent){if(event.key==='Escape'){accountOpen.value=false;more.value='';emit('close');}}
 onMounted(()=>window.addEventListener('keydown',shortcut));onUnmounted(()=>window.removeEventListener('keydown',shortcut));
 </script>
 <template>

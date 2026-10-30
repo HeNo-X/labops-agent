@@ -31,6 +31,8 @@ import SettingsDialog from './components/SettingsDialog.vue';
 import {preferences} from './preferences';
 import {t as tr} from './i18n';
 import CommandBar from './components/CommandBar.vue';
+import CommandPalette from './components/CommandPalette.vue';
+import { requestSidebarSearchFocus } from './lib/sidebar-focus';
 import ChatMessage from './components/ChatMessage.vue';
 import RoundToolbar from './components/RoundToolbar.vue';
 import RoundActionDialog from './components/RoundActionDialog.vue';
@@ -202,6 +204,33 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange);
   if (recoverPollTimer !== null) window.clearTimeout(recoverPollTimer);
 });
+
+// ---- 命令面板（T7）：Ctrl/Cmd+K 的唯一监听者在其自身组件内 ----
+/**
+ * 命令面板的命令集**全部复用既有入口**：
+ * 视觉 / 自动化 / 工作台都走既有的 window 'labops-target' 事件通道（App 内部本来
+ * 就用它打开这些面板），不新增任何一套开关机制。
+ */
+const commandContext = computed(() => ({
+  busy: store.inputLocked || Boolean(submitting.value),
+  focusSidebarSearch: () => requestSidebarSearchFocus(),
+  newChat: (mode?: ConvMode) => onNewChat(mode),
+  openOperations: () => window.open('/operations.html?bridge=1', '_blank', 'noopener'),
+  openVision: () => window.dispatchEvent(new CustomEvent('labops-target', { detail: { view: 'vision' } })),
+  openAutomation: () => window.dispatchEvent(new CustomEvent('labops-target', { detail: { view: 'automation' } })),
+  openSettings: () => (settingsOpen.value = true),
+  stopRun: () => void onCancel(),
+  actorRole: actor.value,
+  actorOptions: authMode.value === 'demo'
+    ? [{ role: 'admin', label: '管理员' }, { role: 'volunteer', label: '志愿者' }, { role: 'student', label: '学生' }]
+    : [],
+  switchActor: (role: string) => switchRole(role as ActorRole),
+  recentSessions: session.conversations.slice(0, 3).map((c) => ({ id: c.id, title: c.title })),
+  openSession: (id: string) => {
+    void session.openConversation(id);
+    navOpen.value = false;
+  }
+}));
 
 // ---- 会话类型（聊天 / 任务）----
 // hero（还没有会话）用 draftMode 选择；**会话一旦开始对话，模式即确定**：
@@ -717,6 +746,8 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
       @task="openTask" @rooms="toggleRooms(!roomsOpen)" @actor="switchRole" @close="navOpen=false" @logout="logout"
       @settings="settingsOpen=true" />
     <SettingsDialog :open="settingsOpen" @close="closeSettings" @logout="settingsOpen=false;logout()" @edition="switchEdition('mobile',session.currentId?{view:'conversation',conversationId:session.currentId}:{view:'assistant'})"/>
+    <!-- T7：命令面板挂在根级，快捷键入口只有它自己一个 -->
+    <CommandPalette :context="commandContext" />
     <div v-if="navOpen" class="nav__mask" @click="navOpen = false"></div>
 
     <!-- 主区：会话（有消息时列高锁定视口，输入框固定在底部） -->

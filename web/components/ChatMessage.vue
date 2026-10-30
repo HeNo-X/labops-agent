@@ -26,6 +26,7 @@ import EvidenceObservationCard from './EvidenceObservationCard.vue';
 import type { EvidenceObservationResult } from '@shared/types';
 import type { Tone } from './ui-types';
 import { buildTurnRenderUnit, shouldForceExpand, toolTitle, toneOf, glyphOf, labelOf } from '../lib/turn-view';
+import { buildToolDisplay } from '../lib/tool-display';
 
 const props = defineProps<{ msg: ChatMessage }>();
 const emit = defineEmits<{ retry: []; decided: [] }>();
@@ -110,6 +111,19 @@ const traceSummary = computed(() => {
   const tools = u.toolCount ? ` · ${u.toolCount} ${tr('次工具调用')}` : '';
   return `${u.workStatus.label}${tools}`;
 });
+
+/**
+ * 工具卡展示模型（T4）：按族分流摘要 —— 查询/知识/草稿/视觉/日报各有不同主语与
+ * 引导语，不再让 18 个工具长得一模一样。完整结果仍由下方结果卡（TaskResult /
+ * OperationCard / ReportCard / EvidenceObservationCard / 引用链接）承担，此处不重复渲染。
+ */
+const toolDisplays = computed(() =>
+  props.msg.toolCalls.map((t) => ({
+    key: t.toolCallId,
+    record: t,
+    display: buildToolDisplay(t, { running: t.ok === null && props.msg.status === 'streaming' })
+  }))
+);
 
 const statusMeta = computed<{ tone: Tone; glyph: string; label: string }>(() => {
   switch (props.msg.status) {
@@ -204,32 +218,46 @@ const engineTitle = computed(() => {
             <StatusTag :tone="toneOf(s) as Tone" :glyph="glyphOf(s)" :label="tr(labelOf(s))" />
             <span v-if="s.ms !== undefined" class="msg__ms">{{ s.ms }} ms</span>
             <p v-if="s.detail" class="msg__stepdetail">{{ s.detail }}</p>
-            <template v-if="s.argsText">
+            <template v-if="s.argsText || s.summaryFull">
               <button type="button" class="msg__stepmore" @click="toggleStep(s.id)">
                 {{ tr(openSteps.has(s.id) ? '收起参数' : '查看参数') }}
               </button>
-              <p v-if="openSteps.has(s.id)" class="msg__args">{{ tr('参数：') }}{{ s.argsText }}</p>
+              <template v-if="openSteps.has(s.id)">
+                <p v-if="s.argsText" class="msg__args">{{ tr('参数：') }}{{ s.argsText }}</p>
+                <p v-if="s.summaryFull" class="msg__args">{{ tr('摘要：') }}{{ s.summaryFull }}</p>
+                <p v-if="s.summaryTruncated" class="msg__toolhint msg__toolhint--warn">
+                  {{tr('内容已截断，完整依据见结果卡或引用链接')}}
+                </p>
+              </template>
             </template>
           </li>
         </ol>
       </details>
 
-      <!-- 工具调用卡（F34：参数在完成后仍可查） -->
+      <!-- 工具调用卡（T4：按族分流摘要，18 个工具不再长一样；完整内容在下方结果卡） -->
       <details v-if="!textOnly && msg.toolCalls.length" class="msg__tools">
         <summary>{{tr("已执行")}} {{ msg.toolCalls.length }} {{tr("次工具调用（点击看参数与依据）")}}</summary>
-        <div v-for="t in msg.toolCalls" :key="t.toolCallId" class="msg__tool">
+        <div v-for="t in toolDisplays" :key="t.key" class="msg__tool" :data-family="t.display.family">
           <div class="msg__toolhead">
-            <b>{{ toolTitle(t.tool) }}</b>
+            <b>{{ tr(t.display.state === 'running' ? t.display.runningLabel : t.display.finalLabel) }}</b>
             <StatusTag
-              :tone="(t.ok === true ? 'ok' : t.ok === false ? 'danger' : 'info') as Tone"
-              :glyph="t.ok === true ? '✓' : t.ok === false ? '✕' : '◌'"
-              :label="t.ok === true ? '成功' : t.ok === false ? '未成功' : '执行中'"
+              :tone="(t.display.state === 'ok' ? 'ok' : t.display.state === 'failed' ? 'danger' : t.display.state === 'cancelled' ? 'neutral' : 'info') as Tone"
+              :glyph="t.display.state === 'ok' ? '✓' : t.display.state === 'failed' ? '✕' : t.display.state === 'cancelled' ? '⏹' : '◌'"
+              :label="tr(t.display.stateLabel)"
             />
-            <span v-if="t.ms !== undefined" class="msg__ms">{{ t.ms }} ms</span>
+            <span v-if="t.record.ms !== undefined" class="msg__ms">{{ t.record.ms }} ms</span>
           </div>
-          <p v-if="t.summary" class="msg__summary">{{ t.summary }}</p>
-          <p class="msg__args">{{tr("参数：")}}{{ argsText(t) || '（无）' }}</p>
-          <p v-if="t.error" class="msg__args">{{tr("错误：")}}{{ t.error.code }} {{ t.error.message }}</p>
+          <p v-if="t.display.primaryText" class="msg__summary">
+            {{ t.display.primaryText }}{{ t.display.primaryTruncated ? '…' : '' }}
+          </p>
+          <!-- 族的引导语：说明"结果去哪看 / 是否已执行"，不重复正文 -->
+          <p v-if="t.display.hint" class="msg__toolhint">{{ tr(t.display.hint) }}</p>
+          <p v-if="t.display.showInput" class="msg__args">{{tr("参数：")}}{{ argsText(t.record) || '（无）' }}</p>
+          <p v-if="t.record.error" class="msg__args">{{tr("错误：")}}{{ t.record.error.code }} {{ t.record.error.message }}</p>
+          <!-- 展开态必须提示已截断：不能让用户以为看到的是全文 -->
+          <p v-if="t.display.output?.truncated" class="msg__toolhint msg__toolhint--warn">
+            {{tr('内容已截断，完整依据见结果卡或引用链接')}}
+          </p>
         </div>
       </details>
 
@@ -399,6 +427,30 @@ const engineTitle = computed(() => {
 .msg__summary {
   margin: var(--sp-1) 0 0;
   word-break: break-word;
+}
+/* 工具卡按族给一条细色边：只做识别线索，不做视觉主戏（无渐变/无发光） */
+.msg__tool[data-family='query'] {
+  border-left: 2px solid var(--primary);
+}
+.msg__tool[data-family='knowledge'] {
+  border-left: 2px solid var(--info);
+}
+.msg__tool[data-family='draft'] {
+  border-left: 2px solid var(--warn);
+}
+.msg__tool[data-family='vision'] {
+  border-left: 2px solid var(--neutral);
+}
+.msg__tool[data-family='report'] {
+  border-left: 2px solid var(--ok);
+}
+.msg__toolhint {
+  margin: 2px 0 0;
+  font-size: calc(var(--ui-font-size) * 0.84615);
+  color: var(--text-faint);
+}
+.msg__toolhint--warn {
+  color: var(--warn);
 }
 .msg__args {
   margin: 2px 0 0;

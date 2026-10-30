@@ -484,6 +484,27 @@ Object.assign(en,{
  '本轮还在执行，可先写下要补的一句（本轮结束后发送）':'This run is still going — write what to send next (sent when it finishes)',
  '将在本轮结束后发送：':'Will be sent after this run: ',
  '（已替换上一条待发送）':'(replaced the previous queued message)',
- '待发送已填回输入框，请确认后发送':'Queued message moved back into the input — review and send it yourself'
+ '待发送已填回输入框，请确认后发送':'Queued message moved back into the input — review and send it yourself',
+ // 工具展示族文案（动作名 / 类别名 / 终态 / 引导语）
+ '正在查询':'Reading data',
+ '查询':'Data query',
+ '正在检索说明':'Searching the manual',
+ '说明检索':'Manual search',
+ '正在准备办理单':'Preparing a draft',
+ '待确认办理单':'Draft awaiting confirmation',
+ '正在读取照片':'Reading the photo',
+ '照片观察':'Photo observation',
+ '正在生成日报':'Generating the report',
+ '运营日报':'Operations report',
+ '正在执行':'Running',
+ '执行':'Executed',
+ '成功':'Succeeded',
+ '未成功':'Not successful',
+ '执行中':'Running',
+ '已取消':'Cancelled',
+ '未执行，等你确认':'Not applied — waiting for your confirmation',
+ '结构化观察，非人工核验':'Structured observation, not a human verification',
+ '完整日报见下方卡片':'The full report is in the card below',
+ '内容已截断，完整依据见结果卡或引用链接':'Content truncated — see the result card or citation link for the full source'
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

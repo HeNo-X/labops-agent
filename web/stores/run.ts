@@ -37,6 +37,20 @@ import type { NeedConfirmPayload } from '@shared/operations-contract';
 import { PERIODS } from '@shared/periods';
 import { actorHeaders } from '../actor';
 import { toolTitle } from '../lib/turn-view';
+import { DISPLAY_TEXT_BUDGET, clampText } from '../lib/tool-display';
+
+/** 时间线那一行短结论的预算（正文级篇幅；完整内容在 summaryFull / 结果卡里） */
+const TIMELINE_DETAIL_BUDGET = 160;
+
+function clampLine(s: string, n: number): string {
+  const c = clampText(s, n);
+  return c.truncated ? `${c.text}…` : c.text;
+}
+
+function clampSummary(s: string): { summaryFull: string; summaryTruncated?: boolean } {
+  const c = clampText(s, DISPLAY_TEXT_BUDGET.output);
+  return c.truncated ? { summaryFull: c.text, summaryTruncated: true } : { summaryFull: c.text };
+}
 
 export type RunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ResultKind = 'none' | 'schedule_hit' | 'schedule_empty' | 'config_insufficient' | 'lab_status' | 'free_rooms';
@@ -101,6 +115,8 @@ export interface TraceStep {
   argsText?: string;
   /** 工具步骤：完整摘要（可展开明细；时间线上只显示 detail 一行短结论） */
   summaryFull?: string;
+  /** 完整摘要是否被 display 预算截断（为真时 UI 必须提示"已截断，完整依据见结果卡"） */
+  summaryTruncated?: boolean;
   /** 该步骤对应的**真实工具名**。标题是给人看的中文（失败时统一为"查询未成功"），
    *  任何需要按工具聚合的展示都必须用它，不能从中文标题反推。 */
   tool?: string;
@@ -335,8 +351,9 @@ export const useRunStore = defineStore('run', () => {
             kind: 'tool',
             title: p.ok ? toolTitle(p.tool) : '查询未成功',
             tool: p.tool,
-            detail: p.ok ? p.summary : `${p.error?.code ?? 'error'}：${p.error?.message ?? ''}`,
-            summaryFull: p.ok ? p.summary : undefined,
+            detail: p.ok ? clampLine(p.summary, TIMELINE_DETAIL_BUDGET) : `${p.error?.code ?? 'error'}：${p.error?.message ?? ''}`,
+            // display 预算：知识检索等长摘要不再无上限直塞 DOM；截断必须可见地标记
+            ...(p.ok ? clampSummary(p.summary) : {}),
             status: p.ok ? 'done' : 'failed',
             ms: p.ms
           };

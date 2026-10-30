@@ -18,6 +18,8 @@ import {useVisibleRefresh} from './composables/useVisibleRefresh';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRunStore } from './stores/run';
 import { useSessionStore } from './stores/session';
+import { usePendingInputStore } from './stores/pending-input';
+import { resolvePendingOnTerminal, resolvePendingOnSwitchAway, mergeDraft } from './lib/pending-input';
 import type { ChatMessage as ChatMessageData, Round, RoundEffects } from './stores/session';
 import { useAgentStream } from './composables/useAgentStream';
 import LabMatrix from './components/LabMatrix.vue';
@@ -101,6 +103,62 @@ watch(
   }
 );
 watch(draft, (t) => session.saveDraft(session.currentId ?? '__new', t));
+
+// ---- 运行中待发送（T3）：单条、按会话隔离；只是暂存意图，不构成第二条并发流 ----
+const pendingInput = usePendingInputStore();
+/** 一次性提示（草稿冲突填回等），几秒后自动消失 */
+const pendingNotice = ref<string | null>(null);
+let pendingNoticeTimer: number | null = null;
+function flashPendingNotice(msg: string): void {
+  pendingNotice.value = msg;
+  if (pendingNoticeTimer !== null) window.clearTimeout(pendingNoticeTimer);
+  pendingNoticeTimer = window.setTimeout(() => (pendingNotice.value = null), 6000);
+}
+/** 只有属于当前会话的待发送才在输入区显示 */
+const pendingTextForCurrent = computed(() =>
+  pendingInput.pending && pendingInput.pending.conversationId === session.currentId ? pendingInput.pending.text : null
+);
+
+function onQueueInput(q: string): void {
+  const convId = session.currentId;
+  if (!convId) return;
+  pendingInput.enqueue(convId, session.currentMode(), q);
+}
+function onCancelPending(): void {
+  pendingInput.clear();
+  pendingNotice.value = null;
+}
+/**
+ * 本轮进入终态后的消费时机（与 finishRun 同一处）：草稿为空才自动发出；
+ * 草稿已有内容就填回草稿让用户确认 —— 不覆盖、不猜测。
+ */
+function consumePendingOnTerminal(convId: string | null): void {
+  const cur = pendingInput.pending;
+  if (!cur || !convId || cur.conversationId !== convId) return;
+  // 用户已经切走：不把待发送偷偷发回原会话，折回该会话自己的草稿，切回去还能看到
+  const folded = resolvePendingOnSwitchAway({ pending: cur, activeConversationId: session.currentId });
+  if (folded.action === 'fold_to_draft') {
+    const taken = pendingInput.takeFor(folded.conversationId);
+    if (taken) session.saveDraft(folded.conversationId, mergeDraft(session.draftFor(folded.conversationId), taken.text));
+    return;
+  }
+  const outcome = resolvePendingOnTerminal({
+    pending: pendingInput.pending,
+    conversationId: convId,
+    running: store.inputLocked,
+    draft: draft.value
+  });
+  if (outcome.action === 'none') return;
+  const taken = pendingInput.takeFor(convId);
+  if (!taken) return;
+  if (outcome.action === 'send') {
+    void onSubmit(outcome.text);
+    return;
+  }
+  // refill：不发送，把文本交给用户确认（保留其原有草稿）
+  draft.value = mergeDraft(draft.value, outcome.text);
+  flashPendingNotice('待发送已填回输入框，请确认后发送');
+}
 const msgsEl = ref<HTMLElement | null>(null);
 const nearBottom=ref(true),newMessages=ref(false);
 function trackScroll(){const el=msgsEl.value;if(el){nearBottom.value=el.scrollHeight-el.scrollTop-el.clientHeight<100;if(nearBottom.value)newMessages.value=false;}}
@@ -267,8 +325,11 @@ function resolveLive(): ChatMessageData | null {
 }
 async function onSubmit(q: string): Promise<void> {
   // N04：**同步**占用提交锁，覆盖"await 创建会话"的窗口 —— 快速双击/连按 Enter 只发一次
+  // T3：运行中的提交由 CommandBar 转成"加入待发送"，走到这里的一律是真正的首轮提交，
+  // 锁语义未放宽（并发互斥仍然只有一条 SSE 流）。
   if (submitting.value || store.inputLocked || !q.trim()) return;
   submitting.value = true;
+  pendingNotice.value = null;
   navOpen.value = false;
   const clientRequestId = session.uid('req');
   let convId: string | null = session.currentId;
@@ -371,6 +432,9 @@ async function onSubmit(q: string): Promise<void> {
     liveMsgId = null;
     void session.loadConversations();
     void loadTasks();
+    // T3：本轮已到终态 —— 消费属于该会话的待发送（自动发出 / 填回草稿）
+    const finishedConv = convId;
+    void nextTick(() => consumePendingOnTerminal(finishedConv));
   }
 }
 
@@ -594,8 +658,13 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
           :submitting="submitting"
           :examples="true"
           :placeholder="tr('例如：E310 今天有哪些课？ / 帮我提交 D526 报修…')"
+          :pending-text="pendingTextForCurrent"
+          :pending-replaced="pendingInput.replaced"
+          :notice="pendingNotice"
           @submit="onSubmit"
+          @queue="onQueueInput"
           @cancel="onCancel"
+          @cancel-pending="onCancelPending"
         />
         <p class="hero__scope">
           {{tr("提问与查询直接开始；要生成办理单时会自动进入任务会话。")}}
@@ -639,8 +708,13 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
             :examples="false"
             :placeholder="convMode === 'chat' ? '查询课表、房间、钥匙或实验室操作说明' : undefined"
             :submit-label="convMode === 'chat' ? '发送' : undefined"
+            :pending-text="pendingTextForCurrent"
+            :pending-replaced="pendingInput.replaced"
+            :notice="pendingNotice"
             @submit="onSubmit"
+            @queue="onQueueInput"
             @cancel="onCancel"
+            @cancel-pending="onCancelPending"
           />
         </div>
       </template>

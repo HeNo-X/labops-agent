@@ -8,7 +8,9 @@ import {t as tr} from "../i18n";
  *  · 中文自然语言输入，Enter 提交（Shift+Enter 换行）
  *  · 示例问题来自真实数据（房间号取自 /api/state，演示日期由 termStart 推导），
  *    **点击即发起任务**，不再只填充
- *  · 运行中禁止二次提交：锁定与否只看 runStatus（结果到达不解锁），但允许取消
+ *  · 运行中**不再锁死输入框**：仍不允许并发提交（提交锁不变），但允许"补一句" ——
+ *    运行中输入的那句进入待发送（单条、按会话隔离），本轮结束后由父组件决定
+ *    自动发出还是填回草稿。示例 chips 在运行中仍禁用。
  */
 import { computed } from 'vue';
 import { useRunStore } from '../stores/run';
@@ -29,13 +31,22 @@ const props = withDefaults(
     placeholder?: string;
     /** 提交按钮文案 */
     submitLabel?: string;
+    /** 待发送文本（仅当属于当前会话时由父组件传入；null 表示没有） */
+    pendingText?: string | null;
+    /** 最近一次排入覆盖了上一条待发送 */
+    pendingReplaced?: boolean;
+    /** 一次性提示（如"已填回输入框，请确认后发送"） */
+    notice?: string | null;
   }>(),
   {
     variant: 'hero',
     submitting: false,
     examples: true,
     placeholder: undefined,
-    submitLabel: undefined
+    submitLabel: undefined,
+    pendingText: null,
+    pendingReplaced: false,
+    notice: null
   }
 );
 const store = useRunStore();
@@ -54,11 +65,18 @@ const busy = computed(() => store.inputLocked || Boolean(props.submitting));
  */
 const awaitingConfirm = computed(() => store.phase === 'awaiting_confirm');
 
-const emit = defineEmits<{ submit: [string]; cancel: [] }>();
+const emit = defineEmits<{ submit: [string]; queue: [string]; cancel: []; 'cancel-pending': [] }>();
 
 function submit(): void {
-  if (!canSubmit.value) return;
+  if (!text.value.trim()) return;
   const q = text.value.trim();
+  // 运行中：进入待发送（不并发提交，也不丢用户的输入）
+  if (busy.value) {
+    emit('queue', q);
+    text.value = '';
+    return;
+  }
+  if (!canSubmit.value) return;
   emit('submit', q);
   // F27：发出即清空草稿（父组件已在会话内保存该轮消息）
   text.value = '';
@@ -170,15 +188,32 @@ function onKeydown(e: KeyboardEvent): void {
         v-model="text"
         class="bar__input"
         :rows="isHero ? 2 : 1"
-        :placeholder="props.placeholder ?? '输入实验室问题或要办理的事项…'"
-        :disabled="busy || voice.working.value"
+        :placeholder="busy ? tr('本轮还在执行，可先写下要补的一句（本轮结束后发送）') : props.placeholder ?? '输入实验室问题或要办理的事项…'"
+        :disabled="voice.working.value"
         @keydown="onKeydown"
       />
       <button v-if="!busy" type="button" class="bar__btn" :disabled="!canSubmit" @click="submit">
         {{tr(props.submitLabel ?? '发送')}}
       </button>
-      <button v-else type="button" class="bar__btn bar__btn--ghost" @click="emit('cancel')">{{tr("停止")}}</button>
+      <template v-else>
+        <button type="button" class="bar__btn bar__btn--queue" :disabled="!text.trim()" @click="submit">
+          {{tr('加入待发送')}}
+        </button>
+        <button type="button" class="bar__btn bar__btn--ghost" @click="emit('cancel')">{{tr("停止")}}</button>
+      </template>
     </div>
+
+    <!-- 待发送：细线提示行 + 可取消。只表达"暂存意图"，不代表已经发出 -->
+    <div v-if="props.pendingText" class="bar__pending" role="status">
+      <span class="bar__pending-line"></span>
+      <span class="bar__pending-text">
+        {{tr('将在本轮结束后发送：')}}<b>{{ props.pendingText.slice(0, 40) }}{{ props.pendingText.length > 40 ? '…' : '' }}</b>
+        <em v-if="props.pendingReplaced">{{tr('（已替换上一条待发送）')}}</em>
+      </span>
+      <button type="button" class="bar__pending-cancel" @click="emit('cancel-pending')">{{tr("取消")}}</button>
+    </div>
+
+    <p v-if="props.notice" class="bar__notice" role="status">{{ tr(props.notice) }}</p>
 
     <p v-if="voiceHint" class="bar__voice-hint" role="alert">{{ voiceHint }}</p>
 
@@ -382,6 +417,64 @@ function onKeydown(e: KeyboardEvent): void {
 .bar__btn--ghost:hover {
   background: var(--surface-3);
   color: var(--text);
+}
+/* 待发送按钮：次于主操作的视觉权重（细线描边，不抢"停止"与正文） */
+.bar__btn--queue {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.bar__btn--queue:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+/* 待发送提示行：一条细线 + 摘要，右侧取消 */
+.bar__pending {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: var(--sp-2) 0 0;
+  font-size: calc(var(--ui-font-size) * 0.88462);
+  color: var(--text-muted);
+}
+.bar__pending-line {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 1px;
+  background: var(--border-strong);
+}
+.bar__pending-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar__pending-text b {
+  color: var(--text);
+  font-weight: 500;
+}
+.bar__pending-text em {
+  color: var(--text-faint);
+  font-style: normal;
+}
+.bar__pending-cancel {
+  margin-left: auto;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: calc(var(--ui-font-size) * 0.84615);
+  padding: 1px 8px;
+  cursor: pointer;
+}
+.bar__pending-cancel:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.bar__notice {
+  margin: var(--sp-2) 0 0;
+  font-size: calc(var(--ui-font-size) * 0.88462);
+  color: var(--warn);
 }
 .bar__hint {
   display: flex;

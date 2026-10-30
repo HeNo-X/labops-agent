@@ -479,6 +479,11 @@ Object.assign(en,{
  '查询未成功':'Query failed',
  '次工具调用':'tool calls',
  '查看参数':'Show arguments',
- '收起参数':'Hide arguments'
+ '收起参数':'Hide arguments',
+ '加入待发送':'Queue for after this run',
+ '本轮还在执行，可先写下要补的一句（本轮结束后发送）':'This run is still going — write what to send next (sent when it finishes)',
+ '将在本轮结束后发送：':'Will be sent after this run: ',
+ '（已替换上一条待发送）':'(replaced the previous queued message)',
+ '待发送已填回输入框，请确认后发送':'Queued message moved back into the input — review and send it yourself'
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

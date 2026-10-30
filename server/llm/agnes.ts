@@ -84,6 +84,45 @@ function classify(status: number, body: string): AgnesError {
   return new AgnesError('agnes_http_error', `Agnes 返回未预期的状态码 ${status}。${snippet}`, status, false);
 }
 
+/**
+ * 从上游 400 正文里认出"这个模型不支持某个采样参数"，返回参数名。
+ *
+ * 真实案例（2026-10-31，kimi-k3 走百炼兼容端点）：
+ *   HTTP 400 InternalError.Algo.InvalidParameter:
+ *   Parameter 'temperature'=0.3 is not supported for kimi-k3 model.
+ * 若照原样抛错，模型链会把它当成"这个模型坏了"直接跳过 —— 实际上只差一个参数。
+ *
+ * 只允许降级**采样类**参数：tools / tool_choice / messages 一律不碰，
+ * 那几个被删掉是功能缺失（工具调用会直接失效），不能"顺手"降级。
+ */
+const DEGRADABLE_PARAMS = new Set([
+  'temperature',
+  'top_p',
+  'top_k',
+  'presence_penalty',
+  'frequency_penalty',
+  'repetition_penalty',
+  'seed',
+  'stop',
+  'chat_template_kwargs',
+  'enable_thinking'
+]);
+
+export function unsupportedParam(body: string): string | null {
+  const patterns = [
+    /Parameter\s+'([A-Za-z0-9_]+)'\s*=/i,
+    /[Uu]nsupported\s+parameter[:\s]+'?([A-Za-z0-9_]+)'?/,
+    /[Uu]nknown\s+parameter[:\s]+'?([A-Za-z0-9_]+)'?/,
+    /'([A-Za-z0-9_]+)'\s+is\s+not\s+supported/i
+  ];
+  for (const re of patterns) {
+    const m = re.exec(body);
+    const name = m?.[1];
+    if (name && DEGRADABLE_PARAMS.has(name)) return name;
+  }
+  return null;
+}
+
 export interface StreamOptions {
   messages: ChatMessage[];
   tools?: ToolSpec[];
@@ -140,8 +179,10 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
   // Thinking 默认关闭：第一阶段不展示内部推理，且思考 token 会挤占正文预算
   if (c.enableThinking) body['chat_template_kwargs'] = { enable_thinking: true };
 
-  const payload = JSON.stringify(body);
+  let payload = JSON.stringify(body);
   const logger = log ?? loggerFor('agnes');
+  /** 已经因为"该模型不支持"而摘掉的参数（每个参数只摘一次，摘满 3 个就认命报错） */
+  const degraded = new Set<string>();
 
   let lastError: AgnesError | null = null;
   for (let attempt = 0; attempt <= c.maxRetries; attempt++) {
@@ -165,6 +206,24 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
 
       if (!res.ok) {
         const text = await res.text().catch(() => '');
+        // 该模型不认某个采样参数（如 kimi-k3 不认 temperature）→ 摘掉该参数重发，
+        // 而不是把整个模型判死换下一个。这是"适配"，不该被 router 记成一次故障。
+        const bad = unsupportedParam(text);
+        if (bad && bad in body && !degraded.has(bad) && degraded.size < 3) {
+          degraded.add(bad);
+          delete body[bad];
+          payload = JSON.stringify(body);
+          logger.warn('llm_param_degraded', {
+            model: c.model,
+            param: bad,
+            status: res.status,
+            reason: '上游明确声明该模型不支持此参数，已摘掉后重发（不换模型、不记熔断）'
+          });
+          clearTimeout(timer);
+          opts.signal?.removeEventListener('abort', onOuterAbort);
+          attempt -= 1; // 抵消本轮 for 自增：降级重发不计入重试次数
+          continue;
+        }
         throw classify(res.status, text);
       }
       if (!res.body) {

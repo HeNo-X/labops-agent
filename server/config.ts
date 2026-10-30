@@ -155,15 +155,29 @@ export function getConfig(): AppConfig {
     },
     /**
      * DashScope（阿里云百炼）OpenAI 兼容端点 —— 2026-10-05 按负责人要求新增。
-     * 用途：**仅聊天模式**使用，按 models 顺序依次 fallback（前面的不可用就换下一个）。
+     * 用途：**仅聊天模式**使用（见 llm/router.ts：mode==='chat' 才走这里，工作模式只走 Agnes，
+     *       两侧在代码结构上互斥，不存在"聊天模型被工作模式拿去用"的可能）。
      * 顺序口径：负责人给的是界面自上而下的列表，要求**从下往上**依次调用 →
      * 故默认值按"最下面那个最先调用"排列。
-     * 说明：这些模型名已用真实 Key 调 GET /models 逐一核对存在，不是猜的。
+     * 说明：模型名已用真实 Key 调 GET /models 核对存在，且逐条实调 /chat/completions 验证可用。
+     *
+     * 2026-10-31 更替：上一批（deepseek-v4-flash-0731 / qwen3.8-max / qwen3.8-2.4t-a95b /
+     * deepseek-v4-pro-0813 / qwen3.8-27b / glm-5.3）免费额度已全部耗尽（403
+     * AllocationQuota.FreeTierOnly），逐条实调确认不可用 → 换成截图里这批新模型，
+     * 截图自上而下：
+     *   deepseek-v4.1-flash-1017 / deepseek-v4.1-flash / qwen3.8-max-0902 / qwen3.8-flash / kimi-k3
+     *
+     * ⚠️ 唯一偏离"自下而上"的地方：kimi-k3 从第 1 位挪到**最后**。实测三条硬理由：
+     *   ① 它**不认 temperature**（400 InternalError.Algo.InvalidParameter）→ 每轮白跑一次
+     *      （已在 llm/agnes.ts 加"摘参数重发"兜底，但没必要把每次请求都赌在兜底上）；
+     *   ② 同样的问题它平均 **23~32 秒**，其余四个 1.5~4.4 秒；
+     *   ③ 问「E310 今天的签到记录」它**不调工具**，直接回"请说明房间"，正是要避免的死路。
+     *   其余 4 个严格自下而上。要完全照原顺序，把 kimi-k3 挪回第一位即可。
      */
     dashscope: {
       apiKey: str('DASHSCOPE_API_KEY'),
       baseUrl: str('DASHSCOPE_BASE_URL', 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/+$/, ''),
-      models: str('DASHSCOPE_MODELS', 'deepseek-v4-flash-0731,qwen3.8-max,qwen3.8-2.4t-a95b,deepseek-v4-pro-0813,kimi-k3,qwen3.8-27b,glm-5.3')
+      models: str('DASHSCOPE_MODELS', 'qwen3.8-flash,qwen3.8-max-0902,deepseek-v4.1-flash,deepseek-v4.1-flash-1017,kimi-k3')
         .split(',').map((s) => s.trim()).filter(Boolean)
     },
     circuit: {

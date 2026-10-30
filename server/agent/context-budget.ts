@@ -9,7 +9,9 @@
  *  这些是"事实与权限"，剪掉会让模型拿旧授权作答。
  */
 import type { ChatMessage } from '../llm/agnes.ts';
-import { decideContextBudget, estimateTokens, type BudgetDecision, type TrimmedCounts } from '@shared/context-budget';
+// ⚠️ 服务端一律用**相对路径**引用 shared：Node 直接跑 TS 时没有 @shared 别名
+//    （web 侧的打包器才有），用别名会让所有加载本文件的测试在 import 阶段崩掉。
+import { decideContextBudget, estimateTokens, type BudgetDecision, type TrimmedCounts } from '../../shared/context-budget.ts';
 
 export interface BudgetConfig {
   enabled: boolean;

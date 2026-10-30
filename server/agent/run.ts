@@ -522,7 +522,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   const businessFacts:BusinessResult[]=[];
   let modelFinal='';
   /** 上下文预算的最近一次决策（随 run_completed 带出供界面展示，不参与任何业务判定） */
-  let budgetDecision: import('@shared/context-budget').BudgetDecision | null = null;
+  let budgetDecision: import('../../shared/context-budget.ts').BudgetDecision | null = null;
   const budgetFailures = { consecutive: 0 };
   /** ops.v1：本轮产出了待确认提案时，run_completed 必须如实带出任务状态 */
   let runTaskStatus: 'awaiting_confirmation' | undefined = undefined;

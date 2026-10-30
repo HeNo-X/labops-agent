@@ -29,6 +29,7 @@ import type {
 } from '../../shared/types.ts';
 import type { NeedConfirmPayload, Proposal, SandboxActor } from '../../shared/operations-contract.ts';
 import { saveFacts, listFacts, transformSchedule } from './facts.ts';
+import { applyContextBudget } from './context-budget.ts';
 import { isBusinessConnected, businessScope, readBusinessTask, listBusinessTasks, loadAuthorizedDataset } from '../business/bridge.ts';
 import { getConfig } from '../config.ts';
 import { loadDataset } from '../data/store.ts';
@@ -520,6 +521,9 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   const verifiedAnswers: string[] = [];
   const businessFacts:BusinessResult[]=[];
   let modelFinal='';
+  /** 上下文预算的最近一次决策（随 run_completed 带出供界面展示，不参与任何业务判定） */
+  let budgetDecision: import('@shared/context-budget').BudgetDecision | null = null;
+  const budgetFailures = { consecutive: 0 };
   /** ops.v1：本轮产出了待确认提案时，run_completed 必须如实带出任务状态 */
   let runTaskStatus: 'awaiting_confirmation' | undefined = undefined;
   /** 指纹 = 工具名 + 排序后的规范化参数；在**执行前**检查（写工具接入后防重复执行） */
@@ -535,6 +539,18 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
 
     let roundText = '';
     let calls: ChatMessage['tool_calls'] = undefined;
+
+    // 上下文预算（确定性截断，不做 LLM 摘要）：每次调模型前评估一次，
+    // 决策对象保留下来随 run_completed 带出，界面可看到"估算/阈值/精简了几条"。
+    const budgeted = applyContextBudget(messages, {
+      enabled: cfg.agent.context.enabled,
+      window: cfg.agent.context.window,
+      outputReserve: cfg.agent.context.outputReserve,
+      circuitBreakerAfter: cfg.agent.context.circuitBreakerAfter,
+      thresholdRatio: cfg.agent.context.thresholdRatio
+    }, budgetFailures);
+    for (let i = 0; i < budgeted.messages.length; i += 1) messages[i] = budgeted.messages[i]!;
+    budgetDecision = budgeted.decision;
 
     for await (const ev of streamChatWithFallback({ messages, tools: toolsForMode(a.mode ?? 'task'), signal: a.signal }, a.mode ?? 'task', a.log, (spec) => {
       // 记录**真正**发起请求的模型（fallback 后会被覆盖）——界面要显示的是它，不是配置里的第一个
@@ -753,7 +769,9 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     engine: engineForMode(a.mode ?? 'task'),
     ...(usedModel ? { model: usedModel } : {}),
     ...(runTaskStatus ? { taskStatus: runTaskStatus } : {}),
-    ...(usage ? { usage } : {})
+    ...(usage ? { usage } : {}),
+    // 上下文预算决策（估算口径）—— 只为可观测，不参与任何终态判定
+    ...(budgetDecision ? { budget: budgetDecision } : {})
   } satisfies RunCompletedPayload);
 }
 

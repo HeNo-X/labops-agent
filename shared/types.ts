@@ -215,6 +215,22 @@ export interface RunCompletedPayload {
   taskStatus?: string;
   /** 模型用量（仅 agnes 引擎有） */
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  /**
+   * 上下文预算决策（估算口径，见 shared/context-budget.ts）。
+   * 只用于**可观测**（界面显示"估算 X / 阈值 Y · 已精简 N 条"），
+   * 不参与终态判定，也绝不冒充 provider 的真实 usage。
+   */
+  budget?: {
+    shouldTrim: boolean;
+    reason: 'disabled' | 'not_enough_turns' | 'below_threshold' | 'above_threshold' | 'circuit_breaker';
+    tokenSource: 'estimate';
+    estimatedTokens: number;
+    threshold: number;
+    contextWindow: number;
+    outputReserveTokens: number;
+    effectiveContextWindow: number;
+    trimmed: { toolResultsDropped: number; historyTurnsDropped: number };
+  };
 }
 
 /** create_operations_report 的结构化产物（只创建给当前用户看的报告，不自动发布） */

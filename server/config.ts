@@ -91,6 +91,17 @@ export interface AppConfig {
     maxSteps: number;
     /** 单次任务墙钟上限 */
     wallClockMs: number;
+    /**
+     * 上下文预算（确定性截断）。分母先用 window - outputReserve，
+     * 因为模型的 context window 是 input+output 共享窗口。
+     */
+    context: {
+      enabled: boolean;
+      window: number;
+      outputReserve: number;
+      circuitBreakerAfter: number;
+      thresholdRatio: number;
+    };
   };
   /**
    * 视觉理解（多模态证据）。独立于任务/聊天两条主链路：
@@ -163,7 +174,20 @@ export function getConfig(): AppConfig {
     },
     agent: {
       maxSteps: int('AGENT_MAX_STEPS', 6, 1, 12),
-      wallClockMs: int('AGENT_WALL_CLOCK_MS', 60000, 5000, 600000)
+      wallClockMs: int('AGENT_WALL_CLOCK_MS', 60000, 5000, 600000),
+      /**
+       * 上下文预算（确定性截断，不做 LLM 摘要压缩）。
+       * 关闭开关（CONTEXT_TRIM_ENABLED=0）时行为与改造前完全一致 —— 只保留决策可观测。
+       */
+      context: {
+        enabled: bool('CONTEXT_TRIM_ENABLED', true),
+        window: int('CONTEXT_WINDOW', 65536, 4096, 1048576),
+        outputReserve: int('CONTEXT_OUTPUT_RESERVE_TOKENS', 8192, 0, 65536),
+        /** 连续多少次"修剪后仍在阈值之上/失败"就不再尝试（熔断），避免每步都白算 */
+        circuitBreakerAfter: int('CONTEXT_BREAKER_AFTER', 3, 1, 20),
+        /** 估算口径下的告警阈值占比：超过它才判定 above_threshold */
+        thresholdRatio: 0.75
+      }
     },
     vision: {
       apiKey: str('VISION_API_KEY') || str('DASHSCOPE_API_KEY'),

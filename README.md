@@ -23,6 +23,24 @@ npm run demo        # 同时起主系统(18843)与 Agent(18878)，随机账号�
 
 接真实模型：复制 `.env.example` 为 `.env`，填 `AGNES_API_KEY`（工作模式）与 `DASHSCOPE_API_KEY`（聊天模式），再 `npm start`。两把 Key 互不借用——某模式未配 Key 时该模式回落规则引擎并如实标注。
 
+### 上下文预算（确定性截断，可一键关闭）
+
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `CONTEXT_TRIM_ENABLED` | `1` | 总开关。设 `0` 时行为与未接入预算前一致，只保留决策可观测（仍显示估算值） |
+| `CONTEXT_WINDOW` | `65536` | 所用模型的上下文窗口（**input+output 共享**，所以阈值分母先扣输出预留） |
+| `CONTEXT_OUTPUT_RESERVE_TOKENS` | `8192` | 输出预留；有效窗口 = `CONTEXT_WINDOW - min(预留, 窗口)`，永不为负 |
+| `CONTEXT_BREAKER_AFTER` | `3` | 连续「精简后仍超阈值」次数上限，达到后置 `circuit_breaker` 并停止再处理 |
+
+阈值 = 有效窗口 × 0.75。token 数是**估算**（中文约 1 字 1 token、拉丁 4 字符 1 token，偏保守），
+只用于展示与截断判断，**不冒充** provider 真实 usage。截断只做确定性瘦身：最旧的工具结果全文压到
+1200 字并保留摘要；权限作用域、已确认提案的 scopeKey/version、服务端时间基准**永不精简**。
+
+验证方式：改上述变量后重启服务并跑一次多步任务，界面「任务完成」步骤显示
+`上下文：估算 X / 阈值 Y token（estimate）· 已精简 N 条工具结果`；调小 `CONTEXT_WINDOW` 应看到
+`reason` 由 `below_threshold` 变为 `above_threshold`，设 `CONTEXT_TRIM_ENABLED=0` 应恒为 `disabled`。
+
+
 ## 界面入口
 
 | 入口 | 用途 |

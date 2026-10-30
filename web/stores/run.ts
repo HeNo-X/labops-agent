@@ -38,6 +38,7 @@ import { PERIODS } from '@shared/periods';
 import { actorHeaders } from '../actor';
 import { toolTitle } from '../lib/turn-view';
 import { DISPLAY_TEXT_BUDGET, clampText } from '../lib/tool-display';
+import { describeBudget, type BudgetDecision } from '@shared/context-budget';
 
 /** 时间线那一行短结论的预算（正文级篇幅；完整内容在 summaryFull / 结果卡里） */
 const TIMELINE_DETAIL_BUDGET = 160;
@@ -380,12 +381,13 @@ export const useRunStore = defineStore('run', () => {
             steps[answerIdx] = { ...steps[answerIdx]!, status: 'done', title: '回答完成', detail: `回答完成（${stream.value.length} 字）` };
             answerIdx = null;
           }
-          const p = ev.payload as { steps: number; toolCalls: number; ms: number };
+          const p = ev.payload as { steps: number; toolCalls: number; ms: number; budget?: BudgetDecision };
           steps.push({
             id: `s${ev.seq}`,
             kind: 'done',
             title: '任务完成',
-            detail: `工具调用 ${p.toolCalls} 次｜服务端耗时 ${p.ms} ms`,
+            // 上下文预算只作可观测说明（估算口径），不改变"完成"这一事实判定
+            detail: `工具调用 ${p.toolCalls} 次｜服务端耗时 ${p.ms} ms${p.budget ? `｜${describeBudget(p.budget)}` : ''}`,
             status: 'done'
           });
           break;

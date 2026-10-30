@@ -47,6 +47,12 @@ const isHero = computed(() => props.variant !== 'dock');
 // R16：提交状态（创建会话/等待接受）也要锁输入并可见，避免"点了没反应"或重复提交
 const canSubmit = computed(() => text.value.trim().length > 0 && !store.inputLocked && !props.submitting);
 const busy = computed(() => store.inputLocked || Boolean(props.submitting));
+/**
+ * 等待你拍板 ≠ 机器在算（T1 相位机）：need_confirm 到达后 runStatus 仍是 running
+ * （输入互斥不放宽），但状态标签换成"等待你的确认"、glyph 换 ⏸（StatusTag 本就无动画，
+ * 不新增 CSS 动效），工作计时由 store 暂停累计。
+ */
+const awaitingConfirm = computed(() => store.phase === 'awaiting_confirm');
 
 const emit = defineEmits<{ submit: [string]; cancel: [] }>();
 
@@ -177,7 +183,13 @@ function onKeydown(e: KeyboardEvent): void {
     <p v-if="voiceHint" class="bar__voice-hint" role="alert">{{ voiceHint }}</p>
 
     <div v-if="busy" class="bar__hint">
-      <StatusTag v-if="busy" tone="info" glyph="◌" :label="props.submitting && !store.inputLocked ? '正在提交…' : '任务执行中'" :title="tr('正在处理，请稍候')" />
+      <StatusTag
+        v-if="busy"
+        :tone="awaitingConfirm ? 'warn' : 'info'"
+        :glyph="awaitingConfirm ? '⏸' : '◌'"
+        :label="awaitingConfirm ? tr('等待你的确认') : props.submitting && !store.inputLocked ? tr('正在提交…') : tr('任务执行中')"
+        :title="awaitingConfirm ? tr('已生成待确认办理单，请在对话中确认或取消') : tr('正在处理，请稍候')"
+      />
     </div>
 
     <div v-if="!isHero && props.examples !== false" class="bar__examples bar__examples--dock">

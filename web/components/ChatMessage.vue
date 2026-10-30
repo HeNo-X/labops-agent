@@ -25,6 +25,7 @@ import ReportCard from './ReportCard.vue';
 import EvidenceObservationCard from './EvidenceObservationCard.vue';
 import type { EvidenceObservationResult } from '@shared/types';
 import type { Tone } from './ui-types';
+import { buildTurnRenderUnit, shouldForceExpand, toolTitle, toneOf, glyphOf, labelOf } from '../lib/turn-view';
 
 const props = defineProps<{ msg: ChatMessage }>();
 const emit = defineEmits<{ retry: []; decided: [] }>();
@@ -60,6 +61,56 @@ const businessArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind=
 
 const isUser = computed(() => props.msg.role === 'user');
 
+/**
+ * 轮次渲染单元（T2）—— 活跃轮从 run store 的实时轨迹重建，历史轮从持久化的
+ * toolCalls/ms/status 重建，**同一套口径**：
+ *   · 运行中 = 展开、逐步带状态；完成 = 默认收起成一行"已工作 N 秒"；
+ *   · 中断/取消/失败 = 强制展开，标题为"已停止"且**不带耗时**；
+ *   · 历史轮缺完成时间 → interrupted（只显示"已停止"），绝不伪造"已完成"。
+ */
+const turnUnit = computed(() => {
+  const live = run.runStatus === 'running' && props.msg.status === 'streaming';
+  if (live) {
+    return {
+      unit: buildTurnRenderUnit(run.trace, { running: true, interrupted: false, serverMs: null }),
+      live: true
+    };
+  }
+  // 历史轮：由持久化事实重建步骤（不重放事件流 —— 历史会话没有 events）
+  const steps = props.msg.toolCalls.map((t) => ({
+    id: t.toolCallId,
+    kind: 'tool' as const,
+    title: t.ok === false ? tr('查询未成功') : toolTitle(t.tool),
+    detail: t.ok === false ? `${t.error?.code ?? 'error'}：${t.error?.message ?? ''}` : (t.summary ?? ''),
+    status: (t.ok === true ? 'done' : t.ok === false ? 'failed' : 'running') as 'done' | 'failed' | 'running',
+    ms: t.ms,
+    argsText: argsText(t)
+  }));
+  const interrupted = props.msg.status === 'interrupted' || props.msg.status === 'cancelled';
+  return {
+    // 已完成轮才有服务端耗时事实（历史里就是 meta.ms）；其余一律 null
+    unit: buildTurnRenderUnit(steps, {
+      running: false,
+      interrupted,
+      serverMs: props.msg.status === 'completed' ? (props.msg.ms ?? null) : null
+    }),
+    live: false
+  };
+});
+/** 展开态按稳定 step id 记忆（不按数组下标）—— 切换会话由父级 key 重建组件自然清空 */
+const openSteps = ref<Set<string>>(new Set());
+function toggleStep(id: string): void {
+  const next = new Set(openSteps.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  openSteps.value = next;
+}
+const traceSummary = computed(() => {
+  const u = turnUnit.value.unit;
+  const tools = u.toolCount ? ` · ${u.toolCount} ${tr('次工具调用')}` : '';
+  return `${u.workStatus.label}${tools}`;
+});
+
 const statusMeta = computed<{ tone: Tone; glyph: string; label: string }>(() => {
   switch (props.msg.status) {
     case 'streaming':
@@ -76,29 +127,6 @@ const statusMeta = computed<{ tone: Tone; glyph: string; label: string }>(() => 
       return { tone: 'neutral', glyph: '○', label: '未知' };
   }
 });
-
-function toolTitle(tool: string): string {
-  switch (tool) {
-    case 'query_schedule':
-      return '查询课表';
-    case 'query_lab_status':
-      return '查询房间状态';
-    case 'query_free_rooms':
-      return '查找空闲房间';
-    case 'prepare_issue_ticket':
-      return '准备报修单';
-    case 'prepare_room_closure':
-      return '准备停用计划';
-    case 'prepare_notification':
-      return '准备站内通知';
-    case 'prepare_duty_session':
-      return '准备值班操作';
-    case 'create_operations_report':
-      return '生成运营日报';
-    default:
-      return tool;
-  }
-}
 
 function argsText(t: ToolCallRecord): string {
   return Object.entries(t.args ?? {})
@@ -162,11 +190,27 @@ const engineTitle = computed(() => {
         </button>
       </div>
 
-      <!-- 活跃轮：任务轨迹来自实时事件流 -->
-      <details v-if="!textOnly && run.runStatus === 'running' && msg.status === 'streaming'" class="msg__trace">
-        <summary>{{tr("执行过程")}}</summary>
+      <!-- 执行过程（T2）：活跃轮与历史轮同一口径 —— 运行中/中断/失败强制展开，
+           正常完成默认收起成一行；每步带状态标签与耗时 -->
+      <details
+        v-if="!textOnly && turnUnit.unit.steps.length"
+        class="msg__trace"
+        :open="shouldForceExpand(turnUnit.unit)"
+      >
+        <summary>{{ traceSummary }}</summary>
         <ol class="msg__steps">
-          <li v-for="s in run.trace" :key="s.id">{{ s.title }} —— {{ s.detail }}</li>
+          <li v-for="s in turnUnit.unit.steps" :key="s.id" class="msg__step">
+            <span class="msg__steptitle">{{ s.title }}</span>
+            <StatusTag :tone="toneOf(s) as Tone" :glyph="glyphOf(s)" :label="tr(labelOf(s))" />
+            <span v-if="s.ms !== undefined" class="msg__ms">{{ s.ms }} ms</span>
+            <p v-if="s.detail" class="msg__stepdetail">{{ s.detail }}</p>
+            <template v-if="s.argsText">
+              <button type="button" class="msg__stepmore" @click="toggleStep(s.id)">
+                {{ tr(openSteps.has(s.id) ? '收起参数' : '查看参数') }}
+              </button>
+              <p v-if="openSteps.has(s.id)" class="msg__args">{{ tr('参数：') }}{{ s.argsText }}</p>
+            </template>
+          </li>
         </ol>
       </details>
 
@@ -316,6 +360,28 @@ const engineTitle = computed(() => {
 .msg__steps {
   margin: var(--sp-1) 0 0;
   padding-left: 18px;
+}
+.msg__step {
+  margin-bottom: var(--sp-1);
+}
+.msg__steptitle {
+  font-weight: 600;
+  margin-right: var(--sp-2);
+}
+.msg__stepdetail {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+.msg__stepmore {
+  margin-top: 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: calc(var(--ui-font-size) * 0.84615);
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
 }
 .msg__tool {
   border: 1px solid var(--border);

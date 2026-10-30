@@ -239,7 +239,8 @@ watch(
             : store.runStatus === 'cancelled'
               ? 'cancelled'
               : 'interrupted';
-    live.ms = store.elapsedMs;
+    // 耗时优先用服务端权威值（run_completed.payload.ms）；拿不到时才退回本次实测跨度
+    live.ms = store.serverMs ?? store.elapsedMs;
     live.model = store.model;
   }
 );
@@ -363,7 +364,7 @@ async function onSubmit(q: string): Promise<void> {
       live.engine = store.engine;
       live.model = store.model;
       live.sourceType = store.sourceType;
-      live.ms = store.elapsedMs;
+      live.ms = store.serverMs ?? store.elapsedMs;
       live.error = store.error ? { ...store.error } : null;
     }
     liveConvId = null;

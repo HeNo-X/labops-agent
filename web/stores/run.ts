@@ -12,6 +12,10 @@ import {clientFetch} from '../client';
  *  resultKind 回答「结果长什么样」，只驱动结果区渲染：
  *    none / schedule_hit / schedule_empty / config_insufficient / lab_status / free_rooms
  *
+ *  phase（T1 相位机）回答「现在在等谁」：planning / model / tool / awaiting_confirm /
+ *    answering / 终态。只做展示与计时口径（awaiting_confirm 暂停工作计时），
+ *    不参与输入锁判断；转移白名单见 PHASE_TRANSITIONS。
+ *
  *  隔离规则：每次 beginRun 生成新的 runId 随请求发送；ingest 丢弃一切
  *  runId 不等于当前任务的事件 —— 旧流迟到的事件绝不可能污染新任务。
  */
@@ -32,9 +36,48 @@ import { DATA_SOURCE_LABELS, RUN_EVENT_TYPES } from '@shared/types';
 import type { NeedConfirmPayload } from '@shared/operations-contract';
 import { PERIODS } from '@shared/periods';
 import { actorHeaders } from '../actor';
+import { toolTitle } from '../lib/turn-view';
 
 export type RunStatus = 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
 export type ResultKind = 'none' | 'schedule_hit' | 'schedule_empty' | 'config_insufficient' | 'lab_status' | 'free_rooms';
+
+/**
+ * 运行相位 —— 回答「现在到底在等谁」，与 RunStatus（回答「任务还开着吗」）正交并存。
+ * need_confirm 到达时 runStatus 仍是 running（输入互斥不放宽），但相位进入
+ * awaiting_confirm：UI 把"任务执行中"换成"等待你的确认"，工作计时暂停累计。
+ * 相位只来自已存在的真实事件（不新增服务端事件类型），run_cancelled 归为正常结束。
+ */
+export type RunPhase =
+  | 'idle' | 'planning' | 'model' | 'tool'
+  | 'awaiting_confirm' | 'answering'
+  | 'completed' | 'failed' | 'cancelled';
+
+/**
+ * 相位转移白名单表（表驱动，不写 if-else 散落）。表**逐条列出全部合法边**，
+ * 含同态自环（a→a）—— 重复/重发事件幂等靠它，而不是靠函数里的提前 return；
+ * 三个终态只有自环，迟到事件不得把终态翻回中间态。
+ */
+export const PHASE_TRANSITIONS: Record<RunPhase, readonly RunPhase[]> = {
+  idle: ['idle', 'planning', 'failed', 'cancelled'],
+  planning: ['planning', 'model', 'tool', 'awaiting_confirm', 'answering', 'completed', 'failed', 'cancelled'],
+  model: ['model', 'tool', 'awaiting_confirm', 'answering', 'completed', 'failed', 'cancelled'],
+  tool: ['tool', 'model', 'awaiting_confirm', 'answering', 'completed', 'failed', 'cancelled'],
+  awaiting_confirm: ['awaiting_confirm', 'tool', 'model', 'answering', 'completed', 'failed', 'cancelled'],
+  answering: ['answering', 'tool', 'model', 'awaiting_confirm', 'completed', 'failed', 'cancelled'],
+  completed: ['completed'],
+  failed: ['failed'],
+  cancelled: ['cancelled']
+};
+
+export function canTransitionPhase(from: RunPhase, to: RunPhase): boolean {
+  return PHASE_TRANSITIONS[from].includes(to);
+}
+
+/** 严格版：白名单外抛错。store 内经 movePhase 防御性消费（异常事件序列不炸运行界面）。 */
+export function transitionPhase(from: RunPhase, to: RunPhase): RunPhase {
+  if (!canTransitionPhase(from, to)) throw new Error(`invalid phase transition: ${from} -> ${to}`);
+  return to;
+}
 
 export interface Lab {
   id: string;
@@ -113,6 +156,11 @@ export const useRunStore = defineStore('run', () => {
   const runStatus = ref<RunStatus>('idle');
   /** 输入锁定 = 任务还在跑。只有终态事件 + 流收尾才解锁（P0 修复） */
   const inputLocked = computed(() => runStatus.value === 'running');
+  /**
+   * 运行相位（T1）：只用于展示与计时口径，**不接入 inputLocked 判断** ——
+   * 锁的语义保持 RunStatus 原样，避免 6 处消费点行为漂移。
+   */
+  const phase = ref<RunPhase>('idle');
   const question = ref('');
   /** 当前任务的 runId。前端生成、随请求发送；服务端全部事件回带它 */
   const runId = ref<string | null>(null);
@@ -121,6 +169,11 @@ export const useRunStore = defineStore('run', () => {
   const stream = ref('');
   const error = ref<StreamErrorInfo | null>(null);
   const elapsedMs = ref(0);
+  /**
+   * 服务端权威耗时（run_completed.payload.ms）。**唯一允许用来显示"已工作 N 秒"的数字**；
+   * 前端本地时钟的 elapsedMs 只用于运行中的进度感与取消前的时长，不冒充服务端事实。
+   */
+  const serverMs = ref<number | null>(null);
   /** ops.v1：活跃轮的待确认提案（need_confirm 事件载荷）。历史轮由消息内的提案卡自持 */
   const pendingConfirm = ref<NeedConfirmPayload | null>(null);
 
@@ -375,28 +428,11 @@ export const useRunStore = defineStore('run', () => {
     return [...map.values()];
   });
 
-  function toolTitle(tool: string): string {
-    switch (tool) {
-      case 'query_schedule':
-        return '查询课表';
-      case 'query_lab_status':
-        return '查询房间状态';
-      case 'query_free_rooms':
-        return '查找空闲房间';
-      case 'prepare_issue_ticket':
-        return '准备报修单';
-      case 'prepare_room_closure':
-        return '准备停用计划';
-      case 'prepare_notification':
-        return '准备站内通知';
-      case 'prepare_duty_session':
-        return '准备值班操作';
-      case 'create_operations_report':
-        return '生成运营日报';
-      default:
-        return `执行 ${tool}`;
-    }
-  }
+  /**
+   * 工具中文名由 web/lib/turn-view.ts 统一提供（此前本文件与 ChatMessage.vue
+   * 各有一份映射表，会漂移 —— 合并为单一事实源）。
+   */
+
 
   const periodSummary = computed(() =>
     PERIODS.map((p) => {
@@ -408,12 +444,55 @@ export const useRunStore = defineStore('run', () => {
   // ------------------------------ 动作 ------------------------------
 
   let timer: number | null = null;
+  /**
+   * 工作计时两段式：awaiting_confirm（等人拍板）的时间**不计入工作时长**。
+   * workSince === 0 表示当前处于暂停段；stopTimer 把剩余段折进 workAccum 收尾。
+   */
+  let workSince = 0;
+  let workAccum = 0;
+
+  function pauseWorkTimer(): void {
+    if (workSince > 0) {
+      workAccum += Date.now() - workSince;
+      workSince = 0;
+    }
+  }
+
+  function resumeWorkTimer(): void {
+    if (workSince === 0 && runStatus.value === 'running') workSince = Date.now();
+  }
 
   function stopTimer(): void {
+    pauseWorkTimer();
+    elapsedMs.value = workAccum;
     if (timer !== null) {
       window.clearInterval(timer);
       timer = null;
     }
+  }
+
+  /** 相位迁移的唯一入口。终态后迟到事件不改相位；白名单外的序列降级为告警，不炸运行界面。 */
+  function movePhase(to: RunPhase): void {
+    const from = phase.value;
+    if (from === 'completed' || from === 'failed' || from === 'cancelled') return;
+    try {
+      phase.value = transitionPhase(from, to);
+    } catch (e) {
+      console.warn(`[run] ${(e as Error).message}`);
+      return;
+    }
+    if (phase.value === 'awaiting_confirm') pauseWorkTimer();
+    else if (from === 'awaiting_confirm') resumeWorkTimer();
+  }
+
+  /** 仍有 tool_started 未收到 tool_result 的调用数 —— 相位回 model 的依据 */
+  function outstandingTools(): number {
+    const started = new Set<string>();
+    for (const ev of events.value) {
+      if (ev.type === 'tool_started') started.add(String((ev.payload as { toolCallId?: string }).toolCallId ?? ''));
+      else if (ev.type === 'tool_result') started.delete(String((ev.payload as { toolCallId?: string }).toolCallId ?? ''));
+    }
+    return started.size;
   }
 
   function ensureSessionId(): string {
@@ -444,12 +523,14 @@ export const useRunStore = defineStore('run', () => {
 
   function resetRun(): void {
     runStatus.value = 'idle';
+    phase.value = 'idle'; // 初始化直赋值：不是事件驱动的转移，不走白名单
     question.value = '';
     runId.value = null;
     events.value = [];
     stream.value = '';
     error.value = null;
     elapsedMs.value = 0;
+    serverMs.value = null;
     engine.value = null;
     model.value = null;
     sourceType.value = null;
@@ -466,11 +547,13 @@ export const useRunStore = defineStore('run', () => {
     question.value = q;
     runId.value = newRunId();
     runStatus.value = 'running';
+    movePhase('planning'); // 乐观相位：run_started 到达后重申（同态重入幂等）
     ensureSessionId();
-    const t0 = Date.now();
     stopTimer();
+    workAccum = 0;
+    resumeWorkTimer();
     timer = window.setInterval(() => {
-      elapsedMs.value = Date.now() - t0;
+      elapsedMs.value = workAccum + (workSince > 0 ? Date.now() - workSince : 0);
     }, 100);
     return runId.value;
   }
@@ -505,6 +588,11 @@ export const useRunStore = defineStore('run', () => {
         serverNow.value = p.serverNow;
         term.value = p.term;
         allowedTools.value = p.allowedTools;
+        movePhase('planning');
+        break;
+      }
+      case 'tool_started': {
+        movePhase('tool');
         break;
       }
       case 'tool_result': {
@@ -513,6 +601,10 @@ export const useRunStore = defineStore('run', () => {
           resultKind?: ToolResultKind;
           result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult;
         };
+        // 相位判定必须放在 `if (!p.result)` 之前：多数工具（准备/查询类）回传不带
+        // 结构化 result，仍算"这次调用已经返回"，否则相位会永远卡在 tool。
+        // 相位：仍有工具在跑保持 tool；全部返回且未出正文 → 回 model 等待
+        movePhase(outstandingTools() > 0 ? 'tool' : 'model');
         if (!p.result) break;
         if (p.resultKind === 'lab_status') {
           extraResult.value = { kind: 'lab_status', payload: p.result as LabStatusResult };
@@ -528,12 +620,14 @@ export const useRunStore = defineStore('run', () => {
         break;
       }
       case 'run_completed': {
+        movePhase('completed');
         if (runStatus.value === 'running') runStatus.value = 'completed';
         // R03/C04：以服务端权威全文对齐（delta 可能漏块；durable 确认在保存成功后发出）
-        const p2 = ev.payload as { answer?: string; engine?: EngineType; model?: string };
+        const p2 = ev.payload as { answer?: string; engine?: EngineType; model?: string; ms?: number };
         if(p2.engine) engine.value=p2.engine;
         // model 反映 fallback 之后真正生效的模型，覆盖 run_started 的计划值
         if(p2.model) model.value=p2.model;
+        if (typeof p2.ms === 'number') serverMs.value = p2.ms;
         if (typeof p2.answer === 'string' && p2.answer) stream.value = p2.answer;
         break;
       }
@@ -541,6 +635,7 @@ export const useRunStore = defineStore('run', () => {
         // R03：保存失败必须可见 —— 保留已生成内容，但明确"刷新后可能丢失"
         const p3 = ev.payload as { message?: string; answer?: string };
         if (runStatus.value !== 'cancelled') runStatus.value = 'failed';
+        movePhase('failed');
         if (typeof p3.answer === 'string') stream.value = p3.answer;
         error.value = { code: 'save_failed', message: p3.message ?? '本轮结果写入会话历史失败' };
         break;
@@ -555,17 +650,21 @@ export const useRunStore = defineStore('run', () => {
           };
           if (runStatus.value !== 'cancelled') runStatus.value = 'failed';
         }
+        movePhase(p4.saved === false ? 'failed' : 'completed');
         break;
       }
       case 'answer_delta': {
         const p = ev.payload as { text: string };
         stream.value += p.text;
+        movePhase('answering');
         break;
       }
       case 'need_confirm': {
         // ops.v1：活跃轮待确认提案。卡片本体渲染在消息流内（OperationCard），
         // 这里保存载荷供"有未确认办理单"类提示使用
         pendingConfirm.value = ev.payload as NeedConfirmPayload;
+        // T1：等人拍板是显式相位 —— UI 据此停 loading、暂停工作计时；runStatus 不动（输入互斥不变）
+        movePhase('awaiting_confirm');
         break;
       }
       case 'task_updated':
@@ -576,12 +675,15 @@ export const useRunStore = defineStore('run', () => {
         const p = ev.payload as StreamErrorInfo;
         error.value = p;
         if (runStatus.value !== 'cancelled') runStatus.value = 'failed';
+        movePhase('failed');
         break;
       }
       case 'run_cancelled': {
         // F05：服务端发出的取消同样是终态。此前缺这个分支会让输入永久锁住。
-        // 终态幂等：只在运行中才收敛到 cancelled。
+        // 终态幂等：只在运行中才收敛到 cancelled。取消是**正常结束**（中性态）：
+        // 不置 error、不进服务端熔断计数（router.ts 对 run_cancelled 直接透传）。
         if (runStatus.value === 'running') runStatus.value = 'cancelled';
+        movePhase('cancelled');
         break;
       }
       default:
@@ -598,6 +700,7 @@ export const useRunStore = defineStore('run', () => {
     }
     error.value = err;
     runStatus.value = 'failed';
+    movePhase('failed');
     appendEvent({
       seq: 100000 + events.value.length,
       v: 1,
@@ -613,6 +716,7 @@ export const useRunStore = defineStore('run', () => {
     if (runStatus.value !== 'running') return;
     stopTimer();
     runStatus.value = 'cancelled';
+    movePhase('cancelled');
     appendEvent({
       seq: 100000 + events.value.length,
       v: 1,
@@ -681,6 +785,7 @@ export const useRunStore = defineStore('run', () => {
   return {
     // state
     runStatus,
+    phase,
     inputLocked,
     question,
     runId,
@@ -689,6 +794,7 @@ export const useRunStore = defineStore('run', () => {
     stream,
     error,
     elapsedMs,
+    serverMs,
     engine,
     model,
     sourceType,

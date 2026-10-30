@@ -46,8 +46,10 @@ import {
   deleteMessagesAndRuns,
   recomputeConversationContext,
   supersedePendingProposals,
-  cancelOpsTasks
+  cancelOpsTasks,
+  listAwaitingProposalsForConversation
 } from '../persistence/db.ts';
+import type { RunSnapshot } from '@shared/types';
 import { collectRoundRefs, revertRoundEffects } from '../operations/revert.ts';
 import type { EffectsReport } from '../operations/revert.ts';
 import { forgetSession } from '../agent/session.ts';
@@ -62,6 +64,62 @@ function parseMode(v: unknown): 'chat' | 'task' | null {
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(body));
+}
+
+/**
+ * 由**已落库事实**拼出运行快照（只读投影）。
+ * 规则：取不到就 null / 空数组 —— 不推测、不补默认值（R4）。
+ * 相位只在能确定时给值：终态直接映射；仍有未确认提案 → awaiting_confirm；其余 null。
+ */
+function buildRunSnapshot(conversationId: string, run: Record<string, unknown>): RunSnapshot {
+  const status = String(run['status'] ?? '');
+  const terminal: RunSnapshot['terminal'] =
+    status === 'completed'
+      ? 'completed'
+      : status === 'cancelled'
+        ? 'cancelled'
+        : status === 'failed' || status === 'save_failed'
+          ? 'failed'
+          : status === 'interrupted'
+            ? 'interrupted'
+            : null;
+
+  const assistant = getMessages(conversationId).find((m) => m.id === String(run['assistantMessageId'] ?? '')) ?? null;
+  const meta = (assistant?.meta ?? {}) as Record<string, unknown>;
+  const rawCalls = Array.isArray(meta['toolCalls']) ? (meta['toolCalls'] as Array<Record<string, unknown>>) : [];
+  const toolCalls: RunSnapshot['toolCalls'] = rawCalls.map((t) => ({
+    toolCallId: String(t['toolCallId'] ?? ''),
+    tool: String(t['tool'] ?? ''),
+    args: (t['args'] as Record<string, unknown>) ?? {},
+    ok: typeof t['ok'] === 'boolean' ? (t['ok'] as boolean) : null,
+    ...(typeof t['ms'] === 'number' ? { ms: t['ms'] as number } : {}),
+    ...(typeof t['summary'] === 'string' ? { summary: t['summary'] as string } : {}),
+    ...(typeof t['resultKind'] === 'string' ? { resultKind: t['resultKind'] as string } : {}),
+    ...(t['error'] ? { error: t['error'] as { code: string; message: string } } : {})
+  }));
+
+  const proposals = listAwaitingProposalsForConversation(conversationId);
+  const phase: RunSnapshot['phase'] = terminal ?? (proposals.length ? 'awaiting_confirm' : null);
+
+  return {
+    runId: String(run['id'] ?? ''),
+    conversationId,
+    phase,
+    toolCalls,
+    // 增量刷写的最新正文；仍在流式时它**不是最终全文**，UI 不得当成已定稿
+    answerText: String(assistant?.text ?? ''),
+    proposals,
+    sourceType: (meta['sourceType'] as RunSnapshot['sourceType']) ?? null,
+    engine: (meta['engine'] as RunSnapshot['engine']) ?? null,
+    model: (meta['model'] as string | null) ?? null,
+    lastSeq: null,
+    terminal,
+    // 正文是否已落为终态（streaming = 还在写库；没有消息行 = 未落库）
+    saved: assistant !== null && assistant.status !== 'streaming',
+    startedAt: (run['startedAt'] as string | null) ?? null,
+    endedAt: (run['endedAt'] as string | null) ?? null,
+    assistantMessageId: assistant?.id ?? null
+  };
 }
 
 /** 统一异步边界：路由层 await 本函数，任何异常都变成 500 而不是进程退出（N01） */
@@ -120,6 +178,30 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
     const run = getRun(decodeURIComponent(runMatch[1]!));
     if (!run || !getConversationMeta(String(run['conversationId']))) return json(res, 404, { error: 'run_not_found' }), true;
     return json(res, 200, run), true;
+  }
+
+  // ---- 运行快照（只读投影）：断线后前端据此把一轮收敛到真实终态 ----
+  //  设计约束：字段只能来自已落库事实（runs 行 + assistant 消息 meta + 待确认提案），
+  //  取不到就返回 null / 空数组，**禁止推测填充**；GET 无副作用，不重发任何消息。
+  const snapshotMatch = /^\/api\/conversations\/([^/]+)\/run-snapshot$/.exec(pathname);
+  if (snapshotMatch && method === 'GET') {
+    const conversationId = decodeURIComponent(snapshotMatch[1]!);
+    const meta = getConversationMeta(conversationId);
+    if (!meta) return json(res, 404, { error: 'conversation_not_found', message: '会话不存在或当前账户不可见' }), true;
+    if (nativeDelegation.getStore()?.sharedChat && meta.mode !== 'chat') {
+      return json(res, 403, { message: '悬浮窗不能读取任务会话的运行快照' }), true;
+    }
+    const query = new URL(req.url || '/', 'http://localhost').searchParams;
+    const runId = (query.get('runId') ?? '').trim();
+    if (!runId) return json(res, 400, { error: 'missing_run_id', message: '需要 ?runId=<运行编号>' }), true;
+    const { getRun } = await import('../persistence/db.ts');
+    const run = getRun(runId);
+    // 会话隔离：runId 必须属于这个会话，否则一律当作不存在（不泄露别处运行是否存在）
+    if (!run || String(run['conversationId']) !== conversationId) {
+      return json(res, 404, { error: 'run_not_found', message: '该运行编号不属于此会话，或已被清理' }), true;
+    }
+    const snapshot = buildRunSnapshot(conversationId, run);
+    return json(res, 200, snapshot), true;
   }
 
   if (pathname === '/api/conversations' && method === 'GET') {

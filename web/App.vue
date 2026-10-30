@@ -20,6 +20,8 @@ import { useRunStore } from './stores/run';
 import { useSessionStore } from './stores/session';
 import { usePendingInputStore } from './stores/pending-input';
 import { resolvePendingOnTerminal, resolvePendingOnSwitchAway, mergeDraft } from './lib/pending-input';
+import { fetchRunSnapshot, snapshotMs, messageStatusOf, isConverged } from './lib/run-snapshot';
+import type { RunSnapshot } from '@shared/types';
 import type { ChatMessage as ChatMessageData, Round, RoundEffects } from './stores/session';
 import { useAgentStream } from './composables/useAgentStream';
 import LabMatrix from './components/LabMatrix.vue';
@@ -194,6 +196,12 @@ function collapseRailOnMobile(): void {
 }
 onMounted(() => window.addEventListener('resize', collapseRailOnMobile));
 onUnmounted(() => window.removeEventListener('resize', collapseRailOnMobile));
+// T5：切回前台且该轮长时间无新事件 → 主动回查快照（不静默停在假"运行中"）
+onMounted(() => document.addEventListener('visibilitychange', onVisibilityChange));
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  if (recoverPollTimer !== null) window.clearTimeout(recoverPollTimer);
+});
 
 // ---- 会话类型（聊天 / 任务）----
 // hero（还没有会话）用 draftMode 选择；**会话一旦开始对话，模式即确定**：
@@ -323,6 +331,82 @@ function resolveLive(): ChatMessageData | null {
   if (!liveConvId || !liveMsgId) return null;
   return session.messages[liveConvId]?.find((m) => m.id === liveMsgId) ?? null;
 }
+
+// ---- 断线回查（T5）：把"请手工回查"升级为"按运行编号收敛到真实终态" ----
+/** 回查提示（细线一行）：恢复中 / 已补齐 / 仍在服务端运行 —— 必须让用户看到发生了什么 */
+const recoverNotice = ref<string | null>(null);
+let recoverPollTimer: number | null = null;
+
+/** 用快照整段替换活跃轮的展示（原子替换，不做局部 merge） */
+function convergeFromSnapshot(snapshot: RunSnapshot): void {
+  const ms = snapshotMs(snapshot);
+  store.settleFromSnapshot(snapshot.terminal!, ms);
+  const live = resolveLive();
+  if (live) {
+    live.text = snapshot.answerText;
+    live.status = messageStatusOf(snapshot.terminal);
+    live.toolCalls = snapshot.toolCalls as ChatMessageData['toolCalls'];
+    live.engine = snapshot.engine;
+    live.model = snapshot.model;
+    live.sourceType = snapshot.sourceType;
+    if (ms !== null) live.ms = ms;
+    // 快照里的错误信息没有落库字段（如实缺省），不编造失败原因
+    live.error = null;
+  }
+  recoverNotice.value = `已按运行编号 ${snapshot.runId} 回查并补齐`;
+  liveConvId = null;
+  liveMsgId = null;
+}
+
+/**
+ * 断线/中断后的收敛流程：
+ *   ① 有明确终态 → 原子替换为该终态；
+ *   ② 仍在服务端运行 → 继续轮询（有上限），拿不到就如实告知，不猜成功；
+ *   ③ 快照不可得（服务端重启等原因）→ 保留原诚实文案，绝不假装成功。
+ */
+async function recoverRunFromSnapshot(convId: string, runId: string, fallback: { code: string; message: string; hint?: string }, attempt = 0): Promise<void> {
+  if (recoverPollTimer !== null) {
+    window.clearTimeout(recoverPollTimer);
+    recoverPollTimer = null;
+  }
+  if (attempt === 0) recoverNotice.value = `正在按运行编号 ${runId} 回查…`;
+  const res = await fetchRunSnapshot(convId, runId);
+  if (!res.ok) {
+    recoverNotice.value = null;
+    // 快照都拿不到：回到原诚实错误（保留内容，提示按编号回查），不静默
+    store.failRun(fallback);
+    return;
+  }
+  if (isConverged(res.snapshot)) {
+    convergeFromSnapshot(res.snapshot);
+    return;
+  }
+  // 仍在服务端运行：继续等（最多约 60 秒，每 3 秒一次）
+  if (attempt < 20) {
+    recoverNotice.value = `该轮仍在服务端执行，正在等待（运行编号 ${runId}）`;
+    recoverPollTimer = window.setTimeout(() => {
+      void recoverRunFromSnapshot(convId, runId, fallback, attempt + 1);
+    }, 3000);
+    return;
+  }
+  // 等不到终态：明确"未能确认结果"，仍给出编号供人工回查 —— 不得显示为成功
+  recoverNotice.value = `未能确认运行 ${runId} 的结果，请稍后按编号回查本会话`;
+  store.failRun({ code: 'stream_ended_early', message: fallback.message, hint: fallback.hint });
+}
+
+/** 前台恢复且长时间无新事件 → 主动回查一次（避免用户看到"永远在跑"的假状态） */
+function checkForegroundStale(): void {
+  if (store.runStatus !== 'running' || !store.runId || !liveConvId) return;
+  const last = store.lastEventAt ?? 0;
+  if (Date.now() - last < 5000) return;
+  void recoverRunFromSnapshot(liveConvId, store.runId, {
+    code: 'stream_ended_early',
+    message: '连接中断或长时间无新事件。已尝试按运行编号回查。'
+  });
+}
+function onVisibilityChange(): void {
+  if (document.visibilityState === 'visible') checkForegroundStale();
+}
 async function onSubmit(q: string): Promise<void> {
   // N04：**同步**占用提交锁，覆盖"await 创建会话"的窗口 —— 快速双击/连按 Enter 只发一次
   // T3：运行中的提交由 CommandBar 转成"加入待发送"，走到这里的一律是真正的首轮提交，
@@ -399,6 +483,11 @@ async function onSubmit(q: string): Promise<void> {
     },
     onError: (err) => {
       if (activeToken !== rid) return;
+      // T5：断流不再只丢一句"请手工回查" —— 先按运行编号取服务端快照收敛
+      if (err.code === 'stream_ended_early' && store.runId) {
+        void recoverRunFromSnapshot(convId, store.runId, err);
+        return;
+      }
       store.failRun(err);
     },
     onClose: () => {
@@ -642,6 +731,12 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
         </ul>
         <button type="button" class="chat__noticedismiss" :aria-label="tr('关闭提示')" :title="tr('关闭')" @click="roundNotice = null">✕</button>
       </div>
+
+      <!-- T5：断线回查状态（细线一行，只为让用户知道"系统在做什么"） -->
+      <p v-if="recoverNotice" class="chat__recover" role="status">
+        {{ recoverNotice }}
+        <button type="button" class="chat__recoverdismiss" :aria-label="tr('关闭提示')" @click="recoverNotice = null">✕</button>
+      </p>
 
       <!-- 空会话：欢迎页即输入（保持居中首屏形态） -->
       <div v-if="!session.currentId || session.currentMessages.length === 0" class="hero">
@@ -995,6 +1090,26 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 .chat__notice--danger {
   border-left-color: var(--danger);
   color: var(--danger);
+}
+/* T5 断线回查状态行：一条细线，不抢正文注意力 */
+.chat__recover {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding-left: var(--sp-2);
+  border-left: 2px solid var(--border-strong);
+  font-size: calc(var(--ui-font-size) * 0.88462);
+  color: var(--text-faint);
+}
+.chat__recoverdismiss {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 0 4px;
+  font-size: inherit;
 }
 .chat__noticelist {
   margin: 0;

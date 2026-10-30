@@ -82,6 +82,50 @@ export interface RunEvent<T extends RunEventType = RunEventType, P = unknown> {
   payload: P;
 }
 
+/**
+ * 单次运行的服务端快照（GET /api/conversations/:id/run-snapshot?runId=…）。
+ *
+ * ★ 它是**只读投影**，不是事件流的替代品：字段全部来自已落库的事实
+ *   （runs 行 + assistant 消息 meta + 待确认提案），没有任何一条是推测出来的。
+ *   **取不到的字段一律为 null**，UI 必须显示"未知"，禁止用推测补齐。
+ *   断线后前端用它把一轮收敛到真实终态，而不是让用户手工回查。
+ */
+export interface RunSnapshot {
+  runId: string;
+  conversationId: string;
+  /** 运行相位。服务端只在能确定时给值（终态 / 有未确认提案），其余为 null */
+  phase: 'planning' | 'model' | 'tool' | 'awaiting_confirm' | 'answering' | 'completed' | 'failed' | 'cancelled' | 'interrupted' | null;
+  /** 该轮已落库的工具调用（含参数与摘要），前端按与历史轮相同的口径重建步骤 */
+  toolCalls: Array<{
+    toolCallId: string;
+    tool: string;
+    args?: Record<string, unknown>;
+    ok: boolean | null;
+    ms?: number;
+    summary?: string;
+    resultKind?: string;
+    error?: { code: string; message: string };
+  }>;
+  /** 已落库的回答正文（增量刷写的最新快照；可能不是最终全文） */
+  answerText: string;
+  /** 该会话仍在等待本人确认的提案（没有就为空数组） */
+  proposals: Array<{ taskId: string; proposalId: string; actionType: string; version: number }>;
+  sourceType: DataSourceType | null;
+  engine: EngineType | null;
+  model: string | null;
+  /** 事件序号。LabOps 不持久化 seq，恒为 null —— 不编造一个看起来连续的编号 */
+  lastSeq: null;
+  /** 终态；仍在运行或无法判定时为 null。interrupted = 连接断开导致的非主动中止 */
+  terminal: 'completed' | 'failed' | 'cancelled' | 'interrupted' | null;
+  /** 该轮正文是否已落为终态（false 表示仍在流式写库或写入失败） */
+  saved: boolean;
+  /** 服务端记录的起止时间（runs 行）；缺字段为 null */
+  startedAt: string | null;
+  endedAt: string | null;
+  /** 实际写出该回答的模型；未配置大模型（规则引擎）时为 null */
+  assistantMessageId: string | null;
+}
+
 export interface RunStartedPayload {
   runId: string;
   /** 会话 id（前端生成并持久化）。服务端据此承接上一问的房间/日期指代 */

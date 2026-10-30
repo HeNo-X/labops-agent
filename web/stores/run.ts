@@ -64,7 +64,7 @@ export type ResultKind = 'none' | 'schedule_hit' | 'schedule_empty' | 'config_in
 export type RunPhase =
   | 'idle' | 'planning' | 'model' | 'tool'
   | 'awaiting_confirm' | 'answering'
-  | 'completed' | 'failed' | 'cancelled';
+  | 'completed' | 'failed' | 'cancelled' | 'interrupted';
 
 /**
  * 相位转移白名单表（表驱动，不写 if-else 散落）。表**逐条列出全部合法边**，
@@ -73,14 +73,15 @@ export type RunPhase =
  */
 export const PHASE_TRANSITIONS: Record<RunPhase, readonly RunPhase[]> = {
   idle: ['idle', 'planning', 'failed', 'cancelled'],
-  planning: ['planning', 'model', 'tool', 'awaiting_confirm', 'answering', 'completed', 'failed', 'cancelled'],
-  model: ['model', 'tool', 'awaiting_confirm', 'answering', 'completed', 'failed', 'cancelled'],
-  tool: ['tool', 'model', 'awaiting_confirm', 'answering', 'completed', 'failed', 'cancelled'],
-  awaiting_confirm: ['awaiting_confirm', 'tool', 'model', 'answering', 'completed', 'failed', 'cancelled'],
-  answering: ['answering', 'tool', 'model', 'awaiting_confirm', 'completed', 'failed', 'cancelled'],
+  planning: ['planning', 'model', 'tool', 'awaiting_confirm', 'answering', 'completed', 'failed', 'cancelled', 'interrupted'],
+  model: ['model', 'tool', 'awaiting_confirm', 'answering', 'completed', 'failed', 'cancelled', 'interrupted'],
+  tool: ['tool', 'model', 'awaiting_confirm', 'answering', 'completed', 'failed', 'cancelled', 'interrupted'],
+  awaiting_confirm: ['awaiting_confirm', 'tool', 'model', 'answering', 'completed', 'failed', 'cancelled', 'interrupted'],
+  answering: ['answering', 'tool', 'model', 'awaiting_confirm', 'completed', 'failed', 'cancelled', 'interrupted'],
   completed: ['completed'],
   failed: ['failed'],
-  cancelled: ['cancelled']
+  cancelled: ['cancelled'],
+  interrupted: ['interrupted']
 };
 
 export function canTransitionPhase(from: RunPhase, to: RunPhase): boolean {
@@ -190,6 +191,8 @@ export const useRunStore = defineStore('run', () => {
    * 前端本地时钟的 elapsedMs 只用于运行中的进度感与取消前的时长，不冒充服务端事实。
    */
   const serverMs = ref<number | null>(null);
+  /** 最近一次收到事件的时间（毫秒）。前台恢复时据此判断"是否已超过 5s 无新事件" */
+  const lastEventAt = ref<number | null>(null);
   /** ops.v1：活跃轮的待确认提案（need_confirm 事件载荷）。历史轮由消息内的提案卡自持 */
   const pendingConfirm = ref<NeedConfirmPayload | null>(null);
 
@@ -491,7 +494,7 @@ export const useRunStore = defineStore('run', () => {
   /** 相位迁移的唯一入口。终态后迟到事件不改相位；白名单外的序列降级为告警，不炸运行界面。 */
   function movePhase(to: RunPhase): void {
     const from = phase.value;
-    if (from === 'completed' || from === 'failed' || from === 'cancelled') return;
+    if (from === 'completed' || from === 'failed' || from === 'cancelled' || from === 'interrupted') return;
     try {
       phase.value = transitionPhase(from, to);
     } catch (e) {
@@ -548,6 +551,7 @@ export const useRunStore = defineStore('run', () => {
     error.value = null;
     elapsedMs.value = 0;
     serverMs.value = null;
+    lastEventAt.value = null;
     engine.value = null;
     model.value = null;
     sourceType.value = null;
@@ -587,6 +591,7 @@ export const useRunStore = defineStore('run', () => {
   /** 事件入口：runId 不匹配的一律丢弃（旧任务迟到事件不得污染新任务） */
   function ingest(ev: RunEvent): void {
     if (runId.value && ev.runId !== runId.value) return;
+    lastEventAt.value = Date.now();
     appendEvent(ev);
     switch (ev.type) {
       case 'run_started': {
@@ -729,8 +734,7 @@ export const useRunStore = defineStore('run', () => {
   }
 
   /** 用户主动取消：中性终态，不是故障 */
-  function cancelRun(message = '你取消了本次任务。'): void {
-    if (runStatus.value !== 'running') return;
+  function cancelRun(message = '你取消了本次任务。'): void {    if (runStatus.value !== 'running') return;
     stopTimer();
     runStatus.value = 'cancelled';
     movePhase('cancelled');
@@ -742,6 +746,21 @@ export const useRunStore = defineStore('run', () => {
       ts: new Date().toISOString(),
       payload: { ms: elapsedMs.value, message }
     });
+  }
+
+  /**
+   * 用服务端快照把本轮收敛到真实终态（T5）。
+   * 不合成假事件：只改生命周期与耗时事实，步骤/正文由调用方按快照整段替换消息。
+   * 未拿到明确终态时调用方**不得**调用本函数（仍运行 → 继续等）。
+   */
+  function settleFromSnapshot(terminal: 'completed' | 'failed' | 'cancelled' | 'interrupted', ms: number | null): void {
+    stopTimer();
+    if (ms !== null) {
+      serverMs.value = ms;
+      elapsedMs.value = ms;
+    }
+    runStatus.value = terminal === 'completed' ? 'completed' : terminal === 'cancelled' ? 'cancelled' : 'failed';
+    movePhase(terminal);
   }
 
   /** 事件流收尾。若没有收到任何终态事件 → 合成失败，绝不留下"永远在跑"的任务 */
@@ -812,6 +831,7 @@ export const useRunStore = defineStore('run', () => {
     error,
     elapsedMs,
     serverMs,
+    lastEventAt,
     engine,
     model,
     sourceType,
@@ -850,6 +870,7 @@ export const useRunStore = defineStore('run', () => {
     ingest,
     failRun,
     cancelRun,
+    settleFromSnapshot,
     finishRun,
     newSession,
     loadOverview,clearOverview,

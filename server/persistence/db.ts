@@ -980,6 +980,29 @@ export function getLatestProposalForTask(taskId: string): StoredProposal | null 
   return row ? rowToProposal(row) : null;
 }
 
+/**
+ * 该会话仍在等待本人确认的提案（只读投影用）。
+ * 只返回最小字段：快照不需要提案正文，避免把业务参数带出到诊断接口。
+ */
+export function listAwaitingProposalsForConversation(
+  conversationId: string
+): Array<{ taskId: string; proposalId: string; actionType: string; version: number }> {
+  const rows = getDb()
+    .prepare(
+      `SELECT p.id AS proposalId, p.taskId, p.actionType, p.version
+         FROM ops_proposals p JOIN ops_tasks t ON t.id = p.taskId
+        WHERE t.conversationId = ? AND p.state = 'awaiting_confirmation'
+        ORDER BY p.taskId ASC, p.version ASC`
+    )
+    .all(conversationId) as Array<Record<string, unknown>>;
+  return rows.map((r) => ({
+    taskId: String(r['taskId']),
+    proposalId: String(r['proposalId']),
+    actionType: String(r['actionType']),
+    version: Number(r['version'] ?? 1)
+  }));
+}
+
 export function updateOpsProposalState(proposalId: string, state: ProposalState): void {
   getDb().prepare(`UPDATE ops_proposals SET state = ? WHERE id = ?`).run(state, proposalId);
 }

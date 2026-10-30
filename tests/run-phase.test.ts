@@ -27,8 +27,8 @@ test('T1-01 转移白名单表：同态重入恒允许，表外全部拒绝且�
     if(allowed)assert.equal(transitionPhase(from,to),to);
     else assert.throws(()=>transitionPhase(from,to),/invalid phase transition/);
   }
-  // 三个终态出边为空（除自环）：迟到事件不得把终态翻回中间态
-  for(const t of ['completed','failed','cancelled'] as RunPhase[]){
+  // 四个终态出边为空（除自环）：迟到事件不得把终态翻回中间态
+  for(const t of ['completed','failed','cancelled','interrupted'] as RunPhase[]){
     assert.deepEqual(PHASE_TRANSITIONS[t].filter(x=>x!==t),[],`${t} 不应有出边`);
   }
 });

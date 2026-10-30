@@ -16,18 +16,20 @@
     "thresholdHours",
     "maxMissedHours"
   ],
-  "weekly_report": [
-    "maxMissedHours"
-  ],
-  "resource_risk": [
-    "roomId",
-    "maxMissedHours"
-  ],
-  "closure_expiry": [
-    "roomId",
-    "maxMissedHours"
-  ],
   "notice_reminder": [
     "maxMissedHours"
-  ]
+  ],
+  "lab_open_reminder": [
+    "roomId",
+    "maxMissedHours"
+  ],
+  "session_checkin_reminder": [
+    "roomId",
+    "maxMissedHours"
+  ],
+  "patrol_reminder": [
+    "roomId",
+    "maxMissedHours"
+  ],
+  "agent_prompt": []
 }

@@ -52,8 +52,15 @@ function clampInt(raw: string | undefined, fallback: number, min: number, max: n
  *  默认直连阿里云百炼（DashScope 兼容模式）qwen3-asr-flash，**Key 回落复用
  *  DASHSCOPE_API_KEY**——聊天链与语音识别共用同一个百炼 Key，一处配置两处生效；
  *  想换供应商（SiliconFlow/Groq/OpenAI）时用 ASR_* 覆盖，互不影响聊天链。 */
+/**
+ * 启动时一次性触发 .env 装载（幂等；.env 不存在则跳过，不报错）。
+ * ⚠️ 不能放进 getAsrConfig() 里每次调用：那样运行时/测试里被清掉的环境变量
+ *    会被 .env 反复灌回来 —— 测试删了 DASHSCOPE_API_KEY 却仍判定"已配置"，
+ *    「诚实降级」就无从验证（实测踩过）。装载只做一次，之后只读 process.env。
+ */
+getConfig();
+
 export function getAsrConfig(): AsrConfig {
-  getConfig(); // 幂等触发 .env 装载（避免绕过 config 直接读 env 时 .env 未加载）
   const env = process.env;
   const dashscopeKey = env.DASHSCOPE_API_KEY ?? '';
   const dashscopeBase = (env.DASHSCOPE_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/+$/, '');

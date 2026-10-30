@@ -214,7 +214,7 @@ try {
     assert.equal(session.json.authenticated, true);
     const denied = await request('/api/conversations', {method: 'POST', headers: {Cookie: cookie, Origin: 'https://untrusted.invalid'}, data: {mode: 'chat'}});
     assert.equal(denied.status, 403);
-    const health = await request('/api/health'); assert.equal(health.json.version, '1.0.4.5');
+    const health = await request('/api/health'); assert.equal(health.json.version, '1.0.5.0');
   });
   await record('N04 真实实验室查询与范围引导的 SSE 完整、顺序正确、保存且幂等', async () => {
     const headers = {Cookie: cookie, Origin: publicBase};
@@ -316,7 +316,7 @@ try {
     assert.equal((await request('/api/read-probe')).status, 200);
   });
 
-  const report = {version: '1.0.4.5', runType: 'isolated_real_nginx_tls', nginxVersion,
+  const report = {version: '1.0.5.0', runType: 'isolated_real_nginx_tls', nginxVersion,
     at: new Date().toISOString(), passed: results.length, failed: 0, results,
     testScriptSha256: digest(fs.readFileSync(fileURLToPath(import.meta.url))),
     nginxBinarySha256: path.isAbsolute(nginx) ? digest(fs.readFileSync(nginx)) : undefined,
@@ -329,7 +329,7 @@ try {
   fs.writeFileSync(path.join(output, 'acceptance.json'), JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify({passed: results.length, failed: 0, nginxVersion, output}));
 } catch (error) {
-  fs.writeFileSync(path.join(output, 'acceptance-failed.json'), JSON.stringify({version: '1.0.4.5', passed: results.length, failed: 1, results,
+  fs.writeFileSync(path.join(output, 'acceptance-failed.json'), JSON.stringify({version: '1.0.5.0', passed: results.length, failed: 1, results,
     error: String(error), logs, nginxLog: fs.existsSync(path.join(temp, 'error.log')) ? fs.readFileSync(path.join(temp, 'error.log'), 'utf8') : ''}, null, 2));
   console.error(error); process.exitCode = 1;
 } finally {

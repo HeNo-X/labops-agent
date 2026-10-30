@@ -15,6 +15,7 @@ import {t as tr} from "../i18n";
 import { computed } from 'vue';
 import { useRunStore } from '../stores/run';
 import { useVoiceInput } from '../composables/useVoiceInput';
+import { useHoldToTalk } from '../composables/useHoldToTalk';
 import StatusTag from './StatusTag.vue';
 import UiIcon from './UiIcon.vue';
 
@@ -109,21 +110,14 @@ const voiceHint = computed(() => {
   return messages[code] || '';
 });
 
-async function onVoice(): Promise<void> {
-  const state = voice.status.value;
-  if (state === 'idle') {
-    await voice.start();
-    return;
-  }
-  if (state === 'recording') {
-    const recognized = await voice.stop();
+// 长按说话：按下开始录音，松手结束并回填。交互逻辑在 useHoldToTalk（PC/移动端共用一份）。
+const hold = useHoldToTalk({
+  voice,
+  onText: (recognized) => {
     // 识别结果并入草稿而非覆盖：用户可能已经打了一半
-    if (recognized) text.value = text.value ? `${text.value.replace(/\s+$/, '')} ${recognized}` : recognized;
+    text.value = text.value ? `${text.value.replace(/\s+$/, '')} ${recognized}` : recognized;
   }
-}
-function onVoiceCancel(): void {
-  voice.cancel();
-}
+});
 
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -160,25 +154,25 @@ function onKeydown(e: KeyboardEvent): void {
       <span class="bar__voice-dot" aria-hidden="true"></span>
       <b>{{ tr(voice.status.value === 'transcribing' ? '识别中…' : voice.status.value === 'requesting' ? '等待麦克风…' : '正在聆听') }}</b>
       <span class="bar__voice-time">{{ Math.floor(voice.seconds.value) }}s / 60s</span>
-      <button type="button" class="bar__voice-cancel" @click="onVoiceCancel">{{ tr('取消') }}</button>
+      <button type="button" class="bar__voice-cancel" @click="hold.cancel">{{ tr('取消') }}</button>
     </div>
 
     <div class="bar__row">
       <label class="sr-only" for="cmd">{{tr("输入你的实验室问题")}}</label>
       <!--
-        录音期间按钮**不能隐藏**：onVoice() 的 recording 分支负责"停止并转写"，
-        若此处用 !voice.working 把它藏掉，该分支就成了死代码 —— 用户只能取消，
-        录完的话拿不回来（浏览器实测复现）。改由 working 时高亮表达状态。
+        长按说话：按住录音、松手结束并回填。
+        录音期间按钮**不能隐藏**（否则用户没有可松开的地方，话就白说了）；
+        用 working 高亮表达状态，并在聆听条里给「松手结束」的提示。
       -->
       <button
         v-if="voice.supported.value"
         type="button"
         class="bar__mic"
-        :class="{ 'is-active': voice.working.value }"
+        :class="{ 'is-active': voice.working.value, 'is-holding': hold.holding.value }"
         :disabled="busy"
-        :aria-label="tr(voice.status.value === 'recording' ? '停止录音并识别' : '语音输入')"
-        :title="tr(voice.status.value === 'recording' ? '停止录音并识别' : '语音输入')"
-        @click="onVoice"
+        :aria-label="tr(voice.status.value === 'recording' ? '松手结束并识别' : '按住说话')"
+        :title="tr(voice.status.value === 'recording' ? '松手结束并识别' : '按住说话')"
+        v-on="hold.handlers"
       >
         <UiIcon name="mic" />
       </button>

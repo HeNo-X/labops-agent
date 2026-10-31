@@ -13,7 +13,7 @@
  *  纯函数、无 Vue 依赖 —— 可直接单测。
  */
 
-export type ToolFamily = 'query' | 'knowledge' | 'draft' | 'vision' | 'report' | 'unknown';
+export type ToolFamily = 'query' | 'knowledge' | 'draft' | 'vision' | 'report' | 'plan' | 'unknown';
 
 /**
  * 展示文本预算（**字符数**，不是字节数 —— 中文按字符计，UTF-8 下 1 字 3 字节）。
@@ -38,7 +38,7 @@ export function clampText(s: string, n: number): { text: string; truncated: bool
   return { text: chars.slice(0, n).join(''), truncated: true };
 }
 
-/** 工具 → 展示族。唯一事实源是 server/tools/registry.ts 的 toolNames()（18 个）。 */
+/** 工具 → 展示族。唯一事实源是 server/tools/registry.ts 的 toolNames()（19 个，含 A5 计划）。 */
 const FAMILY_BY_TOOL: Record<string, ToolFamily> = {
   // 查询类（只读，结构化结果由结果卡承担）
   query_schedule: 'query',
@@ -62,7 +62,9 @@ const FAMILY_BY_TOOL: Record<string, ToolFamily> = {
   // 视觉观察（完整内容由 EvidenceObservationCard 承担）
   analyze_evidence_image: 'vision',
   // 日报
-  create_operations_report: 'report'
+  create_operations_report: 'report',
+  // A5 任务计划（工作记录，不是业务结果；完整内容由 PlanPanel 承担）
+  maintain_task_plan: 'plan'
 };
 
 export function toolFamily(tool: string): ToolFamily {
@@ -75,7 +77,8 @@ const FAMILY_LABELS: Record<Exclude<ToolFamily, 'unknown'>, { running: string; f
   knowledge: { running: '正在检索说明', final: '说明检索' },
   draft: { running: '正在准备办理单', final: '待确认办理单' },
   vision: { running: '正在读取照片', final: '照片观察' },
-  report: { running: '正在生成日报', final: '运营日报' }
+  report: { running: '正在生成日报', final: '运营日报' },
+  plan: { running: '正在更新任务计划', final: '任务计划' }
 };
 
 export function familyLabel(family: ToolFamily, running: boolean): string {

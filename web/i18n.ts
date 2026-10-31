@@ -517,6 +517,8 @@ Object.assign(en,{
  '照片观察':'Photo observation',
  '正在生成日报':'Generating the report',
  '运营日报':'Operations report',
+ '正在更新任务计划':'Updating the task plan',
+ '任务计划':'Task plan',
  '正在执行':'Running',
  '执行':'Executed',
  '成功':'Succeeded',
@@ -552,8 +554,7 @@ Object.assign(en,{
  '切换演示身份为学生':'Switch demo role to student',
  // A6 token 用量（provider 真实上报才显示）
  'tokens':'tokens',
- // A5 任务计划面板
- '任务计划':'Task plan',
+ // A5 任务计划面板（'任务计划' 词条已在工具展示族块登记）
  '已完成':'Done',
  '已放弃':'Dropped',
  '待办':'To do'

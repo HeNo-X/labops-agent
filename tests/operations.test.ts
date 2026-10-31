@@ -360,7 +360,7 @@ test('能力协商：capabilities 描述沙盒环境与当前身份', async () =
   const caps = typeRegistry.toolNames();
   assert.ok(caps.includes('prepare_issue_ticket'));
   assert.ok(caps.includes('create_operations_report'));
-  assert.equal(caps.length,18,'9 个只读（含 analyze_evidence_image 视觉初判）+ 9 个准备/草稿工具');
+  assert.equal(caps.length,19,'9 个只读（含 analyze_evidence_image 视觉初判）+ 9 个准备/草稿工具 + 1 个任务计划（A5 maintain_task_plan，工作记录非业务工具）');
   assert.ok(caps.includes('analyze_evidence_image'),'视觉初判必须是只读能力，不得带草稿效果');
   const visionTool = typeRegistry.REGISTRY.find((t) => t.spec.name === 'analyze_evidence_image');
   assert.equal(visionTool?.effect, 'read', '看图不得产生提案或任何业务写入');

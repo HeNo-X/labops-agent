@@ -492,7 +492,19 @@ export function renderDemoAnswer(
     return lines.join('\n');
   }
   if ('kind' in result) {
-    if (result.kind === 'knowledge') { const r=result.payload as KnowledgeResult; return [r.summary,r.scope,...r.hits.map(h=>`- **${h.title}（v${h.version}）**\n${h.paragraphs.map(p=>p.locator+' '+p.text).join('\n')}`)].join('\n\n'); }
+    // RAG 批次3：知识结果改为**引用脚注**格式——[n] 编号按最终顺序（重排后）分配，
+    // 每个可引用段落一条：[n] 加粗标题+版本+§定位，正文跟在冒号后（A9 列表渲染）。
+    if (result.kind === 'knowledge') {
+      const r=result.payload as KnowledgeResult;
+      const lines=[r.summary, r.scope];
+      let n=0;
+      for (const h of r.hits) for (const p of h.paragraphs) {
+        n+=1;
+        lines.push(`- **[${n}] ${h.title}（v${h.version}）· ${p.locator}**：${p.text}`);
+      }
+      if (!n) lines.push('（本次检索没有可引用的段落——知识库未命中，不作答制度细节。）');
+      return lines.join('\n');
+    }
     if (result.kind === 'business_plan') return renderBusinessFacts(result.payload as BusinessPlanResult);
     if (result.kind === 'lab_status') return renderLabStatusAnswer(result.payload as LabStatusResult, extras);
     if (result.kind === 'free_rooms') return renderFreeRoomsAnswer(result.payload as FreeRoomsResult);

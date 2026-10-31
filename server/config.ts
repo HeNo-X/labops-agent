@@ -85,6 +85,10 @@ export interface AppConfig {
     dimensions: number;
     batchSize: number;
   };
+  /** RAG 批次3：LLM 重排（对三路召回的 top 候选做一次打分重排；缺省关——配额敏感） */
+  rerank: {
+    llm: boolean;
+  };
   /** Agnes 3.0 Flash —— 仅任务模式（工作模式） */
   agnes: {
     apiKey: string;
@@ -230,6 +234,9 @@ export function getConfig(): AppConfig {
       model: str('EMBEDDING_MODEL', 'text-embedding-v3'),
       dimensions: int('EMBEDDING_DIMENSIONS', 1024, 64, 4096),
       batchSize: int('EMBEDDING_BATCH_SIZE', 10, 1, 32)
+    },
+    rerank: {
+      llm: bool('RERANK_LLM', false)
     },
     circuit: {
       enabled: bool('LLM_CIRCUIT_ENABLED', true),

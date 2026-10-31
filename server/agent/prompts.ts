@@ -95,6 +95,36 @@ export function buildDynamicTurnContext(parts: DynamicTurnContextParts): string 
   return `${parts.timeContext}${injectionNote}`;
 }
 
+export interface ToolFailureDigest {
+  tool: string;
+  code: string;
+  message: string;
+}
+
+/**
+ * A4 失败复述（借鉴 Manus 经验 8「keep the wrong stuff in」的 recitation 变体）：
+ * 模型看不见自己"快没步数了"，会在最后几轮继续同路重试。在最后一轮（或连续
+ * 失败时）把失败摘要**重新注入**一条 system 消息，逼它要么换路、要么如实交代
+ * 未完成——而不是用一个注定失败的重试耗尽步数。
+ */
+export function failureRecitationText(f: ToolFailureDigest): string {
+  return `失败复述：本轮工具调用已失败，最近一次 ${f.tool}（错误码 ${f.code}）：${f.message}。不要用相同参数或相同路径重试；若没有别的可行做法，直接向用户如实说明未完成与原因，不要编造结果。`;
+}
+
+/** 触发条件（纯函数，便于单测）：连续失败 ≥2，或已带失败进入最后一轮；整个 run 只复述一次 */
+export function shouldReciteFailure(args: {
+  /** 已递增后的当前步数（与 run.ts 循环内一致，1 起） */
+  steps: number;
+  maxSteps: number;
+  hasFailure: boolean;
+  consecutiveToolFailures: number;
+  recited: boolean;
+}): boolean {
+  if (args.recited || !args.hasFailure) return false;
+  if (args.consecutiveToolFailures >= 2) return true;
+  return args.steps >= args.maxSteps;
+}
+
 /** 越界拒绝的固定措辞（演示引擎与模型引擎共用，保证口径一致） */
 export const REFUSAL_PREFIX = '本阶段做不到：';
 

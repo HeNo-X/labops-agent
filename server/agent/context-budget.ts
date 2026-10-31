@@ -76,6 +76,10 @@ export function slimToolMessage(m: ChatMessage): ChatMessage {
   if (content.length <= TOOL_RESULT_KEEP_CHARS) return m;
 
   const parsed = parseToolContent(m.content);
+  // A4（借鉴 Manus「keep the wrong stuff in」）：失败消息**豁免瘦身**——
+  // code/message/suggestions/instruction 是模型换路与如实交代的依据，
+  // 砍掉它等于把模型的学习信号剪掉；失败消息本来就小，不构成预算压力。
+  if (parsed && parsed['ok'] === false) return m;
   if (!parsed) {
     // 回退旧行为：非 JSON 内容只能按字符截断，但必须如实标注
     return {

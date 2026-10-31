@@ -49,7 +49,7 @@ import type { Intent } from './intent.ts';
 import { getSession, rememberSession } from './session.ts';
 import { loadContext } from '../persistence/db.ts';
 import { planDemo, renderDemoAnswer, runDemoTool, FREE_ROOMS_RE, SMALLTALK_RE } from './demo-engine.ts';
-import { RECOMMENDATION_FORMAT, PROMPT_VERSION, buildSystemPrompt, buildDynamicTurnContext, detectInjection, sanitizeInput } from './prompts.ts';
+import { RECOMMENDATION_FORMAT, PROMPT_VERSION, buildSystemPrompt, buildDynamicTurnContext, shouldReciteFailure, failureRecitationText, detectInjection, sanitizeInput } from './prompts.ts';
 import { normalizeLabName } from '../data/store.ts';
 
 export interface RunInput {
@@ -530,6 +530,9 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   let runTaskStatus: 'awaiting_confirmation' | undefined = undefined;
   /** 指纹 = 工具名 + 排序后的规范化参数；在**执行前**检查（写工具接入后防重复执行） */
   const seenCalls = new Map<string, number>();
+  /** A4：连续工具失败次数（成功即清零）与复述已发标志（整个 run 只复述一次） */
+  let consecutiveToolFailures = 0;
+  let failureRecited = false;
 
   while (steps < cfg.agent.maxSteps) {
     if (a.signal?.aborted) return;
@@ -538,6 +541,15 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
       throw new AgnesError('deadline_exceeded','任务达到总时间上限',null,false);
     }
     steps += 1;
+
+    // A4 收敛前复述：带失败进入最后一轮（或连续失败 ≥2）时，把失败摘要重新
+    // 注入一条 system 消息——逼模型换路或如实交代，而不是用注定失败的重试
+    // 耗尽步数（Manus「keep the wrong stuff in」）。
+    if (shouldReciteFailure({ steps, maxSteps: cfg.agent.maxSteps, hasFailure: lastToolFailure !== null, consecutiveToolFailures, recited: failureRecited })) {
+      failureRecited = true;
+      a.log.warn('failure_recitation', { steps, tool: lastToolFailure?.tool, code: lastToolFailure?.code });
+      messages.push({ role: 'system', content: failureRecitationText(lastToolFailure!) });
+    }
 
     let roundText = '';
     let calls: ChatMessage['tool_calls'] = undefined;
@@ -654,6 +666,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
       toolCalls += 1;
 
       if (exec.ok) {
+        consecutiveToolFailures = 0;
         if(exec.resultKind==='business_plan')businessFacts.push(exec.result);
         verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label}));
         yield a.emit('tool_result', {
@@ -690,6 +703,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
       } else {
         // 记下真实失败原因：这是 run_failed 能给出可执行提示的唯一来源
         lastToolFailure = { tool: name, code: exec.code, message: exec.message, suggestions: exec.suggestions };
+        consecutiveToolFailures += 1;
         yield a.emit('tool_result', {
           step: steps,
           toolCallId,

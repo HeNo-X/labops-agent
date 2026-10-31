@@ -65,6 +65,19 @@ export interface AppConfig {
     baseUrl: string;
     models: string[];
   };
+  /** 备用提供方 1：智谱 BigModel（两模式共用备用） */
+  bigmodel: {
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+  };
+  /** 备用提供方 2：讯飞星火 MaaS（工作模式第一备用 + 两模式末位备用；两模型共用一个 Key） */
+  xfyun: {
+    apiKey: string;
+    baseUrl: string;
+    taskModel: string;
+    chatModel: string;
+  };
   /** Agnes 3.0 Flash —— 仅任务模式（工作模式） */
   agnes: {
     apiKey: string;
@@ -180,6 +193,26 @@ export function getConfig(): AppConfig {
       models: str('DASHSCOPE_MODELS', 'qwen3.8-flash,qwen3.8-max-0902,deepseek-v4.1-flash,deepseek-v4.1-flash-1017,kimi-k3')
         .split(',').map((s) => s.trim()).filter(Boolean)
     },
+    /**
+     * 备用提供方 1：智谱 BigModel（OpenAI 兼容 v4 端点）。
+     * 角色：**聊天模式与工作模式共用的备用**——主链全挂时才轮到它（2026-10-31 负责人指定）。
+     */
+    bigmodel: {
+      apiKey: str('BIGMODEL_API_KEY'),
+      baseUrl: str('BIGMODEL_BASE_URL', 'https://open.bigmodel.cn/api/paas/v4').replace(/\/+$/, ''),
+      model: str('BIGMODEL_MODEL', 'glm-4.7-flash')
+    },
+    /**
+     * 备用提供方 2：讯飞星火 MaaS（v2 端点）。**两个模型共用一个 Key**。
+     * 角色：`taskModel` 是**工作模式的第一备用**（Agnes 挂了下一次就用它），
+     *       `chatModel` 是聊天/工作两种模式的**末位备用**。
+     */
+    xfyun: {
+      apiKey: str('XFYUN_API_KEY'),
+      baseUrl: str('XFYUN_BASE_URL', 'https://maas-api.cn-huabei-1.xf-yun.com/v2').replace(/\/+$/, ''),
+      taskModel: str('XFYUN_TASK_MODEL', 'spark-x2.6'),
+      chatModel: str('XFYUN_CHAT_MODEL', 'spark-x2.6-4b')
+    },
     circuit: {
       enabled: bool('LLM_CIRCUIT_ENABLED', true),
       failureThreshold: int('LLM_CIRCUIT_THRESHOLD', 3, 1, 10),
@@ -237,6 +270,7 @@ export function describeConfig(c: AppConfig): string[] {
     `Agnes API Key   : ${c.agnes.apiKey ? '已配置 ✓（仅服务端持有）' : '未配置 → 使用确定性规则引擎'}`,
     `模型分流        : 任务模式→Agnes${c.agnes.apiKey ? '' : '（未配置，回落规则引擎）'}；聊天模式→DashScope`,
     `DashScope 聊天链: ${c.dashscope.apiKey ? c.dashscope.models.join(' → ') + '（按序 fallback）' : '未配置 → 聊天模式回落规则引擎'}`,
+    `备用链          : ${[c.bigmodel.apiKey ? `BigModel(${c.bigmodel.model})` : '', c.xfyun.apiKey ? `星火(${c.xfyun.taskModel}｜${c.xfyun.chatModel})` : ''].filter(Boolean).join(' + ') || '未配置（主链挂即回落规则引擎）'}`,
     `步数/墙钟上限   : ${c.agent.maxSteps} 步 / ${c.agent.wallClockMs} ms`,
     `视觉理解        : ${c.vision.apiKey ? `${c.vision.model} @ ${c.vision.baseUrl}（单次最多 ${c.vision.maxImages} 图）` : '未配置 → 证据照片不入模，工具如实说明不可得'}`,
     `认证模式        : ${process.env.LABOPS_AUTH_MODE||'native'}`,

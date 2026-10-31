@@ -46,7 +46,7 @@ interface ProbeResult {
 function probe(env: Record<string, string>): ProbeResult {
   const base: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
-    if (typeof v === 'string' && !/^(AGNES|DASHSCOPE)_/.test(k)) base[k] = v;
+    if (typeof v === 'string' && !/^(AGNES|DASHSCOPE|BIGMODEL|XFYUN)_/.test(k)) base[k] = v;
   }
   const out = execFileSync(process.execPath, [PROBE], {
     env: { ...base, LABOPS_AUTH_MODE: 'demo', ...env },
@@ -118,4 +118,64 @@ test('只配了百炼：工作链必须为空，不借聊天模型顶上', () =>
   assert.deepEqual(r.task, [], '没有 AGNES_API_KEY 时工作链必须为空');
   assert.equal(r.engineTask, 'demo', '工作模式的 engine 不能变成 dashscope');
   assert.equal(r.chat.length, 3, '聊天链不受工作链为空的影响');
+});
+
+// ---------------------------------------------------------------------------
+// 备用链（2026-10-31）：BigModel(glm-4.7-flash) + 星火(两个模型共用一个 Key)
+// ---------------------------------------------------------------------------
+const BIGMODEL = {
+  BIGMODEL_API_KEY: 'bigmodel-key-for-chain',
+  BIGMODEL_BASE_URL: 'https://open.bigmodel.cn/api/paas/v4',
+  BIGMODEL_MODEL: 'glm-4.7-flash'
+};
+const XFYUN = {
+  XFYUN_API_KEY: 'xfyun-key-for-chain',
+  XFYUN_BASE_URL: 'https://maas-api.cn-huabei-1.xf-yun.com/v2',
+  XFYUN_TASK_MODEL: 'spark-x2.6',
+  XFYUN_CHAT_MODEL: 'spark-x2.6-4b'
+};
+
+test('全配置：两条链都是"主链在前、备用在后"，且备用顺序符合约定', () => {
+  const r = probe({ ...DASHSCOPE, ...AGNES, ...BIGMODEL, ...XFYUN });
+  assert.deepEqual(
+    r.chat.map((p) => p.model),
+    ['kimi-k3', 'qwen3.8-flash', 'qwen3.8-max-0902', 'glm-4.7-flash', 'spark-x2.6-4b'],
+    '聊天链：DashScope 五模型 → BigModel → 星火(chat)'
+  );
+  assert.deepEqual(
+    r.task.map((p) => p.model),
+    ['agnes-3.0-flash', 'spark-x2.6', 'glm-4.7-flash', 'spark-x2.6-4b'],
+    '工作链：Agnes → 星火(task，第一备用) → BigModel → 星火(chat)'
+  );
+  assert.deepEqual(r.task.map((p) => p.name), ['agnes', 'xfyun', 'bigmodel', 'xfyun']);
+  assert.ok(r.chat.every((p) => p.hasKey) && r.task.every((p) => p.hasKey), '每条都要带 Key');
+  // 两条链各自的端点必须不同域，防止 Key 串用
+  assert.equal(new Set(r.task.map((p) => p.baseUrl)).size, 3, 'Agnes / 星火 / BigModel 三个端点');
+});
+
+test('Agnes 不可用时：工作链第一位必须是星火 spark-x2.6（第一备用）', () => {
+  const r = probe({ AGNES_API_KEY: '', ...BIGMODEL, ...XFYUN });
+  assert.equal(r.task[0]!.name, 'xfyun');
+  assert.equal(r.task[0]!.model, 'spark-x2.6', '第一备用必须是 spark-x2.6，不是 4b 那个');
+  assert.deepEqual(r.task.map((p) => p.model), ['spark-x2.6', 'glm-4.7-flash', 'spark-x2.6-4b']);
+  assert.equal(r.engineTask, 'dashscope', '备用链统一归到兼容端点族');
+  // 工作链里仍然一个 DashScope 提供方都没有（注意此时聊天链本身就是备用链，
+  // 所以不能拿"模型名是否出现在 chat 里"当判据，要按提供方判断）
+  assert.ok(r.task.every((p) => p.name !== 'dashscope'), '备用链不得借用 dashscope 提供方');
+});
+
+test('备用 Key 留空：链回落到原样，不留空壳 provider', () => {
+  const r = probe({ ...DASHSCOPE, ...AGNES });
+  assert.equal(r.chat.length, 3, '只有 DashScope，不该凭空多出备用');
+  assert.equal(r.task.length, 1, '只有 Agnes');
+  const names = [...r.chat, ...r.task].map((p) => p.name);
+  assert.ok(!names.includes('bigmodel') && !names.includes('xfyun'), '没 Key 的提供方不得进链');
+});
+
+test('只配备用、主链全空：聊天与工作都还能用（不会退化成规则引擎）', () => {
+  const r = probe({ DASHSCOPE_API_KEY: '', AGNES_API_KEY: '', ...BIGMODEL, ...XFYUN });
+  assert.deepEqual(r.chat.map((p) => p.model), ['glm-4.7-flash', 'spark-x2.6-4b']);
+  assert.deepEqual(r.task.map((p) => p.model), ['spark-x2.6', 'glm-4.7-flash', 'spark-x2.6-4b']);
+  assert.equal(r.configured.chat, true);
+  assert.equal(r.configured.task, true);
 });

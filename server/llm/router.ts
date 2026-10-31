@@ -15,9 +15,12 @@ import { selectableProviders, recordFailure, recordSuccess, circuitStatus } from
 import { streamChat, AgnesError, type AgnesStreamEvent, type StreamOptions } from './agnes.ts';
 import type { Logger } from '../obs/trace.ts';
 
+/** 提供方标识。`dashscope/agnes` 是主链，`bigmodel/xfyun` 是 2026-10-31 新增的备用链。 */
+export type ProviderName = 'dashscope' | 'agnes' | 'bigmodel' | 'xfyun';
+
 export interface LlmProviderSpec {
   /** 提供方标识（用于日志与前端展示的 engine 字段） */
-  name: 'dashscope' | 'agnes';
+  name: ProviderName;
   apiKey: string;
   baseUrl: string;
   model: string;
@@ -26,20 +29,42 @@ export interface LlmProviderSpec {
 export const TASK_ENGINE = 'agnes' as const;
 export const CHAT_ENGINE = 'dashscope' as const;
 
-/** 按会话模式给出**按调用顺序**排列的提供方/模型链；未配置返回空数组 */
+/** 备用链的构造（两处共用）：只有配了 Key 的提供方才入链，不留空壳 */
+function fallbackSpecs(role: 'chat' | 'task'): LlmProviderSpec[] {
+  const c = getConfig();
+  const big: LlmProviderSpec[] = c.bigmodel.apiKey
+    ? [{ name: 'bigmodel', apiKey: c.bigmodel.apiKey, baseUrl: c.bigmodel.baseUrl, model: c.bigmodel.model }]
+    : [];
+  const spark = (model: string): LlmProviderSpec[] =>
+    c.xfyun.apiKey ? [{ name: 'xfyun', apiKey: c.xfyun.apiKey, baseUrl: c.xfyun.baseUrl, model }] : [];
+  return role === 'chat' ? [...big, ...spark(c.xfyun.chatModel)] : [...spark(c.xfyun.taskModel), ...big, ...spark(c.xfyun.chatModel)];
+}
+
+/**
+ * 按会话模式给出**按调用顺序**排列的提供方/模型链；未配置返回空数组。
+ *
+ * 2026-10-31 起是"主链 + 备用链"：
+ *   chat：DashScope 五模型 → BigModel(glm-4.7-flash) → 星火(spark-x2.6-4b)
+ *   task：Agnes → 星火(spark-x2.6，第一备用) → BigModel → 星火(spark-x2.6-4b)
+ * 两条链仍然**互不串用**：chat 链里永远不会出现 agnes，task 链的第一位永远是 agnes（配了 Key 时）。
+ */
 export function providersForMode(mode: 'chat' | 'task'): LlmProviderSpec[] {
   const c = getConfig();
   if (mode === 'chat') {
-    if (!c.dashscope.apiKey) return [];
-    return c.dashscope.models.map((model) => ({
-      name: CHAT_ENGINE,
-      apiKey: c.dashscope.apiKey,
-      baseUrl: c.dashscope.baseUrl,
-      model
-    }));
+    const primary = c.dashscope.apiKey
+      ? c.dashscope.models.map((model) => ({
+          name: CHAT_ENGINE as ProviderName,
+          apiKey: c.dashscope.apiKey,
+          baseUrl: c.dashscope.baseUrl,
+          model
+        }))
+      : [];
+    return [...primary, ...fallbackSpecs('chat')];
   }
-  if (!c.agnes.apiKey) return [];
-  return [{ name: TASK_ENGINE, apiKey: c.agnes.apiKey, baseUrl: c.agnes.baseUrl, model: c.agnes.model }];
+  const primary: LlmProviderSpec[] = c.agnes.apiKey
+    ? [{ name: TASK_ENGINE, apiKey: c.agnes.apiKey, baseUrl: c.agnes.baseUrl, model: c.agnes.model }]
+    : [];
+  return [...primary, ...fallbackSpecs('task')];
 }
 
 /** 该模式是否已有可用的大模型（否则上层走规则引擎） */
@@ -47,10 +72,16 @@ export function isLlmConfigured(mode: 'chat' | 'task'): boolean {
   return providersForMode(mode).length > 0;
 }
 
-/** 该模式对应的 engine 标识（写进 run_started / run_completed，供前端展示） */
+/**
+ * 该模式对应的 engine 标识（写进 run_started / run_completed，供前端展示）。
+ * ⚠️ 备用链里的 bigmodel / xfyun 统一归到 `dashscope` 这一"OpenAI 兼容端点族"——
+ *    engine 只是粗粒度归类，**用户看到的是 model 字段**（真实模型 id），
+ *    这样不必为了两个备用提供方去改前后端的 EngineType 联合类型。
+ */
 export function engineForMode(mode: 'chat' | 'task'): 'dashscope' | 'agnes' | 'demo' {
   const list = providersForMode(mode);
-  return list.length ? list[0]!.name : 'demo';
+  if (!list.length) return 'demo';
+  return list[0]!.name === 'agnes' ? 'agnes' : 'dashscope';
 }
 
 /** 该模式**计划**使用的模型（首个）；未配置返回 null。给 run_started 与健康检查用，不含密钥 */

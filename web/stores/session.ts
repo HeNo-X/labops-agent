@@ -48,6 +48,8 @@ export interface ChatMessage {
   model?: string | null;
   sourceType?: string | null;
   ms?: number;
+  /** A6：provider 上报的真实 token 用量（run_completed.usage 落库进 meta）；拿不到为 null，不估数冒充 */
+  usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
   error?: { code: string; message: string; hint?: string } | null;
   responseMode?: 'chat'|'task';
   queriedAt?:string;
@@ -232,7 +234,7 @@ export const useSessionStore = defineStore('session', () => {
 
   function fromServer(m:Record<string,unknown>):ChatMessage{
     const meta=(m['meta']||{}) as Record<string,unknown>;
-    return {id:String(m['id']),role:m['role'] as ChatMessage['role'],text:String(m['text']||''),status:(m['status'] as ChatMessage['status'])||'completed',toolCalls:(meta['toolCalls'] as ToolCallRecord[])||[],engine:meta['engine'] as string|null,model:meta['model'] as string|null,sourceType:meta['sourceType'] as string|null,ms:Number(meta['ms'])||undefined,error:meta['error'] as ChatMessage['error'],responseMode:meta['responseMode'] as 'chat'|'task'|undefined,queriedAt:meta['queriedAt'] as string|undefined,scope:meta['scope'] as string|undefined,createdAt:String(m['createdAt']||''),ordinal:Number(m['ordinal'])};
+    return {id:String(m['id']),role:m['role'] as ChatMessage['role'],text:String(m['text']||''),status:(m['status'] as ChatMessage['status'])||'completed',toolCalls:(meta['toolCalls'] as ToolCallRecord[])||[],engine:meta['engine'] as string|null,model:meta['model'] as string|null,sourceType:meta['sourceType'] as string|null,ms:Number(meta['ms'])||undefined,usage:(meta['usage'] as ChatMessage['usage'])??null,error:meta['error'] as ChatMessage['error'],responseMode:meta['responseMode'] as 'chat'|'task'|undefined,queriedAt:meta['queriedAt'] as string|undefined,scope:meta['scope'] as string|undefined,createdAt:String(m['createdAt']||''),ordinal:Number(m['ordinal'])};
   }
   async function syncConversation(id:string,select=false):Promise<void>{
     if(select)saveCurrentId(id);

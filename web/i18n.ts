@@ -12,7 +12,7 @@ const en:Record<string,string>={
  '工作':'Work','聊天':'Read only','发送':'Send','停止':'Stop','生成中…':'Generating…','查询实验室，或准备办理工作…':'Ask about a lab or prepare a work request…',
  '搜索会话':'Search chats','置顶会话':'Pin chat','取消置顶':'Unpin','管理会话':'Manage chat','保存名称':'Save name','删除会话':'Delete chat','取消':'Cancel','会话名称':'Chat title',
  '尚未开始对话':'No messages yet','无匹配会话':'No matching chats','此分区暂无会话。':'No chats in this section.','新建工作会话':'New work chat','新建聊天会话':'New read-only chat',
- '实验室':'Labs','实验室详情':'Lab details','自动化':'Automation','消息中心':'Messages','我的':'More','资料与证据':'Evidence and manuals','身份与提醒偏好':'Account and reminders',
+ '实验室':'Labs','实验室详情':'Lab details','自动化':'Automation','消息中心':'Messages','我的':'Me','资料与证据':'Evidence and manuals','身份与提醒偏好':'Account and reminders',
  '本人站内提醒偏好':'My in-app reminders','启用站内提醒':'Enable in-app reminders','保存本人偏好':'Save reminder preferences','静默开始':'Quiet hours start','静默结束':'Quiet hours end','每日上限':'Daily limit','同一依据最多提醒次数':'Per-event limit','最短间隔（分钟）':'Minimum interval (minutes)','设置模板分类与规则':'Manage reminder rules',
  '帮助与安装':'Help and installation','消息':'Messages','返回':'Back','账户菜单':'Account menu','主要导航':'Main navigation','管理员':'Administrator','志愿者':'Volunteer','学生':'Student',
  '正在恢复本人工作区…':'Restoring your workspace…','重新读取':'Reload','使用主系统账号登录':'Sign in with your main system account','账号':'Account','密码':'Password','登录':'Sign in','正在验证…':'Verifying…',
@@ -472,7 +472,24 @@ Object.assign(en,{
  '筛选':'Filter',
  '按登记、服务与排课筛选。':'Filter by registration, service and timetable.',
  '条课':' classes',
- '课表未知':'Timetable unknown'
+ '课表未知':'Timetable unknown',
+ '可查询并准备办理单':'Can query and prepare a work request',
+ '只查询，不办理业务':'Query only; no business actions',
+ '房间办理':'Room actions',
+ '更多办理':'More actions',
+ '按房间与身份可用的办理入口。':'Actions available for this room and role.',
+ '偏好':'Preferences',
+ '帮助':'Help',
+ '提醒偏好':'Reminders',
+ '站内提醒与分类':'In-app reminders and categories',
+ '界面与连接':'Appearance and connection',
+ '主题、字号与安装设置':'Theme, text size and install settings',
+ '使用说明':'Usage guide',
+ '主系统账号':'Main system account',
+ '记住账号':'Remember account',
+ '显示密码':'Show password',
+ '隐藏密码':'Hide password',
+ '登录后进入':'After sign-in you will enter'
 });
 // PC 端过程呈现与人在环路（相位机 / 轮次折叠 / 工具展示 / 命令面板）
 Object.assign(en,{
@@ -532,6 +549,8 @@ Object.assign(en,{
  '停止当前任务':'Stop the current task',
  '切换演示身份为管理员':'Switch demo role to administrator',
  '切换演示身份为志愿者':'Switch demo role to volunteer',
- '切换演示身份为学生':'Switch demo role to student'
+ '切换演示身份为学生':'Switch demo role to student',
+ // A6 token 用量（provider 真实上报才显示）
+ 'tokens':'tokens'
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

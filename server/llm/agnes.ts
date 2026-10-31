@@ -64,8 +64,24 @@ export class AgnesError extends Error {
   }
 }
 
+/**
+ * A6 配额感知（2026-10-30 部署实测教训）：账号级配额/额度耗尽（403 +
+ * AllocationQuota.FreeTierOnly 等）与"鉴权失败"是两回事 —— 密钥是好的，
+ * 重试与换模型都不会自愈，提示必须指路充值/调整配额模式，而不是让用户
+ * 去检查 KEY。签名覆盖实测案例与两家供应商的常见措辞。
+ */
+const QUOTA_BODY_RE = /AllocationQuota|FreeTierOnly|Arrearage|quota[_. ]?(exhaust|exceed|used[_ ]?up)|insufficient[_. ]?quota|欠费|额度已?用?(尽|完)/i;
+
+/** 纯函数判定（供 classify 与单测共用） */
+export function isQuotaExhaustedResponse(status: number, body: string): boolean {
+  return status === 403 && QUOTA_BODY_RE.test(body);
+}
+
 function classify(status: number, body: string): AgnesError {
   const snippet = body.slice(0, 400);
+  if (isQuotaExhaustedResponse(status, body)) {
+    return new AgnesError('agnes_quota_exhausted', `模型服务账号配额/额度已用尽（HTTP 403）。这不是网络或密钥问题。${snippet}`, status, false);
+  }
   if (status === 401 || status === 403) {
     return new AgnesError('agnes_auth_failed', `Agnes 鉴权失败（HTTP ${status}）：请检查 AGNES_API_KEY 是否有效。${snippet}`, status, false);
   }

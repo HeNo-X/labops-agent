@@ -106,3 +106,20 @@ test('T1-06 白名单外的异常事件序列：store 降级告警维持原相�
   assert.equal(store.phase,'idle','非法转移被降级为告警，相位维持原状');
   assert.equal(store.events.length,1,'事件本身仍入轨迹（展示事实不受相位约束）');
 });
+
+test('A6-04 run_completed.usage 捕获：provider 真实值入库展示，resetRun 清空，坏值不冒充',()=>{
+  setActivePinia(createPinia());
+  const store=useRunStore();
+  store.beginRun('查询课表');
+  feed(store,0,'run_started',{engine:'demo',sourceType:'snapshot',serverNow:{iso:'',date:'',time:'',weekday:1,weekdayLabel:'',timezone:''},term:{term:'',termStart:null,weekNo:null,weekDeterminable:false,note:''},allowedTools:[]});
+  assert.equal(store.usage,null,'运行中不该有 usage');
+  feed(store,1,'run_completed',{steps:1,toolCalls:1,ms:800,answer:'done',usage:{promptTokens:120,completionTokens:45,totalTokens:165}});
+  assert.deepEqual(store.usage,{promptTokens:120,completionTokens:45,totalTokens:165});
+  store.resetRun();
+  assert.equal(store.usage,null,'resetRun 必须清空 usage');
+  // 缺 totalTokens 的坏 payload 不入库（宁可空缺，不展示残缺数字）
+  store.beginRun('再查一次');
+  feed(store,0,'run_started',{engine:'demo',sourceType:'snapshot',serverNow:{iso:'',date:'',time:'',weekday:1,weekdayLabel:'',timezone:''},term:{term:'',termStart:null,weekNo:null,weekDeterminable:false,note:''},allowedTools:[]});
+  feed(store,1,'run_completed',{steps:1,toolCalls:0,ms:100,answer:'x',usage:{promptTokens:1}});
+  assert.equal(store.usage,null);
+});

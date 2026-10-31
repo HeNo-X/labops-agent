@@ -119,6 +119,14 @@ export async function* streamChatWithFallback(
         // 也**不记熔断**：中途断流多半与本次回答有关，不该让该模型替后续所有请求背锅
         throw err;
       }
+      // A6：账号级配额/额度耗尽对链上**所有**模型同样生效——逐个换模型只会
+      // 白烧一遍（2026-10-30 实测 7 个模型全 403 AllocationQuota.FreeTierOnly）。
+      // 短路整条链并如实上报；记一次熔断让 /health 能看到该模型不可用。
+      if ((err as AgnesError)?.code === 'agnes_quota_exhausted') {
+        recordFailure(provider);
+        log?.warn('llm_quota_exhausted', { mode, provider: provider.name, model: provider.model });
+        throw err;
+      }
       recordFailure(provider);
       log?.warn('llm_provider_failed', {
         mode,

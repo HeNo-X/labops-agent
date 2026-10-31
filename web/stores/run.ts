@@ -192,6 +192,11 @@ export const useRunStore = defineStore('run', () => {
    * 前端本地时钟的 elapsedMs 只用于运行中的进度感与取消前的时长，不冒充服务端事实。
    */
   const serverMs = ref<number | null>(null);
+  /**
+   * A6：本轮 token 用量（run_completed.payload.usage，provider 上报的真实值）。
+   * 只为展示；拿不到（流中断/老服务端）就是 null，绝不前端估数冒充。
+   */
+  const usage = ref<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(null);
   /** 最近一次收到事件的时间（毫秒）。前台恢复时据此判断"是否已超过 5s 无新事件" */
   const lastEventAt = ref<number | null>(null);
   /** ops.v1：活跃轮的待确认提案（need_confirm 事件载荷）。历史轮由消息内的提案卡自持 */
@@ -563,6 +568,7 @@ export const useRunStore = defineStore('run', () => {
     lastResult.value = null;
     extraResult.value = null;
     pendingConfirm.value = null;
+    usage.value = null;
   }
 
   function beginRun(q: string): string {
@@ -647,11 +653,13 @@ export const useRunStore = defineStore('run', () => {
         movePhase('completed');
         if (runStatus.value === 'running') runStatus.value = 'completed';
         // R03/C04：以服务端权威全文对齐（delta 可能漏块；durable 确认在保存成功后发出）
-        const p2 = ev.payload as { answer?: string; engine?: EngineType; model?: string; ms?: number };
+        const p2 = ev.payload as { answer?: string; engine?: EngineType; model?: string; ms?: number; usage?: { promptTokens: number; completionTokens: number; totalTokens: number } };
         if(p2.engine) engine.value=p2.engine;
         // model 反映 fallback 之后真正生效的模型，覆盖 run_started 的计划值
         if(p2.model) model.value=p2.model;
         if (typeof p2.ms === 'number') serverMs.value = p2.ms;
+        // A6：provider 真实 usage（服务端拿不到时不下发，前端不估数冒充）
+        if (p2.usage && typeof p2.usage.totalTokens === 'number') usage.value = p2.usage;
         if (typeof p2.answer === 'string' && p2.answer) stream.value = p2.answer;
         break;
       }
@@ -833,6 +841,7 @@ export const useRunStore = defineStore('run', () => {
     error,
     elapsedMs,
     serverMs,
+    usage,
     lastEventAt,
     engine,
     model,

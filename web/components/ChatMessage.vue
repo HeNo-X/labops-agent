@@ -109,7 +109,17 @@ function toggleStep(id: string): void {
 const traceSummary = computed(() => {
   const u = turnUnit.value.unit;
   const tools = u.toolCount ? ` · ${u.toolCount} ${tr('次工具调用')}` : '';
-  return `${u.workStatus.label}${tools}`;
+  return `${u.workStatus.label}${tools}${usageSuffix.value}`;
+});
+
+/**
+ * A6：token 用量后缀。provider 真实上报才显示（活跃轮来自 run_completed.usage，
+ * 历史轮来自消息 meta.usage）；拿不到就是空串 —— 绝不前端估数冒充。
+ */
+const usageSuffix = computed(() => {
+  const u = turnUnit.value.live ? run.usage : (props.msg.usage ?? null);
+  if (!u || typeof u.totalTokens !== 'number' || !(u.totalTokens >= 0)) return '';
+  return ` · ${u.totalTokens.toLocaleString('en-US')} ${tr('tokens')}`;
 });
 
 /**

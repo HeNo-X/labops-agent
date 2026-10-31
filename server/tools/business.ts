@@ -134,7 +134,7 @@ export function planNativeDialogue(q:string,ctx:ToolContext):{tool:string;args:R
       const tm=/(\d{1,2})[:：](\d{2})/.exec(q),daily=/每天|每日|每个教学日/.test(q);
       // Incomplete recurrence/recipient parsing must not silently become a daily self rule.
       const unsupported=/每周|每月|每年|星期|周[一二三四五六日天]|班.*前|班.*开始|Cron|cron|\d{4}-\d{2}-\d{2}|给(?!我|本人|自己)|全校|全体|班级|角色|\d+\s*小时|仅|只保存|不要.*(?:发|提醒)|上午|下午|晚上|中午|早上|夜间|早晨|AM|PM|节假日|工作日|周末|除外|排除|不提醒|为(?!我|本人|自己).*?(?:设置|创建|订阅)|帮(?!我).*?(?:设置|创建|订阅)/i.test(q);
-      const kind=/未读.*通知/.test(q)?'notice_reminder':/停用.*到期/.test(q)?'closure_expiry':/资源.*风险|风险.*巡检/.test(q)?'resource_risk':/周报/.test(q)?'weekly_report':/值班/.test(q)?'duty_reminder':/明日|明天/.test(q)?'tomorrow_courses':/工单|催办/.test(q)?'due_followup':/日报/.test(q)?'daily_report':null;
+      const kind=/未读.*通知/.test(q)?'notice_reminder':/开门|提前.*开门|开实验室的门/.test(q)?'lab_open_reminder':/签到.*(?:缺口|情况|提醒)|上机.*签到/.test(q)?'session_checkin_reminder':/巡检|巡查/.test(q)?'patrol_reminder':/值班/.test(q)?'duty_reminder':/明日|明天/.test(q)?'tomorrow_courses':/工单|催办/.test(q)?'due_followup':/日报/.test(q)?'daily_report':null;
       if(!tm||!daily||unsupported||!kind||Number(tm[1])>23||Number(tm[2])>59)return {tool:'query_scheduled_jobs',args:{},execute:async()=>result({summary:'请在“定时任务与提醒”面板核对模板、每天/每周/正式班次前、时间与接收对象，预览后本人确认。本轮未创建规则方案。'},ctx)};
       const args={action:'create',spec:{kind,calendarPolicy:/教学日/.test(q)?'teaching_days':'all_days',trigger:{type:'daily',time:tm[1]!.padStart(2,'0')+':'+tm[2]},recipients:[{kind:'user',userId:businessScope().principal?.username}],approvedEffects:['report','inbox']}};return {tool:'prepare_scheduled_job',args,execute:()=>prepareScheduled(args,ctx)};
     }

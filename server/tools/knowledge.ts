@@ -1,7 +1,7 @@
 import {businessRequest,isBusinessConnected} from '../business/bridge.ts';
 import { effectiveRole } from '../business/bridge.ts';
 import { searchChunks, eligibleDocs } from './knowledge-search.ts';
-import { vectorRecallByVec } from './knowledge-vector.ts';
+import { vectorRecallByVec, rankManualParagraphs } from './knowledge-vector.ts';
 import { embedQuery, isEmbeddingEnabled } from '../llm/embeddings.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -80,6 +80,15 @@ export async function runKnowledge(args:Record<string,unknown>,ctx:ToolContext):
   if(typeof args['query']!=='string'||!args['query'].trim())return {ok:false,code:'query_required',message:'请提供检索问题',suggestions:[],summary:'缺少检索问题'};
   if(isBusinessConnected()&&/手册|设备|厂家|维修|投影|铭牌/.test(args['query'])){
     try{const raw=await businessRequest('/evidence/manuals?q='+encodeURIComponent(args['query']));const manuals=raw['manuals'] as Array<{id:string;title:string;device:string;version:string;sourceUrl:string;importedAt:string;paragraphs:Array<{id:string;text:string}>}>;
+      // RAG 批次2：向量路对**主系统已返回**的手册段落排序（集合权威在主系统侧，
+      // 权限在它那边过滤；排序失败保持原序，不影响可用性）
+      if(manuals.length&&isEmbeddingEnabled()){
+        try{
+          const qv=await embedQuery(args['query']);
+          const ranks=rankManualParagraphs(qv,manuals);
+          if(ranks.size)manuals.forEach((m)=>{m.paragraphs=[...m.paragraphs].sort((a,b)=>(ranks.get(`m:${m.id}@${m.version}#${a.id}`)??1e9)-(ranks.get(`m:${m.id}@${m.version}#${b.id}`)??1e9));});
+        }catch{/* 排序失败保持原序 */}
+      }
       const summary=manuals.length?'已找到当前权限范围内的设备资料。':'没有命中已上传审核的设备资料，维修规范未知。';return {ok:true,resultKind:'knowledge',summary,result:{summary,scope:'实际导入并按权限检索的设备资料；照片不能替代人工验收。',hits:manuals.map(d=>({id:d.id,title:d.title+'（适用设备 '+d.device+'）',version:d.version,effectiveFrom:d.importedAt.slice(0,10),source:'主系统管理员审核资料：'+d.sourceUrl,url:d.sourceUrl,paragraphs:d.paragraphs.map(p=>({locator:d.id+'@'+d.version+'#'+p.id,text:p.text}))}))}};
     }catch(e){return {ok:false,code:'evidence_unavailable',message:(e as Error).message,suggestions:[],summary:'未取得有效设备资料'};}
   }

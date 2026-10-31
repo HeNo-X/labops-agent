@@ -13,6 +13,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { getDb } from '../persistence/db.ts';
 import { cosine, embedTexts, embeddingEndpoint, type EmbeddingEndpoint } from '../llm/embeddings.ts';
 import type { KnowledgeDocument } from './knowledge.ts';
+import { docChunks, manualChunks, type ManualDoc } from './knowledge-chunker.ts';
 
 export function ensureKnowledgeVecTable(db: DatabaseSync): void {
   db.exec(`CREATE TABLE IF NOT EXISTS knowledge_chunks_vec (
@@ -47,6 +48,8 @@ export interface IndexOptions {
   embed?: typeof embedTexts;
   /** 测试注入：:memory: 库；缺省用持久库 */
   db?: DatabaseSync;
+  /** 分块参数（缺省 420 字窗口 / 50 字重叠） */
+  chunk?: { window?: number; overlap?: number };
 }
 
 /**
@@ -57,7 +60,10 @@ export async function indexKnowledge(docs: KnowledgeDocument[], opts: IndexOptio
   const db = opts.db ?? getDb();
   ensureKnowledgeVecTable(db);
   const ep = embeddingEndpoint(opts.endpoint);
-  const entries = docs.flatMap((d) => d.paragraphs.map((text, i) => ({ key: `${d.id}#${i + 1}`, docId: d.id, idx: i + 1, text })));
+  // RAG 批次2：分块器接管——短段落 1 段 1 块（与批次 1 行为一致），长段落按
+  // 句边界开窗重叠；向量化文本带标题语境前缀。paraIndex 存**父段落号**，
+  // chunkKey 保留子块号（docId#N / docId#N.k）。
+  const entries = docs.flatMap((d) => docChunks(d, opts.chunk).map((c) => ({ key: c.key, docId: d.id, idx: c.paraIndex, text: c.embedText })));
   if (!entries.length) {
     const existing = db.prepare('SELECT chunkKey FROM knowledge_chunks_vec').all() as Array<{ chunkKey: string }>;
     const del = db.prepare('DELETE FROM knowledge_chunks_vec WHERE chunkKey=?');
@@ -107,17 +113,89 @@ export function vecIndexStats(db: DatabaseSync = getDb()): { count: number; mode
  */
 export function vectorRecallByVec(queryVec: number[], eligible: KnowledgeDocument[], topN: number, db: DatabaseSync = getDb()): Map<string, number> {
   ensureKnowledgeVecTable(db);
-  const rows = db.prepare('SELECT chunkKey, dim, vec FROM knowledge_chunks_vec').all() as Array<{ chunkKey: string; dim: number; vec: Buffer }>;
+  const rows = db.prepare('SELECT chunkKey, docId, paraIndex, dim, vec FROM knowledge_chunks_vec').all() as Array<{ chunkKey: string; docId: string; paraIndex: number; dim: number; vec: Buffer }>;
+  // 候选 = 权限/日期过滤后的文档段落（含子块：docId#N 与 docId#N.k 同属父段 N）
   const allowed = new Set(eligible.flatMap((d) => d.paragraphs.map((_, i) => `${d.id}#${i + 1}`)));
-  const scored: Array<{ key: string; score: number }> = [];
+  const allowedChunk = (r: { docId: string; paraIndex: number }): boolean => allowed.has(`${r.docId}#${r.paraIndex}`);
+  // 同段多子块取最优分，折叠回父段落（对外 locator §N 的契约不变）
+  const best = new Map<string, number>();
   for (const r of rows) {
     if (r.dim !== queryVec.length) continue;
-    if (!allowed.has(r.chunkKey)) continue;
+    if (!allowedChunk(r)) continue;
     const score = cosine(queryVec, decodeVec(r.vec));
-    if (score > 0) scored.push({ key: r.chunkKey, score });
+    if (score <= 0) continue;
+    const parent = `${r.docId}#${r.paraIndex}`;
+    const cur = best.get(parent);
+    if (cur === undefined || score > cur) best.set(parent, score);
   }
-  scored.sort((a, b) => b.score - a.score || a.key.localeCompare(b.key));
+  const scored = [...best.entries()].map(([parent, score]) => ({ parent, score }));
+  scored.sort((a, b) => b.score - a.score || a.parent.localeCompare(b.parent));
   const out = new Map<string, number>();
-  scored.slice(0, topN).forEach((s, i) => out.set(s.key, i + 1));
+  scored.slice(0, topN).forEach((s, i) => out.set(s.parent, i + 1));
+  return out;
+}
+
+/**
+ * RAG 批次2：主系统手册向量索引。键命名空间 `m:${id}@${version}#paraId(.k)`，
+ * **版本在键里**——重导入新版本自动新增键，同 id 旧版本键清剪（增量去重）。
+ * 权限口径：只索引主系统按当前账号返回的手册（manualVisible 在主系统侧过滤）。
+ */
+export async function indexManuals(manuals: ManualDoc[], opts: IndexOptions = {}): Promise<IndexResult> {
+  const db = opts.db ?? getDb();
+  ensureKnowledgeVecTable(db);
+  const ep = embeddingEndpoint(opts.endpoint);
+  const entries = manuals.flatMap((m) => manualChunks(m, opts.chunk).map((c) => ({ key: c.key, docId: c.docId, text: c.embedText })));
+  const embed = opts.embed ?? embedTexts;
+  const vecs = entries.length ? await embed(entries.map((e) => e.text), opts.endpoint) : [];
+  const validPrefixes = new Set(manuals.map((m) => `m:${m.id}@`));
+  db.exec('BEGIN');
+  try {
+    const upsert = db.prepare(
+      `INSERT INTO knowledge_chunks_vec (chunkKey,docId,paraIndex,dim,model,vec,updatedAt) VALUES (?,?,?,?,?,?,?)
+       ON CONFLICT(chunkKey) DO UPDATE SET dim=excluded.dim, model=excluded.model, vec=excluded.vec, updatedAt=excluded.updatedAt`
+    );
+    const now = new Date().toISOString();
+    entries.forEach((e, i) => {
+      const f32 = Float32Array.from(vecs[i]!);
+      upsert.run(e.key, e.docId, 0, f32.length, ep.model, Buffer.from(f32.buffer, f32.byteOffset, f32.byteLength), now);
+    });
+    // 清剪：同手册旧版本（前缀匹配但不在当前键集）；其他手册（本轮未返回、
+    // 可能当前无权限）的键不动——不越权清剪
+    const all = db.prepare("SELECT chunkKey FROM knowledge_chunks_vec WHERE chunkKey LIKE 'm:%'").all() as Array<{ chunkKey: string }>;
+    const validKeys = new Set(entries.map((e) => e.key));
+    const del = db.prepare('DELETE FROM knowledge_chunks_vec WHERE chunkKey=?');
+    let pruned = 0;
+    for (const r of all) {
+      if (validKeys.has(r.chunkKey)) continue;
+      if ([...validPrefixes].some((p) => r.chunkKey.startsWith(p))) { del.run(r.chunkKey); pruned += 1; }
+    }
+    db.exec('COMMIT');
+    return { indexed: entries.length, pruned, docs: manuals.length };
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+/**
+ * RAG 批次2：手册段落向量排序。**只对主系统本次返回的手册段落排序**——
+ * 手册集合的权威仍是主系统端点（权限在它那边过滤），向量路只决定段落先后。
+ * 返回 `m:id@version#paraId` → 名次（1 起）。
+ */
+export function rankManualParagraphs(queryVec: number[], manuals: ManualDoc[], db: DatabaseSync = getDb()): Map<string, number> {
+  ensureKnowledgeVecTable(db);
+  const allowed = new Set(manuals.flatMap((m) => manualChunks(m).map((c) => c.key)));
+  const rows = db.prepare('SELECT chunkKey, dim, vec FROM knowledge_chunks_vec').all() as Array<{ chunkKey: string; dim: number; vec: Buffer }>;
+  const best = new Map<string, number>();
+  for (const r of rows) {
+    if (r.dim !== queryVec.length) continue;
+    // 子块键（…#paraId.2）折算回父键（…#paraId）
+    const parent = r.chunkKey.replace(/\.\d+$/, '');
+    if (!allowed.has(parent)) continue;
+    const score = cosine(queryVec, decodeVec(r.vec));
+    if (score <= 0) continue;
+    const cur = best.get(parent);
+    if (cur === undefined || score > cur) best.set(parent, score);
+  }
+  const sorted = [...best.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const out = new Map<string, number>();
+  sorted.forEach(([key], i) => out.set(key, i + 1));
   return out;
 }

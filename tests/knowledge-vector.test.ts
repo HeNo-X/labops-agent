@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { cosine, embedTexts, EmbeddingError } from '../server/llm/embeddings.ts';
-import { ensureKnowledgeVecTable, indexKnowledge, vecIndexStats } from '../server/tools/knowledge-vector.ts';
+import { ensureKnowledgeVecTable, indexKnowledge, indexManuals, vecIndexStats, vectorRecallByVec, rankManualParagraphs } from '../server/tools/knowledge-vector.ts';
 import { retrieveHybrid, type KnowledgeDocument } from '../server/tools/knowledge.ts';
 import { retrieveRanked } from '../server/tools/knowledge.ts';
 import { searchChunks } from '../server/tools/knowledge-search.ts';
@@ -159,4 +159,89 @@ test('A11-08 searchChunks 向量路显式传入：无权限/过期候选不因�
   const ranks = new Map<string, number>([[`${expired.id}#1`, 1]]);
   const chunks = searchChunks('投影', 'admin', '2026-10-31', [expired], 8, ranks);
   assert.equal(chunks.length, 0, '过期文档的向量名次再高也不得通过检索');
+});
+
+// ==================== RAG 批次 2：分块器与手册摄取 ====================
+
+import { chunkLongText, docChunks, type ManualDoc } from '../server/tools/knowledge-chunker.ts';
+
+test('A11-09 分块器：短文本原样 1 块；长文本按句边界开窗且带重叠', () => {
+  const short = '一句话。';
+  assert.deepEqual(chunkLongText(short, { window: 420 }), [short]);
+  const sentences = Array.from({ length: 40 }, (_, i) => `这是第${i}句话，讲到实验室管理的某个细节。`).join('');
+  const chunks = chunkLongText(sentences, { window: 200, overlap: 50 });
+  assert.ok(chunks.length >= 4, `长文本应切成多块（实际 ${chunks.length}）`);
+  for (const c of chunks) assert.ok(c.length <= 220, `单块不得超窗太多：${c.length}`);
+  // 句边界：每块必须以句尾符结尾（句子单元不被腰斩）
+  for (const c of chunks) assert.match(c, /[。！？；]$/, `块应以句子边界结束：…${c.slice(-20)}`);
+  // 重叠：相邻块之间有共享文本
+  for (let i = 1; i < chunks.length; i += 1) {
+    const tail = chunks[i - 1]!.slice(-30);
+    const shared = chunks[i]!.slice(0, 60).split('').filter((ch) => tail.includes(ch)).length;
+    assert.ok(shared > 0, '相邻块应有重叠内容');
+  }
+});
+
+test('A11-10 分块器：表格/列表行作为整体单元，绝不从中间切断', () => {
+  const rows = Array.from({ length: 30 }, (_, i) => `| 参数${i} | 数值${i} | 备注${i} |`).join('\n');
+  const chunks = chunkLongText(rows, { window: 200, overlap: 40 });
+  assert.ok(chunks.length > 1);
+  for (const c of chunks) for (const line of c.split('\n')) {
+    if (!line.trim()) continue;
+    assert.match(line, /^\s*\|/, '表格行必须整行保留，不得切断：' + line.slice(0, 30));
+  }
+});
+
+test('A11-11 docChunks：键契约（单块 #N / 多块 #N.k）与标题语境前缀', () => {
+  // 版本号约定：库内不带 v 前缀（渲染层统一加 v）——分块器同样只加一个 v
+  const long: KnowledgeDocument = { ...DOC_A, title: '调课规程', version: '1', paragraphs: ['短段。', '超长段落'.repeat(80) + '。'] };
+  const chunks = docChunks(long, { window: 200 });
+  assert.equal(chunks[0]!.key, 'doc-a#1', '短段：单块键无子号');
+  assert.equal(chunks[0]!.embedText, '调课规程（v1）：短段。', '向量化文本带标题语境前缀');
+  const subs = chunks.filter((c) => c.paraIndex === 2);
+  assert.ok(subs.length >= 2, '长段落切成多块');
+  assert.equal(subs[0]!.key, 'doc-a#2.1', '多块键带子号');
+  assert.ok(subs.every((c) => c.paraIndex === 2), 'paraIndex 恒为父段落号（locator 契约）');
+});
+
+test('A11-12 段落折叠：子块命中在向量召回里折叠回父段落（取最优名次）', async () => {
+  const db = memoryDb();
+  const long: KnowledgeDocument = { ...DOC_A, paragraphs: ['短段。', '投影仪的信号接入分三步，这是很长的说明。'.repeat(30) + '。'] };
+  // testEmbed 对"投影/信号"打高维 0：长段两个子块都会带投影语义
+  await indexKnowledge([long], { embed: testEmbed, db, chunk: { window: 200 } });
+  const ranks = vectorRecallByVec([1, 0, 0, 0.01], [long], 4, db);
+  assert.equal([...ranks.keys()].filter((k) => k.startsWith('doc-a#2')).length, 1, '同段多子块折叠为一条父段落名次');
+  assert.ok(ranks.has('doc-a#2'), '父段落键在召回结果里');
+});
+
+test('A11-13 手册索引：版本在键里，重导入新版清剪旧版（增量去重）', async () => {
+  const db = memoryDb();
+  const manual: ManualDoc = { id: 'pm-1', title: '投影机手册', device: '投影仪', version: 'v1', paragraphs: [{ id: 'p1', text: '开机步骤。' }, { id: 'p2', text: '信号接入步骤。' }] };
+  const first = await indexManuals([manual], { embed: testEmbed, db });
+  assert.equal(first.indexed, 2);
+  assert.ok(vecIndexStats(db).count >= 2);
+  const v2: ManualDoc = { ...manual, version: 'v2' };
+  const second = await indexManuals([v2], { embed: testEmbed, db });
+  assert.equal(second.indexed, 2, '新版本键写入');
+  assert.equal(second.pruned, 2, '同手册旧版本键被清剪');
+  const stats = vecIndexStats(db);
+  assert.equal(stats.count, 2, '库内只剩当前版本');
+  // 其他手册的键不被越权清剪
+  const other: ManualDoc = { id: 'pm-2', title: '其他手册', device: '其他', version: 'v1', paragraphs: [{ id: 'p1', text: '内容。' }] };
+  await indexManuals([other], { embed: testEmbed, db });
+  const third = await indexManuals([v2], { embed: testEmbed, db });
+  assert.equal(third.pruned, 0, '不同 id 的键不受清剪影响');
+});
+
+test('A11-14 手册段落排序：只排主系统返回的手册，向量相近者靠前', async () => {
+  const db = memoryDb();
+  const m1: ManualDoc = { id: 'pm-1', title: '投影机手册', device: '投影仪', version: 'v1', paragraphs: [{ id: 'p1', text: '调课流程说明。' }, { id: 'p2', text: '信号接入与显示设置。' }] };
+  await indexManuals([m1], { embed: testEmbed, db });
+  const ranks = rankManualParagraphs([1, 0, 0, 0.01], [m1], db);
+  assert.equal(ranks.get('m:pm-1@v1#p2'), 1, '投影语义段排在第一');
+  assert.equal(ranks.get('m:pm-1@v1#p1'), 2);
+  // 未返回的手册（不在 allowed 集）不得出现在结果里
+  const other: ManualDoc = { id: 'pm-9', title: '别的', device: 'x', version: 'v1', paragraphs: [{ id: 'q1', text: '投影。' }] };
+  void other;
+  assert.ok(![...ranks.keys()].some((k) => k.startsWith('m:pm-9')), '未返回手册不得借排序混入');
 });

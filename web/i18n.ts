@@ -563,6 +563,11 @@ Object.assign(en,{
  '已切换为聊天会话：之后只查询数据，不准备办理单':'Switched to Chat: only queries from now on, no business drafts.',
  '已切换为工作会话：之后可准备办理单，执行仍需本人确认':'Switched to Work: business drafts can be prepared, execution still requires your confirmation.',
  '模式切换失败：':'Mode switch failed: ',
+ // A11/RAG 批次2：知识向量索引（管理端）
+ '导入后重建知识向量索引（RAG）':'Rebuild knowledge vector index after import (RAG)',
+ '向量索引已重建：内置 {n} 块':'Vector index rebuilt: {n} built-in chunks',
+ '，手册 {n} 块':', {n} manual chunks',
+ '（⚠️ 查询期未启用向量路：EMBEDDING_ENABLED=0）':'(warning: vector recall is not enabled at query time: EMBEDDING_ENABLED=0)',
  // A10 会话模式开关（主区顶部居中左右分栏）
  '会话模式':'Conversation mode',
  '聊天会话：只查询数据，不准备办理单。模式随发送时刻生效，历史消息保持其发生时的语义。':'Chat: read-only queries, no business drafts. The mode applies from the moment of sending; past messages keep the semantics they were created with.',

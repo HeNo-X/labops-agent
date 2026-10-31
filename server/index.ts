@@ -27,6 +27,7 @@ import { handleTranscribe } from './api/transcribe.ts';
 import { handleVisionApi } from './api/vision-api.ts';
 import { handleServiceAgent } from './api/service-agent.ts';
 import { handleConversations } from './api/conversations.ts';
+import { handleKnowledgeApi } from './api/knowledge-api.ts';
 import { handleTasksApi } from './api/tasks.ts';
 import { loadDataset, verifySnapshotIntegrity } from './data/store.ts';
 import { runtimeCapabilities } from './agent/run.ts';
@@ -150,6 +151,9 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   if(p==='/api/shared-chat/history-import'||p==='/api/chat/history-import'){await importHistory(req,res);return;}
   if(p.startsWith('/api/shared-chat/conversations')){await handleConversations(req,res,p.replace('/api/shared-chat/','/api/'));return;}
 
+  // RAG 批次2：向量索引管理端点（reindex/vec-status）——必须排在下面的
+  // 「/api/knowledge/:id 文档读取」之前，否则 reindex 会被当成文档 id
+  if (p.startsWith('/api/knowledge/') && (p === '/api/knowledge/reindex' || p === '/api/knowledge/vec-status')) { await handleKnowledgeApi(req, res, p); return; }
   if (p.startsWith('/api/knowledge/') && req.method === 'GET') { const doc=documents().find(d=>d.id===p.slice('/api/knowledge/'.length)&&d.roles.includes(effectiveRole(currentActor()?.role||'student'))); json(res,doc?200:404,doc||{error:'document_not_found'}); return; }
   if (p.startsWith('/api/business/')) { await handleBusinessApi(req,res,p); return; }
 

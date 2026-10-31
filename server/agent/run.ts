@@ -49,7 +49,7 @@ import type { Intent } from './intent.ts';
 import { getSession, rememberSession } from './session.ts';
 import { loadContext } from '../persistence/db.ts';
 import { planDemo, renderDemoAnswer, runDemoTool, FREE_ROOMS_RE, SMALLTALK_RE } from './demo-engine.ts';
-import { RECOMMENDATION_FORMAT, PROMPT_VERSION, buildSystemPrompt, detectInjection, sanitizeInput } from './prompts.ts';
+import { RECOMMENDATION_FORMAT, PROMPT_VERSION, buildSystemPrompt, buildDynamicTurnContext, detectInjection, sanitizeInput } from './prompts.ts';
 import { normalizeLabName } from '../data/store.ts';
 
 export interface RunInput {
@@ -486,10 +486,8 @@ interface AgnesArgs extends Omit<DemoArgs, 'sourceType'> {
 async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   const cfg = getConfig();
   const system = buildSystemPrompt({
-    timeContext: buildTimeContext(a.now, a.intent, a.week.note),
     toolList: a.toolListText,
     sourceTypeLabel: a.ds.sourceLabel,
-    injectionSuspected: a.injectionSuspected,
     chatMode: a.mode === 'chat'
   });
 
@@ -499,7 +497,11 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   const messages: ChatMessage[] = [
     { role: 'system', content: system+'\n'+RECOMMENDATION_FORMAT },
     { role:'system',content:JSON.stringify({authorizedHistoricalFacts:authorizedFacts,activeTask:taskContext,authorizedTasks:listBusinessTasks(a.conversationId).map(t=>({taskId:t['taskId'],view:t['view'],date:t['date'],sourceLesson:t['sourceLesson'],candidateSetId:t['candidateSetId']})),rule:'历史事实只可转换或参考。问最新、改变查询条件、准备执行时重新调用工具。编号必须来自事实；候选序号依据活动候选顺序。业务确认权仅属于用户。'}) },
-    { role: 'user', content: a.question }
+    { role: 'user', content: a.question },
+    // A1 动态尾块：时间上下文 + 注入疑似声明。随 run 变化的内容全部沉到消息序列
+    // 末尾（Manus 稳定前缀经验），system 前缀因此逐字节稳定、可被供应商前缀缓存
+    // 跨 run 命中；本块只在本轮开始注入一次，run 内 messages 只追加、前缀不抖动。
+    { role:'system', content: buildDynamicTurnContext({ timeContext: buildTimeContext(a.now, a.intent, a.week.note), injectionSuspected: a.injectionSuspected }) }
   ];
 
   let steps = 0;

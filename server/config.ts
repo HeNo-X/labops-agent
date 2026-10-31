@@ -78,6 +78,13 @@ export interface AppConfig {
     taskModel: string;
     chatModel: string;
   };
+  /** RAG 批次1：知识检索的向量召回（DashScope text-embedding，OpenAI 兼容端点；复用 DASHSCOPE_API_KEY） */
+  embeddings: {
+    enabled: boolean;
+    model: string;
+    dimensions: number;
+    batchSize: number;
+  };
   /** Agnes 3.0 Flash —— 仅任务模式（工作模式） */
   agnes: {
     apiKey: string;
@@ -212,6 +219,17 @@ export function getConfig(): AppConfig {
       baseUrl: str('XFYUN_BASE_URL', 'https://maas-api.cn-huabei-1.xf-yun.com/v2').replace(/\/+$/, ''),
       taskModel: str('XFYUN_TASK_MODEL', 'spark-x2.6'),
       chatModel: str('XFYUN_CHAT_MODEL', 'spark-x2.6-4b')
+    },
+    /**
+     * RAG 批次1：知识检索向量召回。enabled 缺省关——生效需同时具备
+     * DASHSCOPE_API_KEY 与已建索引（npm run knowledge:index）；任一不满足时
+     * 检索自动退回关键词+BM25 两路，向量路任何失败都不影响检索本身。
+     */
+    embeddings: {
+      enabled: bool('EMBEDDING_ENABLED', false),
+      model: str('EMBEDDING_MODEL', 'text-embedding-v3'),
+      dimensions: int('EMBEDDING_DIMENSIONS', 1024, 64, 4096),
+      batchSize: int('EMBEDDING_BATCH_SIZE', 10, 1, 32)
     },
     circuit: {
       enabled: bool('LLM_CIRCUIT_ENABLED', true),

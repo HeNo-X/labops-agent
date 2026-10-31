@@ -155,6 +155,17 @@ function initDatabase(): DatabaseSync {
     if (!columns.some(c => c['name'] === 'ownerId')) conn.exec("ALTER TABLE conversations ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'legacy-unassigned'");
     conn.exec(`
       CREATE TABLE IF NOT EXISTS demo_sessions (tokenHash TEXT PRIMARY KEY, subject TEXT NOT NULL, expiresAt INTEGER NOT NULL);
+      -- RAG 批次1：知识段落向量索引（余弦检索在 JS 侧完成，语料规模小无需向量库）
+      CREATE TABLE IF NOT EXISTS knowledge_chunks_vec (
+        chunkKey TEXT PRIMARY KEY,
+        docId TEXT NOT NULL,
+        paraIndex INTEGER NOT NULL,
+        dim INTEGER NOT NULL,
+        model TEXT NOT NULL,
+        vec BLOB NOT NULL,
+        updatedAt TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_kcv_doc ON knowledge_chunks_vec(docId);
       CREATE TABLE IF NOT EXISTS request_quota (bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, expiresAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS verified_facts (ownerId TEXT NOT NULL, sessionId TEXT NOT NULL, fact TEXT NOT NULL, updatedAt INTEGER NOT NULL, PRIMARY KEY(ownerId, sessionId));
     `);

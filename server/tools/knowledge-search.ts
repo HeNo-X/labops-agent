@@ -25,8 +25,8 @@ export interface ScoredChunk {
   index: number;
   text: string;
   score: number;
-  /** 召回来源，便于评测归因与界面展示"为什么是这段" */
-  via: Array<'keyword' | 'bm25'>;
+  /** 召回来源，便于评测归因与界面展示"为什么是这段"（RAG 批次1 新增 vector 路） */
+  via: Array<'keyword' | 'bm25' | 'vector'>;
 }
 
 /**
@@ -144,29 +144,45 @@ function keywordRecall(query: string, docs: KnowledgeDocument[], topN: number): 
   return out;
 }
 
-/** RRF：只用名次，k=60 为业界常用平滑值 */
-function rrfMerge(a: Map<string, number>, b: Map<string, number>, k = 60): Map<string, { score: number; via: ScoredChunk['via'] }> {
+/** RRF：只用名次，k=60 为业界常用平滑值。RAG 批次1 起支持任意多路（关键词/BM25/向量） */
+function rrfMerge(...legs: Array<{ ranks: Map<string, number>; via: ScoredChunk['via'] }>): Map<string, { score: number; via: ScoredChunk['via'] }> {
   const merged = new Map<string, { score: number; via: ScoredChunk['via'] }>();
-  for (const [key, rank] of a) merged.set(key, { score: 1 / (k + rank), via: ['keyword'] });
-  for (const [key, rank] of b) {
-    const cur = merged.get(key);
-    if (cur) {
-      cur.score += 1 / (k + rank);
-      cur.via.push('bm25');
-    } else merged.set(key, { score: 1 / (k + rank), via: ['bm25'] });
+  for (const leg of legs) {
+    for (const [key, rank] of leg.ranks) {
+      const cur = merged.get(key);
+      if (cur) {
+        cur.score += 1 / (60 + rank);
+        if (!cur.via.includes(leg.via[0]!)) cur.via.push(leg.via[0]!);
+      } else merged.set(key, { score: 1 / (60 + rank), via: [...leg.via] });
+    }
   }
   return merged;
+}
+
+/** 权限与生效日期过滤是检索的硬前置（打分之前），各召回路共用同一候选集 */
+export function eligibleDocs(docs: KnowledgeDocument[], role: string, date: string): KnowledgeDocument[] {
+  return docs.filter((d) => d.roles.includes(role) && d.effectiveFrom <= date && (!d.effectiveTo || d.effectiveTo >= date));
 }
 
 /**
  * 检索入口。返回按相关度排序的段落，并保留文档元信息。
  * 权限（roles）与生效日期在打分**之前**过滤。
  */
-export function searchChunks(query: string, role: string, date: string, docs: KnowledgeDocument[], limit = 8): ScoredChunk[] {
-  const eligible = docs.filter((d) => d.roles.includes(role) && d.effectiveFrom <= date && (!d.effectiveTo || d.effectiveTo >= date));
+export function searchChunks(query: string, role: string, date: string, docs: KnowledgeDocument[], limit = 8, vectorRanks?: Map<string, number> | null): ScoredChunk[] {
+  const eligible = eligibleDocs(docs, role, date);
   if (!eligible.length || !query.trim()) return [];
   const pool = eligible.length * 3;
-  const merged = rrfMerge(keywordRecall(query, eligible, pool), bm25Recall(query, eligible, pool));
+  // RAG 批次1：向量路按需并入（未启用/未建索引/调用失败传 null，退回两路，检索不因向量路失败而失败）
+  const merged = vectorRanks && vectorRanks.size
+    ? rrfMerge(
+        { ranks: keywordRecall(query, eligible, pool), via: ['keyword'] },
+        { ranks: bm25Recall(query, eligible, pool), via: ['bm25'] },
+        { ranks: vectorRanks, via: ['vector'] }
+      )
+    : rrfMerge(
+        { ranks: keywordRecall(query, eligible, pool), via: ['keyword'] },
+        { ranks: bm25Recall(query, eligible, pool), via: ['bm25'] }
+      );
   const byKey = new Map(eligible.flatMap((d) => d.paragraphs.map((text, i): [string, ScoredChunk] => [
     `${d.id}#${i + 1}`,
     { docId: d.id, index: i + 1, text, score: 0, via: [] }

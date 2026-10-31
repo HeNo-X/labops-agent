@@ -33,15 +33,69 @@ export interface BudgetApplyResult {
 
 /** 单条工具结果瘦身：只保留前若干字符（那是模型真正需要的结论段） */
 const TOOL_RESULT_KEEP_CHARS = 1200;
+/**
+ * A3 结构感知窗口（借鉴 SWE-agent ACI 的 observation windowing）：
+ * 数组字段截到前 TOOL_ARRAY_WINDOW 项，并用 dataNote 如实告知
+ * 「共几条、省了几条、下一步怎么拿」——绝不在记录中间盲切（旧实现会把
+ * JSON 腰斩成残缺记录，模型既看不到总数，也不知道数据被切过）。
+ */
+const TOOL_ARRAY_WINDOW = 8;
 
-function slimToolMessage(m: ChatMessage): ChatMessage {
+/** 解析工具消息正文；非 JSON 对象返回 null（调用方回退到字符截断） */
+function parseToolContent(content: unknown): Record<string, unknown> | null {
+  if (typeof content !== 'string') return null;
+  try {
+    const v = JSON.parse(content) as unknown;
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 递归开窗：超长数组截前 TOOL_ARRAY_WINDOW 项，路径与省略量记入 notes；depth 限 2 层 */
+function windowArrays(value: unknown, path: string, depth: number, notes: string[]): unknown {
+  if (Array.isArray(value)) {
+    if (value.length > TOOL_ARRAY_WINDOW) {
+      notes.push(`${path}（共 ${value.length} 条，已省略 ${value.length - TOOL_ARRAY_WINDOW} 条）`);
+      return value.slice(0, TOOL_ARRAY_WINDOW);
+    }
+    return value;
+  }
+  if (value && typeof value === 'object' && depth > 0) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = windowArrays(v, `${path}.${k}`, depth - 1, notes);
+    }
+    return out;
+  }
+  return value;
+}
+
+export function slimToolMessage(m: ChatMessage): ChatMessage {
   const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? '');
   if (content.length <= TOOL_RESULT_KEEP_CHARS) return m;
-  return {
-    role: 'tool',
-    tool_call_id: m.tool_call_id,
-    content: `${content.slice(0, TOOL_RESULT_KEEP_CHARS)}…[已精简：原始长度 ${content.length} 字，完整依据见工具结果卡]`
-  };
+
+  const parsed = parseToolContent(m.content);
+  if (!parsed) {
+    // 回退旧行为：非 JSON 内容只能按字符截断，但必须如实标注
+    return {
+      role: 'tool',
+      tool_call_id: m.tool_call_id,
+      content: `${content.slice(0, TOOL_RESULT_KEEP_CHARS)}…[已精简：原始长度 ${content.length} 字，完整依据见工具结果卡]`
+    };
+  }
+
+  const notes: string[] = [];
+  const next: Record<string, unknown> = { ...parsed, data: windowArrays(parsed['data'], 'data', 2, notes) };
+  if (notes.length) {
+    next['dataNote'] = `结果较大已开窗：${notes.join('；')}。如需更多请缩小查询范围（更具体的房间/日期/类型）后重新查询。`;
+  }
+  let out = JSON.stringify(next);
+  if (out.length > TOOL_RESULT_KEEP_CHARS) {
+    // 开窗后仍超长（例如巨大的字符串字段）→ 才按字符截断兜底
+    out = `${out.slice(0, TOOL_RESULT_KEEP_CHARS)}…[已精简：原始长度 ${content.length} 字，完整依据见工具结果卡]`;
+  }
+  return { role: 'tool', tool_call_id: m.tool_call_id, content: out };
 }
 
 /**

@@ -22,7 +22,7 @@ import { serverNow, isValidDateString } from './time/term.ts';
 import { loadAuthorizedDataset } from './business/bridge.ts';
 
 const PROTOCOL_FALLBACK = '2025-06-18';
-const SERVER_INFO = { name: 'labops-agent', version: '1.0.4.0' };
+const SERVER_INFO = { name: 'labops-agent', version: '1.0.5.0' };
 
 /** 只读工具白名单：这是"外部客户端不得借道提交业务"的唯一闸门 */
 function exposedTools() {

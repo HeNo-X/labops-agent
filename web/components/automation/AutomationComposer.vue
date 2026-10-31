@@ -36,6 +36,23 @@ const emit = defineEmits<{ requestPlan: []; confirm: []; cancel: [] }>();
 
 const applicable = params as Record<string, string[]>;
 const advanced = ref(false);
+const isAgentTemplate = computed(() => spec.value.kind === 'agent_prompt');
+const execMode = computed<'message' | 'agent'>(() => (spec.value.execMode === 'agent' ? 'agent' : 'message'));
+const agentTools = computed<string[]>(() => (Array.isArray(spec.value.agentTools) ? spec.value.agentTools : []));
+const DRAFT_TOOLS: Array<{ name: string; label: string }> = [
+  { name: 'prepare_notification', label: '生成通知草稿（仍需本人确认后发布）' },
+  { name: 'prepare_issue_ticket', label: '生成报修工单草稿（仍需本人确认）' }
+];
+function setExecMode(mode: 'message' | 'agent'): void {
+  spec.value.execMode = mode;
+  if (mode === 'message') spec.value.agentTools = [];
+}
+function toggleTool(name: string): void {
+  const set = new Set(agentTools.value);
+  if (set.has(name)) set.delete(name);
+  else set.add(name);
+  spec.value.agentTools = [...set];
+}
 const localError = ref('');
 
 type SimpleTrigger = 'daily' | 'weekly' | 'once' | 'duty';
@@ -127,6 +144,10 @@ function submit(): void {
     return;
   }
   if (!spec.value.name.trim()) spec.value.name = templateLabel.value;
+  if (spec.value.kind === 'agent_prompt' && !String(spec.value.prompt ?? '').trim()) {
+    localError.value = '请填写指令正文：到点要让 Agent 做什么';
+    return;
+  }
   const type = String(spec.value.trigger?.type ?? '');
   if (type === 'daily' && !/^\d{2}:\d{2}$/.test(String(spec.value.trigger?.['time'] ?? ''))) {
     localError.value = '请填写有效的运行时间（北京时间）';
@@ -177,6 +198,62 @@ watch(
         </select>
         <small class="auto-field__hint">{{ tr(hint) }}</small>
       </label>
+
+      <template v-if="isAgentTemplate">
+        <label class="auto-field">
+          <span class="auto-field__label">{{ tr('指令正文') }}</span>
+          <textarea
+            v-model="spec.prompt"
+            class="auto-textarea"
+            rows="3"
+            maxlength="2000"
+            :placeholder="tr('到点后让 Agent 做什么，例如：查一下今天有哪些课，用一句话总结')"
+          ></textarea>
+        </label>
+
+        <fieldset class="auto-field">
+          <legend class="auto-field__label">{{ tr('执行方式') }}</legend>
+          <div class="auto-seg" role="radiogroup" :aria-label="tr('执行方式')">
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="execMode === 'message'"
+              :class="{ 'is-on': execMode === 'message' }"
+              :disabled="busy"
+              @click="setExecMode('message')"
+            >
+              {{ tr('只发消息') }}
+            </button>
+            <button
+              type="button"
+              role="radio"
+              :aria-checked="execMode === 'agent'"
+              :class="{ 'is-on': execMode === 'agent' }"
+              :disabled="busy"
+              @click="setExecMode('agent')"
+            >
+              {{ tr('让 Agent 去做') }}
+            </button>
+          </div>
+          <small class="auto-field__hint">
+            {{
+              tr(
+                execMode === 'agent'
+                  ? '到点由 Agent 自己查数据并给结论，结果写进站内信与报告'
+                  : '只把上面的正文当一条消息发出去，不调用 Agent'
+              )
+            }}
+          </small>
+        </fieldset>
+
+        <fieldset v-if="execMode === 'agent'" class="auto-field">
+          <legend class="auto-field__label">{{ tr('额外允许的动作（默认只读）') }}</legend>
+          <label v-for="tool in DRAFT_TOOLS" :key="tool.name" class="auto-check">
+            <input type="checkbox" :checked="agentTools.includes(tool.name)" :disabled="busy" @change="toggleTool(tool.name)">
+            <span>{{ tr(tool.label) }}</span>
+          </label>
+        </fieldset>
+      </template>
 
       <fieldset class="auto-field auto-field--trigger">
         <legend class="auto-field__label">{{ tr('多久一次') }}</legend>
@@ -285,6 +362,35 @@ watch(
 </template>
 
 <style scoped>
+.auto-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #dfe3e8);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  background: var(--surface, #fff);
+  color: inherit;
+}
+.auto-textarea:focus {
+  outline: none;
+  border-color: var(--primary, #1668dc);
+  box-shadow: 0 0 0 3px var(--primary-weak, #eef4ff);
+}
+.auto-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.auto-check input {
+  margin-top: 3px;
+}
 .auto-composer {
   display: grid;
   gap: 14px;

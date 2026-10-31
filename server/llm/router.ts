@@ -37,7 +37,17 @@ function fallbackSpecs(role: 'chat' | 'task'): LlmProviderSpec[] {
     : [];
   const spark = (model: string): LlmProviderSpec[] =>
     c.xfyun.apiKey ? [{ name: 'xfyun', apiKey: c.xfyun.apiKey, baseUrl: c.xfyun.baseUrl, model }] : [];
-  return role === 'chat' ? [...big, ...spark(c.xfyun.chatModel)] : [...spark(c.xfyun.taskModel), ...big, ...spark(c.xfyun.chatModel)];
+  // 去重：任务链里 spark(taskModel) 与 spark(chatModel) 可能是同一个模型
+  // （现实里常见——比如 4b 那个没额度、两个槽位都指向同一个可用模型），
+  // 不去重就会对同一个端点连续打两次，白白多消耗一次失败/一次配额。
+  const merged = role === 'chat' ? [...big, ...spark(c.xfyun.chatModel)] : [...spark(c.xfyun.taskModel), ...big, ...spark(c.xfyun.chatModel)];
+  const seen = new Set<string>();
+  return merged.filter((p) => {
+    const key = `${p.baseUrl}::${p.model}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**

@@ -15,7 +15,7 @@ import { effectiveSchedule, calendar } from '../data/calendar.ts';
 
 import type { QueryScheduleArgs, ScheduleLesson, ScheduleQueryResult } from '../../shared/types.ts';
 import type { Dataset, LabRow, TimetableRow } from '../data/store.ts';
-import { findLab, findOpenLab, normalizeLabName } from '../data/store.ts';
+import { findLab, findOpenLab, normalizeLabName, findLabsByNameSuffix } from '../data/store.ts';
 import {
   APP_TZ,
   APP_TZ_OFFSET,
@@ -80,7 +80,23 @@ export function runQuerySchedule(
   }
 
   // ---------- 2. 找房间（普通实验室 + 开放实验室都认）----------
-  const lab: LabRow | null = findLab(ds, rawLabName) ?? findOpenLab(ds, rawLabName);
+  // A7：裸数字房间号（"310今天有课吗"）按后缀解析——唯一命中自动收敛并在 notes
+  // 如实标注，多个命中如实报歧义（可选项给全），零个走下方 lab_not_found 结果。
+  let lab: LabRow | null = findLab(ds, rawLabName) ?? findOpenLab(ds, rawLabName);
+  let bareResolved = false;
+  if (!lab) {
+    const bare = findLabsByNameSuffix(ds, rawLabName);
+    if (bare.length === 1) {
+      lab = bare[0]!;
+      bareResolved = true;
+    } else if (bare.length > 1) {
+      throw new ToolArgumentError(
+        'lab_ambiguous',
+        `房间号 ${rawLabName} 未带字母前缀，匹配到多个房间（${bare.map((b) => b.name).join('、')}）。请使用完整编号。`,
+        bare.map((b) => b.name)
+      );
+    }
+  }
 
   const weekday = weekdayOf(date);
   const week = describeWeek(date, ds.term);
@@ -93,6 +109,8 @@ export function runQuerySchedule(
     notes.push(week.note);
   }
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
+  // A7：裸数字自动解析必须让用户看见（工具消息 reminder 要求 notes 原样转达）
+  if (bareResolved && lab) notes.push(`房间号「${rawLabName}」未带字母前缀，已按 ${lab.name} 理解`);
 
   const provenance: ScheduleQueryResult['provenance'] = {
     sourceType: ds.sourceType,

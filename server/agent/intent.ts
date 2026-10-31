@@ -201,13 +201,24 @@ export function resolvePeriodRange(text: string): PeriodKey[] | null {
 /** E310 / D517 / UB201 这类：1~3 个字母 + 3~4 位数字 */
 const LAB_CODE_RE = /(?<![A-Za-z0-9])([A-Za-z]{1,3})\s?-?\s?(\d{3,4})(?![0-9])/g;
 
+/**
+ * A7：无字母前缀的裸房间号（用户口语"310有人吗"，真实房间是 E310）。
+ * 只取 3 位连续数字——4 位几乎都是年份/时间；前后不得再贴字母数字
+ * （字母前缀形态归 LAB_CODE_RE 管，更长数字串是编号/年份不是房间）。
+ * 返回的是"候选"而非定论：工具层按系统收录的房间做后缀解析，
+ * 唯一命中自动收敛并如实标注，多个命中如实报歧义，零个报查无此房间。
+ */
+const BARE_ROOM_RE = /(?<![A-Za-z0-9])(\d{3})(?![0-9])/g;
+
 export function resolveLabName(text: string): string | null {
   const cleaned = stripDateLike(String(text ?? ''));
   const hits = [...cleaned.matchAll(LAB_CODE_RE)]
     .map((m) => `${m[1].toUpperCase()}${m[2]}`)
     // 纯 4 位数字（无字母前缀）已由正则排除；过滤掉显然是时间的 4 位数
     .filter((s) => !/^\d{4}$/.test(s));
-  return hits.length ? hits[0] : null;
+  if (hits.length) return hits[0];
+  const bare = cleaned.match(BARE_ROOM_RE);
+  return bare ? bare[0] : null;
 }
 
 export function resolveAllLabNames(text: string): string[] {
@@ -234,6 +245,8 @@ export function parseIntent(text: string, now: ServerNow): Intent {
   if (dateInvalid) notes.push(`日期输入非法：${dateInvalid.reason}`);
   if (!date && !dateInvalid) notes.push('未识别到日期指代 → 缺省按服务端当天处理，并在上下文里标明这是缺省值');
   if (labName && !date && !dateInvalid) notes.push(`识别到房间号 ${labName}，但未识别到日期`);
+  // A7：裸数字候选不是定论——工具层按系统收录的房间做后缀解析，唯一命中会如实标注
+  if (labName && /^\d/.test(labName)) notes.push(`房间号 ${labName} 未带字母前缀，将按系统收录的房间推断（如 310 → E310）`);
   if (periodKeys) notes.push(`识别到时间范围（${periodKeys.join('/')}）——"整个范围都空闲"与"其中一节空闲"含义不同，需按口径处理`);
 
   return { date, dateInvalid, periodKey, periodKeys, labName, notes };

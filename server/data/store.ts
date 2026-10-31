@@ -337,3 +337,15 @@ export function findOpenLab(ds: Dataset, input: unknown): LabRow | null {
   if (!key) return null;
   return ds.openLabs.find((l) => normalizeLabName(l.name) === key) ?? null;
 }
+
+/**
+ * A7：裸数字房间号（用户口语"310有人吗"，不带字母前缀）——按归一化名称
+ * **后缀**匹配全部候选。分流由调用方决定：唯一命中自动收敛（并在结果 notes
+ * 里如实标注"已按 E310 理解"），多个命中回 lab_ambiguous，零个走既有
+ * lab_not_found。绝不静默猜一个。
+ */
+export function findLabsByNameSuffix(ds: Dataset, input: unknown): LabRow[] {
+  const key = normalizeLabName(input);
+  if (!/^\d{2,4}$/.test(key)) return [];
+  return [...ds.labs, ...ds.openLabs].filter((l) => normalizeLabName(l.name).endsWith(key));
+}

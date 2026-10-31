@@ -11,7 +11,7 @@ import { isBusinessConnected, businessRequest } from '../business/bridge.ts';
 
 import type { LabStatusArgs, LabStatusResult, ScheduleQueryResult } from '../../shared/types.ts';
 import type { Dataset, LabRow, TimetableRow } from '../data/store.ts';
-import { findLab, findOpenLab, normalizeLabName } from '../data/store.ts';
+import { findLab, findOpenLab, normalizeLabName, findLabsByNameSuffix } from '../data/store.ts';
 import { APP_TZ, APP_TZ_OFFSET, describeWeek, isHoliday, isValidDateString, weekdayLabelOf } from '../time/term.ts';
 import { PERIODS, toMinutes } from '../../shared/periods.ts';
 import { ToolArgumentError, availableRoomNames } from './query-schedule.ts';
@@ -45,7 +45,7 @@ export async function runQueryLabStatus(
     );
   }
 
-  const lab: LabRow | null = findLab(ds, rawLabName) ?? findOpenLab(ds, rawLabName);
+  let lab: LabRow | null = findLab(ds, rawLabName) ?? findOpenLab(ds, rawLabName);
   const base = {
     date,
     weekdayLabel: weekdayLabelOf(date),
@@ -67,6 +67,40 @@ export async function runQueryLabStatus(
             : '模拟演示：内置构造的示例数据，与真实实验室无关'
     } satisfies ScheduleQueryResult['provenance']
   };
+
+  // A7：裸数字房间号（"310有人吗"）按后缀解析——唯一命中自动收敛并在 notes
+  // 如实标注，多个命中如实报歧义（suggestions=候选，不替用户猜），零个走下方 lab_not_found。
+  let bareResolved = false;
+  if (!lab) {
+    const bare = findLabsByNameSuffix(ds, rawLabName);
+    if (bare.length === 1) {
+      lab = bare[0]!;
+      bareResolved = true;
+    } else if (bare.length > 1) {
+      const candidates = bare.map((b) => b.name);
+      const names = availableRoomNames(ds);
+      return {
+        ...base,
+        labId: null,
+        labName: null,
+        labLocation: null,
+        capacity: null,
+        status: null,
+        statusLabel: '未知',
+        description: '',
+        weekNo: null,
+        weekDeterminable: false,
+        schedule: { lessonCount: 0, occupiedPeriods: [], nextLesson: null, nextLessonReason: 'unknown' },
+        occupancy: null,
+        registryStatusNote: '',
+        suggestions: candidates,
+        notes: [
+          `房间号「${rawLabName}」未带字母前缀，匹配到多个房间：${candidates.join('、')}。未替你猜测。`,
+          names.length ? `本系统收录的房间号共 ${names.length} 个：${names.join('、')}` : '本系统当前未收录任何房间'
+        ]
+      };
+    }
+  }
 
   if (!lab) {
     const names = availableRoomNames(ds);
@@ -122,6 +156,8 @@ export async function runQueryLabStatus(
   const notes: string[] = [week.note];
   if (!week.determinable) notes.push('⚠️ 教学周不可确定，以下排课统计未做周次过滤');
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
+  // A7：裸数字自动解析必须让用户看见（工具消息 reminder 要求 notes 原样转达）
+  if (bareResolved && lab) notes.push(`房间号「${rawLabName}」未带字母前缀，已按 ${lab.name} 理解`);
   // F19：档案状态 ≠ 实时门禁。措辞必须避免把静态档案解释成"此刻能否进入"
   const dynamic=ds.openLabStatus?.[lab.name]??ds.openLabStatus?.[lab.id],record=typeof dynamic==='object'?dynamic.status:dynamic;
   const actualStatus=['active','closed'].includes(record||'')?record!:lab.status;

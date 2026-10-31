@@ -3,7 +3,7 @@ const en:Record<string,string>={
  '设置':'Settings','个性化':'Personalization','常规':'General','账户':'Account','主题':'Appearance','跟随系统':'System','浅色':'Light','深色':'Dark',
  '界面字体大小':'Interface text size','回复字体大小':'Response text size','强调色':'Accent color','中性':'Neutral','蓝色':'Blue','绿色':'Green','紫色':'Purple','琥珀':'Amber',
  '减少动效':'Reduce motion','预览':'Preview','恢复默认设置':'Reset preferences','语言':'Language','简体中文':'简体中文','默认会话模式':'Default conversation mode','工作会话':'Work chats','聊天会话':'Read-only chats',
- '手机默认入口':'Mobile start page','助手':'Assistant','工作台':'Work','更多':'More','界面版本':'Interface edition','使用桌面版':'Use desktop edition','使用手机版':'Use mobile edition',
+ '手机默认入口':'Mobile start page','助手':'Conversations','工作台':'Work','更多':'More','界面版本':'Interface edition','使用桌面版':'Use desktop edition','使用手机版':'Use mobile edition',
  '偏好暂时无法保存，当前调整仍可使用。':'Preferences could not be saved. Your current changes still apply.',
  '实验室课程和工作记录会在这里显示。':'Laboratory schedules and work records appear here.','保存于当前浏览器，按账号分别记忆。':'Saved per account in this browser.',
  '个人资料':'Personal information','修改密码':'Change password','前往主系统':'Open main system','主系统入口暂不可用':'Main system link is unavailable','退出登录':'Sign out','关闭设置':'Close settings',
@@ -557,6 +557,11 @@ Object.assign(en,{
  // A5 任务计划面板（'任务计划' 词条已在工具展示族块登记）
  '已完成':'Done',
  '已放弃':'Dropped',
- '待办':'To do'
+ '待办':'To do',
+ // A8 会话模式切换（顶栏胶囊即入口）
+ '点击切换为{mode}。模式随发送时刻生效：历史消息保持其发生时的语义；切换为聊天后只查询、不准备办理单。':'Click to switch to {mode}. The mode applies from the moment of sending: past messages keep the semantics they were created with; in Chat mode only queries are answered, no business drafts.',
+ '已切换为聊天会话：之后只查询数据，不准备办理单':'Switched to Chat: only queries from now on, no business drafts.',
+ '已切换为工作会话：之后可准备办理单，执行仍需本人确认':'Switched to Work: business drafts can be prepared, execution still requires your confirmation.',
+ '模式切换失败：':'Mode switch failed: '
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

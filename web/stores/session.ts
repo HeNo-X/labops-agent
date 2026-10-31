@@ -377,9 +377,8 @@ export const useSessionStore = defineStore('session', () => {
     });
   }
 
-  // 会话模式不再提供"切换"能力（2026-10-06 用户要求）：开始对话后模式即确定，
-  // 服务端 PATCH 同样返回 409 mode_locked。此处刻意不保留 setConversationMode，
-  // 避免将来有人顺手把入口加回来而绕过服务端规则。
+  // A8（2026-10-31 用户要求）：恢复会话模式切换——服务端锁定已解除，模式随
+  // 发送时刻生效，历史消息语义不变。改名照常走 renameConversation。
   async function renameConversation(id: string, title: string): Promise<void> {
     const response=await clientFetch(`/api/conversations/${encodeURIComponent(id)}`, {
       method: 'PATCH',
@@ -387,6 +386,18 @@ export const useSessionStore = defineStore('session', () => {
       body: JSON.stringify({ title })
     });
     if(!response.ok)throw await responseError(response);
+    await loadConversations();
+  }
+
+  /** 切换会话模式（chat↔task）：PATCH 成功后同步本地两处状态（当前模式 + 会话列表） */
+  async function changeConversationMode(id: string, mode: 'chat' | 'task'): Promise<void> {
+    const response=await clientFetch(`/api/conversations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { ...actorHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode })
+    });
+    if(!response.ok)throw await responseError(response);
+    setCurrentMode(id, mode);
     await loadConversations();
   }
 
@@ -421,6 +432,7 @@ export const useSessionStore = defineStore('session', () => {
     deleteRound,
     rollbackRound,
     renameConversation,
+    changeConversationMode,
     timeLabel,
     uid,
     roundsOf

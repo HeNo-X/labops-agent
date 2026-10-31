@@ -321,6 +321,8 @@ const engineTitle = computed(() => {
   align-items: flex-end;
 }
 .msg__userbubble {
+  /* A8：margin-left:auto 双保险——即使外层覆写了 align-items，用户气泡也靠右 */
+  margin-left: auto;
   max-width: 78%;
   background: var(--surface-2);
   border: 1px solid var(--border-strong);

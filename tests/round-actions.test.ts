@@ -361,34 +361,37 @@ test('提案状态新增 superseded 是既有契约的增量，不影响原有�
   assert.equal(typeOps.TASK_STATUS_LABELS.cancelled, '已取消');
 });
 
-test('模式锁定：会话开始对话后不可再改模式，改名不受影响', async () => {
+test('A8 模式可切换：非空会话 PATCH 立即生效；同模式幂等；改名照常；非法值仍被拒', async () => {
   const request = await demoClient();
 
-  // 还没发过消息的空会话：模式尚未"确定"，仍可改（前端建会话与首条消息之间就是这一瞬）
+  // 空会话可改（既有行为不变）
   const fresh = await newConversation(request, 'task');
   assert.equal((await request(`/api/conversations/${fresh}`, { mode: 'chat' }, 'PATCH')).status, 200);
   assert.equal((await request(`/api/conversations/${fresh}`)).data.mode, 'chat');
 
-  // 一旦产生对话，模式即锁定
-  const locked = await newConversation(request, 'chat');
-  seedRound(locked, '随便聊聊', '聊完了', { labName: null, date: null, task: null });
-  const denied = await request(`/api/conversations/${locked}`, { mode: 'task' }, 'PATCH');
-  assert.equal(denied.status, 409, JSON.stringify(denied.data));
-  assert.equal(denied.data.error, 'mode_locked');
-  assert.equal(denied.data.mode, 'chat');
-  assert.match(String(denied.data.message), /新建会话/);
-  assert.equal((await request(`/api/conversations/${locked}`)).data.mode, 'chat', '被拒绝后模式不得变化');
+  // A8（2026-10-31 用户要求）：有对话的会话也能切换——模式随发送时刻生效，
+  // 历史消息保持其发生时的语义；chat→task、task→chat 双向都允许。
+  const chat = await newConversation(request, 'chat');
+  seedRound(chat, '随便聊聊', '聊完了', { labName: null, date: null, task: null });
+  const toWork = await request(`/api/conversations/${chat}`, { mode: 'task' }, 'PATCH');
+  assert.equal(toWork.status, 200, JSON.stringify(toWork.data));
+  assert.equal((await request(`/api/conversations/${chat}`)).data.mode, 'task', '切换必须真实生效');
 
-  // 同模式重复提交是幂等的，不算"修改"
-  assert.equal((await request(`/api/conversations/${locked}`, { mode: 'chat' }, 'PATCH')).status, 200);
-  // 改名与锁定无关，必须照常可用
-  const renamed = await request(`/api/conversations/${locked}`, { title: '换个名字' }, 'PATCH');
+  const work = await newConversation(request, 'task');
+  seedRound(work, '第一问', '第一答', { labName: null, date: null, task: null });
+  const toChat = await request(`/api/conversations/${work}`, { mode: 'chat' }, 'PATCH');
+  assert.equal(toChat.status, 200, JSON.stringify(toChat.data));
+  assert.equal((await request(`/api/conversations/${work}`)).data.mode, 'chat');
+
+  // 同模式重复提交是幂等的
+  assert.equal((await request(`/api/conversations/${work}`, { mode: 'chat' }, 'PATCH')).status, 200);
+  // 改名与模式切换无关，必须照常可用
+  const renamed = await request(`/api/conversations/${work}`, { title: '换个名字' }, 'PATCH');
   assert.equal(renamed.status, 200, JSON.stringify(renamed.data));
   assert.equal(renamed.data.title, '换个名字');
 
-  // 工作会话同样锁：从 task 改 chat 也要 409（业务办理权限不能靠改模式绕开）
-  const work = await newConversation(request, 'task');
-  seedRound(work, '第一问', '第一答', { labName: null, date: null, task: null });
-  assert.equal((await request(`/api/conversations/${work}`, { mode: 'chat' }, 'PATCH')).status, 409);
-  assert.equal((await request(`/api/conversations/${work}`)).data.mode, 'task');
+  // 非法模式值按既有 parseMode 白名单语义被忽略（不报错、不改动）
+  const bad = await request(`/api/conversations/${work}`, { mode: 'admin' }, 'PATCH');
+  assert.equal(bad.status, 200, JSON.stringify(bad.data));
+  assert.equal(bad.data.mode, 'chat', '非法值不得改动当前模式');
 });

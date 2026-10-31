@@ -233,17 +233,37 @@ const commandContext = computed(() => ({
 }));
 
 // ---- 会话类型（聊天 / 任务）----
-// hero（还没有会话）用 draftMode 选择；**会话一旦开始对话，模式即确定**：
-// 2026-10-06 用户要求 —— 会话内部不再提供切换入口，服务端同样以 409 拒绝改模式，
-// 否则同一条历史会在"只查询"和"可办理"两种语义之间漂移。
+// hero（还没有会话）用 draftMode 选择；A8（2026-10-31 用户要求）：会话模式恢复
+// 可切换——顶栏模式胶囊即切换入口，服务端 PATCH 随时接受。语义边界：模式随
+// **发送时刻**的会话模式生效，历史消息保持其发生时的语义（办理单确认权仍在用户）。
 type ConvMode = 'chat' | 'task';
 const draftMode = ref<ConvMode>(preferences.value.defaultMode);
 watch(()=>preferences.value.defaultMode,value=>{if(!session.currentId)draftMode.value=value;});
 const convMode = computed<ConvMode>(() => session.currentMode());
 const modeLabel = (m: ConvMode): string => (m === 'chat' ? '聊天会话' : '工作会话');
-const modeLockTip = computed(
-  () => `本会话已确定为${modeLabel(convMode.value)}：${convMode.value === 'chat' ? '只查询数据，不准备办理单' : '可查询、可准备办理单并执行'}。开始对话后模式不可更改，需要另一种模式请新建会话。`
+const modeSwitchTip = computed(
+  () => tr('点击切换为{mode}。模式随发送时刻生效：历史消息保持其发生时的语义；切换为聊天后只查询、不准备办理单。', { mode: modeLabel(convMode.value === 'chat' ? 'task' : 'chat') })
 );
+const modeSwitching = ref(false);
+const modeNotice = ref<string | null>(null);
+watch(()=>session.currentId,()=>{modeNotice.value=null;});
+async function onToggleMode(): Promise<void> {
+  const id = session.currentId;
+  if (!id || modeSwitching.value || store.inputLocked) return;
+  const next: ConvMode = convMode.value === 'chat' ? 'task' : 'chat';
+  modeSwitching.value = true;
+  modeNotice.value = null;
+  try {
+    await session.changeConversationMode(id, next);
+    modeNotice.value = next === 'chat'
+      ? tr('已切换为聊天会话：之后只查询数据，不准备办理单')
+      : tr('已切换为工作会话：之后可准备办理单，执行仍需本人确认');
+  } catch (e) {
+    modeNotice.value = tr('模式切换失败：') + (e as Error).message;
+  } finally {
+    modeSwitching.value = false;
+  }
+}
 
 /** 活跃轮的助手占位消息（直接写入会话消息数组，流式更新同一对象） */
 
@@ -805,11 +825,12 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
           <button type="button" class="chat__navtoggle" @click="navOpen = !navOpen">{{tr("会话")}}</button>
           <h1 class="chat__title">{{ currentTitle }}</h1>
           <span class="chat__count">{{ session.currentMessages.length }} {{tr("条消息")}}</span>
-          <!-- 模式一旦确定就只读展示：不再提供会话内切换入口 -->
-          <span class="chat__mode" :class="`chat__mode--${convMode}`" :title="modeLockTip" :aria-label="modeLockTip">
+          <!-- A8：模式胶囊即切换入口（点击 chat↔task）；历史消息语义不变 -->
+          <button type="button" class="chat__mode" :class="`chat__mode--${convMode}`" :title="modeSwitchTip" :aria-label="modeSwitchTip" :disabled="modeSwitching" @click="onToggleMode">
             {{ modeLabel(convMode) }}
-          </span>
+          </button>
         </header>
+        <p v-if="modeNotice" class="chat__err" role="status">{{ modeNotice }}</p>
         <p v-if="session.currentMessagesError" class="chat__err" role="alert">{{ session.currentMessagesError }}</p>
 
         <div ref="msgsEl" @scroll.passive="trackScroll" class="chat__msgs">
@@ -1023,7 +1044,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   color: var(--text-faint);
   flex: 0 0 auto;
 }
-/* 已确定的会话模式：只读徽标（不是开关，所以不做成按钮外观） */
+/* A8：会话模式胶囊 = 切换入口（点击 chat↔task；运行中禁用） */
 .chat__mode {
   margin-left: auto;
   flex: 0 0 auto;
@@ -1034,9 +1055,12 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 1px 10px;
-  cursor: help;
+  cursor: pointer;
   white-space: nowrap;
+  font-family: inherit;
 }
+.chat__mode:hover { border-color: var(--border-strong); color: var(--text); }
+.chat__mode:disabled { cursor: wait; opacity: 0.6; }
 .chat__mode--chat {
   color: var(--info, var(--primary));
   border-color: currentColor;

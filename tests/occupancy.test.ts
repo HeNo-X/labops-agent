@@ -163,16 +163,22 @@ test('已连接原系统：在室人数给出真实数字（正文与工具摘�
   const a = await client(true);
   const out = await a.ask('E310 现在有多少人？');
   assert.match(out.answer, /在室人数：1 人/, out.answer);
-  assert.match(out.answer, /同房间、同主体逐条配对/, out.answer);
+  // A8：正文只留一行短口径；完整配对口径在工具结果的 notes 里如实保留（结构化卡可查）
+  assert.match(out.answer, /有效签到口径/, out.answer);
   assert.ok(!/无法提供|没有签到/.test(out.answer), '有数据就不该说无法提供：' + out.answer);
   assert.ok(out.toolSummaries.some((s) => /在室人数 1 人/.test(s)), '工具摘要同样不能再说"无数据来源"：' + JSON.stringify(out.toolSummaries));
+  const notes = out.events.filter((e: any) => e.type === 'tool_result').flatMap((e: any) => (e.payload?.result?.notes ?? []) as string[]);
+  assert.ok(notes.some((n: string) => /逐条配对/.test(n)), '完整口径必须在工具 notes 里：' + JSON.stringify(notes));
 });
 
 test('已连接原系统：房间确实没有签到时给 0，而不是"未知"', async () => {
   const a = await client(true);
   const out = await a.ask('E312 现在有多少人？');
   assert.match(out.answer, /在室人数：0 人/, out.answer);
-  assert.match(out.answer, /记录数口径/, out.answer);
+  // A8：正文的短口径 + notes 里的完整记录数口径
+  assert.match(out.answer, /有效签到口径/, out.answer);
+  const notes = out.events.filter((e: any) => e.type === 'tool_result').flatMap((e: any) => (e.payload?.result?.notes ?? []) as string[]);
+  assert.ok(notes.some((n: string) => /记录数口径|逐条配对/.test(n)), '完整口径必须在工具 notes 里：' + JSON.stringify(notes));
 });
 
 /** 从"在室人数：…"里取值，判断它是真实数字还是如实声明的不可得 */

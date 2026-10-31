@@ -437,7 +437,7 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
   const answer = exec.ok
     ? renderDemoAnswer({ kind: exec.resultKind, payload: exec.result }, {
         dateWasDefaulted: !a.intent.date,
-        periodFiltered: Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label
+        periodFiltered: Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label,question:a.question
       })
     : `${exec.message}${exec.suggestions.length ? `\n可选：${exec.suggestions.join('、')}` : ''}`;
 
@@ -678,7 +678,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
         if(exec.resultKind==='business_plan')businessFacts.push(exec.result);
         // A5：计划是模型自己的工作记录，不是业务答案——不进 verifiedAnswers，
         // 单独以 plan_updated 事件广播给界面（计划面板）。
-        if(exec.resultKind!=='task_plan')verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label}));
+        if(exec.resultKind!=='task_plan')verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label,question:a.question}));
         if(exec.resultKind==='task_plan'){
           yield a.emit('plan_updated',{steps:(exec.result as {steps:import('../../shared/types.ts').TaskPlanStep[]}).steps,updatedAt:nowIso()} satisfies import('../../shared/types.ts').TaskPlanUpdatedPayload);
         }

@@ -479,21 +479,22 @@ export async function runDemoTool(tool: string, args: Record<string, unknown>, c
 /** 把结构化结果渲染成可读回答（不调用模型）。**结论式短文案**：明细指向结构化结果卡，不逐条重复 */
 export function renderDemoAnswer(
   result: ScheduleQueryResult | { kind: ToolResultKind; payload: unknown },
-  extras: { dateWasDefaulted: boolean; periodFiltered: boolean; textOnly?:boolean; scopeLabel?:string }
+  extras: { dateWasDefaulted: boolean; periodFiltered: boolean; textOnly?:boolean; scopeLabel?:string; question?:string }
 ): string {
   if(extras.textOnly){
-    const kind='kind' in result?result.kind:'schedule',raw=('kind' in result?result.payload:result) as {provenance?:{queryTime?:string;sourceRevision?:string;sourceSha256Prefix?:string;coverage?:string}};
-    const base=renderDemoAnswer(result,{...extras,textOnly:false}).replace(/；逐节明细见下方课表卡。/g,'。').replace(/明细见下方结果卡。/g,'');
+    const kind='kind' in result?result.kind:'schedule';
+    const base=renderDemoAnswer(result,{...extras,textOnly:false}).replace(/；?逐节明细见下方课表卡。?/g,'').replace(/明细见下方结果卡。?/g,'');
     if(kind==='business_plan')return base;
     const lines=[base];
-    if(kind==='schedule')for(const r of (raw as ScheduleQueryResult).lessons)lines.push(`• ${r.startTime}—${r.endTime} ${r.periodLabel}｜${r.courseName}｜${r.labName}｜班级 ${(r.classNames?.length?r.classNames:[r.className]).join('、')||'未知'}｜教师 ${r.teacher||'未录入'}｜编号 ${r.timetableId}`);
-    lines.push(`查询时间：${raw.provenance?.queryTime||'未提供'}；范围：${extras.scopeLabel||'当前账号授权范围'}；数据版本：${raw.provenance?.sourceRevision||raw.provenance?.sourceSha256Prefix||'未提供'}；覆盖：${raw.provenance?.coverage||'见上述查询说明'}。`);
+    // A8：聊天模式无结果卡 → 正文承担明细（列表化）；来源/版本/覆盖不上正文（噪音），
+    // 界面徽章与工具历史仍如实记录
+    if(kind==='schedule')for(const r of (( 'kind' in result?result.payload:result) as ScheduleQueryResult).lessons)lines.push(`- ${r.startTime}—${r.endTime} ${r.periodLabel}｜${r.courseName}｜${r.labName}｜班级 ${(r.classNames?.length?r.classNames:[r.className]).join('、')||'未知'}｜教师 ${r.teacher||'未录入'}｜编号 ${r.timetableId}`);
     return lines.join('\n');
   }
   if ('kind' in result) {
-    if (result.kind === 'knowledge') { const r=result.payload as KnowledgeResult; return r.summary+'\n'+r.scope+'\n'+r.hits.map(h=>h.title+'（v'+h.version+'）\n'+h.paragraphs.map(p=>p.locator+' '+p.text).join('\n')).join('\n\n'); }
+    if (result.kind === 'knowledge') { const r=result.payload as KnowledgeResult; return [r.summary,r.scope,...r.hits.map(h=>`- **${h.title}（v${h.version}）**\n${h.paragraphs.map(p=>p.locator+' '+p.text).join('\n')}`)].join('\n\n'); }
     if (result.kind === 'business_plan') return renderBusinessFacts(result.payload as BusinessPlanResult);
-    if (result.kind === 'lab_status') return renderLabStatusAnswer(result.payload as LabStatusResult);
+    if (result.kind === 'lab_status') return renderLabStatusAnswer(result.payload as LabStatusResult, extras);
     if (result.kind === 'free_rooms') return renderFreeRoomsAnswer(result.payload as FreeRoomsResult);
     if (result.kind === 'operation_proposal') return renderProposalAnswer(result.payload as Proposal);
     if (result.kind === 'operations_report') return renderReportAnswer(result.payload as OperationsReportResult);
@@ -504,16 +505,16 @@ export function renderDemoAnswer(
 
 function renderProposalAnswer(p: Proposal): string {
   const lines: string[] = [];
-  lines.push(`已生成办理单《${p.title}》，等待你确认：`);
-  lines.push(`· ${p.summary}`);
+  lines.push(`**已生成办理单《${p.title}》，等待你确认：**`);
+  lines.push(`- ${p.summary}`);
   if (p.effects.length) {
-    lines.push(`· 提交后将执行 ${p.effects.length} 项变更：${p.effects.map((e) => e.label).join('；')}`);
+    lines.push(`- 提交后将执行 ${p.effects.length} 项变更：${p.effects.map((e) => e.label).join('；')}`);
   }
-  for (const dep of p.missingDependencies) lines.push(`· 未接入：${dep}`);
+  for (const dep of p.missingDependencies) lines.push(`- 未接入：${dep}`);
   if (p.canExecute) {
     lines.push('请在下方提案卡核对后点击「确认执行」。确认后返回业务单号与回执；也可以直接拒绝或放弃。');
   } else {
-    lines.push(`⚠️ 当前演示身份无权执行：${p.cannotExecuteReason ?? '权限不足'}。可在左侧切换演示视角后重新发起。`);
+    lines.push(`- ⚠️ 当前演示身份无权执行：${p.cannotExecuteReason ?? '权限不足'}。可在左侧切换演示视角后重新发起。`);
   }
   lines.push('（执行环境：沙盒演示，不产生真实业务影响；单号与回执以提案卡为准，聊天文字不是凭据。）');
   return lines.join('\n');
@@ -522,13 +523,13 @@ function renderProposalAnswer(p: Proposal): string {
 function renderReportAnswer(r: OperationsReportResult): string {
   const lines: string[] = [];
   lines.push(
-    `运营日报草稿（${r.range.startDate}${r.range.startDate !== r.range.endDate ? ` ~ ${r.range.endDate}` : ''}）：`
+    `**运营日报草稿（${r.range.startDate}${r.range.startDate !== r.range.endDate ? ` ~ ${r.range.endDate}` : ''}）**：`
   );
   for (const m of r.metrics) {
     lines.push(
       m.status === 'known'
-        ? `· ${m.label}：${m.value} ${m.unit}`
-        : `· ${m.label}：未知 —— ${m.note}`
+        ? `- **${m.label}：${m.value} ${m.unit}**`
+        : `- ${m.label}：未知 —— ${m.note}`
     );
   }
   lines.push('报告为草稿产物，仅当前用户可见，未自动发布；明细见下方报告卡。');
@@ -541,15 +542,15 @@ function renderScheduleAnswer(
 ): string {
   const weekText =
     result.weekNo === null ? '教学周无法确定' : `第 ${result.weekNo} 教学周（${result.weekNo % 2 === 1 ? '单周' : '双周'}）`;
-  const head = `${result.labName ?? '该房间'}（${result.labLocation ?? '位置未录入'}）${result.date} ${result.weekdayLabel}，${weekText}`;
+  const head = `${result.labName ?? '该房间'}（${result.labLocation ?? '位置未录入'}）${result.date}（${result.weekdayLabel}，${weekText}）`;
 
   if (result.reason === 'lab_not_found') {
-    return `系统里没有收录这个房间号，所以查不到课表。可选的房间号：${result.suggestions.join('、') || '（当前未收录任何房间）'}。`;
+    return `**查不到课表：系统里没有收录这个房间号。**\n\n可选的房间号：${result.suggestions.join('、') || '（当前未收录任何房间）'}。`;
   }
   if (result.lessons.length === 0) {
     // F09：timetable_empty 是数据问题，不能先给"没有课"的确定结论
     if (result.reason === 'timetable_empty') {
-      return `${head}无法判断是否有课：系统内课表数据为空。本结果不构成"该房间没课"的结论。`;
+      return `**${head}无法判断是否有课**：系统内课表数据为空。本结果不构成"该房间没课"的结论。`;
     }
     const why =
       result.reason === 'no_class_in_that_period'
@@ -557,55 +558,70 @@ function renderScheduleAnswer(
         : result.reason === 'lab_not_active'
           ? '该房间当前状态不是「开放」，且当天没有排课'
           : '当天没有排课';
-    return `${head}没有课。原因：${why}。明细见下方结果卡。`;
+    return `**${head}没有课。**原因：${why}。明细见下方结果卡。`;
   }
 
+  // A8：重点先行（加粗结论句），明细列表化；数据来源/常规口径不上正文——
+  // 来源徽章与结构化卡已经在界面承担，正文只留改变结论的例外说明。
   const lines: string[] = [];
+  const lastLesson = result.lessons[result.lessons.length - 1]!;
   lines.push(
-    `${head}共有 ${result.lessons.length} 条排课，从 ${result.lessons[0].startTime} 的《${result.lessons[0].courseName}》到 ${
-      result.lessons[result.lessons.length - 1].endTime
-    } 的《${result.lessons[result.lessons.length - 1].courseName}》。`
+    `**${head}共有 ${result.lessons.length} 条排课**，从 ${result.lessons[0]!.startTime} 的《${result.lessons[0]!.courseName}》到 ${lastLesson.endTime} 的《${lastLesson.courseName}》。`
   );
   const byPeriod = result.byPeriod.filter((b) => b.count > 0);
   if (byPeriod.length) {
-    lines.push(`占用节次：${byPeriod.map((b) => `${b.periodLabel}×${b.count}`).join('、')}；逐节明细见下方课表卡。`);
+    lines.push(`- 占用节次：${byPeriod.map((b) => `${b.periodLabel}×${b.count}`).join('、')}；逐节明细见下方课表卡`);
   }
-  if (extras.periodFiltered) lines.push('（已按你指定的节次过滤。）');
-  if (extras.dateWasDefaulted) lines.push(`（你没有说明日期，以上按服务端当天 ${result.date} 计算。）`);
-
-  // 条件说明必须原样带出去，不能只在界面角落里显示
-  for (const n of result.notes) lines.push(`— ${n}`);
-  lines.push(`数据来源：${result.provenance.sourceLabel}。${result.provenance.coverage}`);
+  if (extras.periodFiltered) lines.push('- 已按你指定的节次过滤');
+  if (extras.dateWasDefaulted) lines.push(`- 你没有说明日期，以上按服务端当天 ${result.date} 计算`);
+  // A8：notes 白名单——只保留改变结论或口径的例外说明（警告/歧义消解/停用/
+  // 学生视角/周次不可确定）；常规口径（教学周、门态、在室统计说明）留在结构化卡
+  for (const n of result.notes) {
+    if (/⚠️|未带字母前缀|临时停用|仅为本人的课程|教学周不可确定|未做周次过滤/.test(n)) lines.push(`- ${n}`);
+  }
   return lines.join('\n');
 }
 
-function renderLabStatusAnswer(r: LabStatusResult): string {
+function renderLabStatusAnswer(r: LabStatusResult, extras: { question?: string }): string {
   if (r.labName === null) {
-    return `系统里没有收录这个房间号。可选的房间号：${r.suggestions.join('、') || '（当前未收录任何房间）'}。`;
+    return `**查不到状态：系统里没有收录这个房间号。**\n\n可选的房间号：${r.suggestions.join('、') || '（当前未收录任何房间）'}。`;
   }
+  // A8：重点先行——"有人吗"的核心答案（在室人数）或排课概要放第一句加粗；
+  // 在室统计长口径、门态说明留在结构化卡，正文只留一行短口径括注。
+  // ⚠️ 保留 `在室人数：N 人` 字面（occupancy.test.ts 按它取值）。
   const lines: string[] = [];
-  // F19：档案状态措辞，避免被理解为"此刻开着门"
-  lines.push(
-    `${r.labName}（${r.labLocation ?? '位置未录入'}）人员开放登记/档案回退「${r.statusLabel}」，容量 ${r.capacity ?? '未知'} 人。${r.date}（${r.weekdayLabel}）有 ${r.schedule.lessonCount} 条排课。`
-  );
-  if (r.schedule.nextLesson) {
-    lines.push(`下一节是 ${r.schedule.nextLesson.startTime} 的《${r.schedule.nextLesson.courseName}》（${r.schedule.nextLesson.periodLabel}）。`);
-  } else if (r.schedule.nextLessonReason === 'not_applicable') {
-    lines.push('（「下一节课」仅对当天提供；你查的是其他日期，请看当天排课明细。）');
-  } else if (r.schedule.nextLessonReason === 'no_more_today') {
-    lines.push('当天剩余时间没有更多排课。');
+  const head = `${r.labName}（${r.labLocation ?? '位置未录入'}）`;
+  if (r.occupancy) {
+    lines.push(
+      `**${head}在室人数：${r.occupancy.present} 人**（${r.occupancy.date} 有效签到口径，不等于"此刻一定有人"）。档案状态「${r.statusLabel}」，容量 ${r.capacity ?? '未知'} 人。`
+    );
+  } else {
+    lines.push(
+      `**${head}${r.date}（${r.weekdayLabel}）有 ${r.schedule.lessonCount} 条排课**。档案状态「${r.statusLabel}」，容量 ${r.capacity ?? '未知'} 人。`
+    );
+    lines.push('- 在室人数：未知 —— 当前没有签到数据来源（业务通道未连接或未取得授权），无法提供，请勿据此判断是否有人');
   }
-  // 2026-10-06 修正：此前这里恒输出"未知 —— 没有签到/门禁数据来源"，
-  // 但工具自 2026-10-05 起已能在业务通道连通时取到主系统 /occupancy 的真实值 ——
-  // 渲染层漏改会让真实数字被自己抹掉。有值就说值，没值才说为什么没有。
-  lines.push(
-    r.occupancy
-      ? `在室人数：${r.occupancy.present} 人（${r.occupancy.date}，来源：主系统授权的实时签到数据，口径=上海当日同房间、同主体逐条配对的未结束有效签到记录，与主系统页面同源；逐人明细未开放）。这是记录数口径，不等于"此刻屋里一定有人"。`
-      : '在室人数：未知 —— 当前没有取到签到数据来源（业务通道未连接或未取得授权），无法提供，请勿据此判断房间内是否有人。'
-  );
-  if(r.registryStatusNote)lines.push(r.registryStatusNote);
-  if(r.serviceState==='suspended')lines.push('服务状态：停用；请分别核对停用节次与排课。');
-  if(r.keySummary){const k=r.keySummary;const labels:Record<string,string>={in_cabinet:'在钥匙柜',borrowed:'登记借用',handover:'登记位置待交接',unknown:'未知'};lines.push('钥匙登记：'+(labels[k.state]||'未知')+'；位置 '+(k.location||'未知')+(k.holder?'；借用人 '+k.holder:'')+'；时间 '+(k.recordedAt||'未知')+'。'+k.note);}
+  if (r.schedule.nextLesson) {
+    lines.push(`- 下一节：${r.schedule.nextLesson.startTime} 的《${r.schedule.nextLesson.courseName}》（${r.schedule.nextLesson.periodLabel}）`);
+  } else if (r.schedule.nextLessonReason === 'not_applicable') {
+    lines.push('- 「下一节课」仅对当天提供；你查的是其他日期，请看当天排课明细');
+  } else if (r.schedule.nextLessonReason === 'no_more_today') {
+    lines.push('- 当天剩余时间没有更多排课');
+  }
+  if(r.serviceState==='suspended')lines.push('- ⚠️ 服务状态：停用；请分别核对停用节次与排课');
+  if(r.keySummary && (r.keySummary.state!=='unknown'||r.keySummary.location)){
+    const k=r.keySummary;const labels:Record<string,string>={in_cabinet:'在钥匙柜',borrowed:'登记借用',handover:'登记位置待交接',unknown:'位置未知'};
+    lines.push(`- 钥匙登记：${labels[k.state]||'未知'}${k.location?`，位置 ${k.location}`:''}${k.holder?`，借用人 ${k.holder}`:''}`);
+  }
+  // A8：notes 白名单（与课表渲染同口径）——只上例外说明，不上常规口径
+  for (const n of r.notes) {
+    if (/⚠️|已按|临时停用|匹配到多个房间|未带字母前缀/.test(n)) lines.push(`- ${n}`);
+  }
+  // 能力边界按需出现：只有用户在问"明细/都有谁"时才说明逐人明细未开放，
+  // 平时不刷屏（occupancy 长口径已在结构化卡里）
+  if (extras.question && /明细|都有谁|签到记录/.test(extras.question)) {
+    lines.push('- 逐人签到明细未开放：没有对 LabOps 开放的接口，无法代查');
+  }
   return lines.join('\n');
 }
 
@@ -613,7 +629,7 @@ function renderFreeRoomsAnswer(r: FreeRoomsResult): string {
   const lines: string[] = [];
   // F09：数据覆盖不足时禁止输出确定空闲名单
   if (r.coverage === 'missing') {
-    lines.push(`无法判断 ${r.date}（${r.weekdayLabel}）哪些房间空闲：系统内课表数据为空，"没有记录"不能当成"没有课"。`);
+    lines.push(`**无法判断 ${r.date}（${r.weekdayLabel}）哪些房间空闲**：系统内课表数据为空，"没有记录"不能当成"没有课"。`);
     lines.push('请先导入课表数据后再使用找空闲房间功能。');
     return lines.join('\n');
   }
@@ -622,14 +638,14 @@ function renderFreeRoomsAnswer(r: FreeRoomsResult): string {
     : r.periodKeys.length && r.periodKeys.length < 6
       ? r.freeByPeriod.map((p) => p.periodLabel).join('、')
       : '全天各节次';
-  lines.push(`${r.date}（${r.weekdayLabel}）${scope}——只统计档案状态为「开放」的房间：`);
+  lines.push(`**${r.date}（${r.weekdayLabel}）${scope}的空闲房间**——只统计档案状态为「开放」的房间：`);
   for (const p of r.freeByPeriod) {
     lines.push(
-      `· ${p.periodLabel}：${p.rooms.length ? p.rooms.map((x) => x.labName).join('、') : '无空闲房间'}`
+      `- **${p.periodLabel}（${p.rooms.length} 间）**：${p.rooms.length ? p.rooms.map((x) => x.labName).join('、') : '无空闲房间'}`
     );
   }
   if (r.excluded.length) {
-    lines.push(`已排除（档案非开放，不宜推荐借用，课表未必不空）：${r.excluded.map((x) => `${x.labName}（${x.reason}）`).join('、')}`);
+    lines.push(`- 已排除（档案非开放，不宜推荐借用，课表未必不空）：${r.excluded.map((x) => `${x.labName}（${x.reason}）`).join('、')}`);
   }
   lines.push('说明：「空闲」指课表上无排课，不代表室内无人，也不代表可以预约借用。');
   return lines.join('\n');

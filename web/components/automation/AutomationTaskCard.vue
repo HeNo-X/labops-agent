@@ -61,6 +61,7 @@ function formatShort(iso: string): string {
       <span class="auto-card__title">
         <UiIcon name="clock" :size="14" />
         <b>{{ title }}</b>
+        <span v-if="job.spec.execMode === 'agent'" class="auto-chip">{{ tr('Agent 执行') }}</span>
         <span class="auto-badge" :class="`auto-badge--${status.tone}`">
           <span aria-hidden="true">{{ status.glyph }}</span>{{ tr(status.label) }}
         </span>
@@ -138,6 +139,16 @@ function formatShort(iso: string): string {
 }
 .auto-card__main:disabled {
   cursor: default;
+}
+.auto-chip {
+  padding: 1px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--primary-border, #b9d4ff);
+  background: var(--primary-weak, #eef4ff);
+  color: var(--primary, #1668dc);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
 }
 .auto-card__title {
   display: flex;

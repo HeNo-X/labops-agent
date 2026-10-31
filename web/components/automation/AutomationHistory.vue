@@ -11,6 +11,14 @@ import type { AutomationRun } from '../../composables/useAutomation';
 import { formatDateTime, statusMeta } from '../../business/automation-format';
 
 defineProps<{ runs: AutomationRun[] }>();
+
+/** 这一轮是不是 Agent 跑的？是就把它用的模型与工具调用数摊开给用户看 */
+function copyRunId(id: string): void { void navigator.clipboard?.writeText(id); }
+function agentMeta(run: AutomationRun): { model: string; toolCalls: number; runId: string } | null {
+  const first = run.frozenPayload?.[0]?.output?.agent;
+  if (!first || !first.model) return null;
+  return { model: first.model, toolCalls: Number(first.toolCalls ?? 0), runId: String(first.runId ?? '') };
+}
 </script>
 
 <template>
@@ -26,6 +34,12 @@ defineProps<{ runs: AutomationRun[] }>();
           </span>
           <span v-if="run.attempt > 1" class="auto-run__attempt">{{ tr('第') }}{{ run.attempt }}{{ tr('次尝试') }}</span>
         </div>
+        <p v-if="agentMeta(run)" class="auto-run__agent">
+          {{ tr('由 Agent 执行') }} · {{ agentMeta(run)!.model }} · {{ agentMeta(run)!.toolCalls }}{{ tr(' 次工具调用') }}
+          <button v-if="agentMeta(run)!.runId" type="button" class="auto-run__copy" @click="copyRunId(agentMeta(run)!.runId)">
+            {{ tr('复制运行号') }}
+          </button>
+        </p>
         <p v-if="run.error" class="auto-run__error" role="status">{{ run.error }}</p>
         <details v-if="run.frozenPayload?.length || run.resultRefs?.length" class="auto-run__more">
           <summary>{{ tr('查看当时的输出与业务回执') }}</summary>
@@ -113,6 +127,42 @@ defineProps<{ runs: AutomationRun[] }>();
 .auto-run__attempt {
   font-size: 11px;
   color: var(--text-faint);
+}
+.auto-run__agent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-muted, #5b6470);
+}
+.auto-run__copy {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--primary, #1668dc);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.auto-run__agent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-muted, #5b6470);
+}
+.auto-run__copy {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--primary, #1668dc);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
 }
 .auto-run__error {
   margin: 6px 0 0;

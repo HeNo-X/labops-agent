@@ -39,7 +39,7 @@ export interface AutomationRun {
   attempt: number;
   error?: string;
   sourceRevision?: string;
-  frozenPayload: Array<{ output: { text: string } }>;
+  frozenPayload: Array<{ output: { text: string; agent?: { runId?: string; model?: string; toolCalls?: number } } }>;
   resultRefs: unknown[];
 }
 

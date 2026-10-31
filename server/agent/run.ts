@@ -272,24 +272,39 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
     if (engine === 'demo'||(convMode==='chat'&&isBusinessConnected()&&planNativeDialogue(question,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode}))) {
       yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode, allowedTools: input.allowedTools });
     } else {
-      yield* runAgnesEngine({
-        question,
-        intent,
-        ds,
-        now,
-        emit,
-        log,
-        runId,
-        watch,
-        sourceType,
-        signal: input.signal,
-        actor: input.actor,
-        conversationId: input.sessionId ?? null,
-        mode: convMode,
-        week,
-        toolListText,
-        injectionSuspected
-      });
+      // A10：模型链整体不可用（账号配额耗尽/未配置）且**尚未产生任何可展示内容**
+      // 时，降级到确定性规则引擎——能查的照答（真实授权数据），并如实标注未用大模型。
+      // 已输出过内容（中途失败）或用户取消则原样抛出，不重复作答、不造假。
+      let sawContent = false;
+      try {
+        for await (const ev of runAgnesEngine({
+          question,
+          intent,
+          ds,
+          now,
+          emit,
+          log,
+          runId,
+          watch,
+          sourceType,
+          signal: input.signal,
+          actor: input.actor,
+          conversationId: input.sessionId ?? null,
+          mode: convMode,
+          week,
+          toolListText,
+          injectionSuspected
+        })) {
+          if (ev.type === 'answer_delta' || ev.type === 'tool_started' || ev.type === 'tool_result') sawContent = true;
+          yield ev;
+        }
+      } catch (err) {
+        const code = (err as AgnesError)?.code;
+        const fallbackable = code === 'agnes_quota_exhausted' || code === 'llm_not_configured';
+        if (!fallbackable || sawContent || input.signal?.aborted) throw err;
+        log.warn('llm_fallback_deterministic', { code, mode: convMode, reason: '模型链不可用，确定性引擎接管（如实标注）' });
+        yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode, allowedTools: input.allowedTools });
+      }
     }
   } catch (err) {
     // 客户端主动断开不算故障：流被上层 abort 收尾即可，不必再补 run_failed
@@ -531,6 +546,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   const verifiedAnswers: string[] = [];
   const businessFacts:BusinessResult[]=[];
   let modelFinal='';
+  /** A10：模型链中途死亡（配额/超时/网络）——已有确定性结果时用它作答并如实标注 */
+  let modelUnavailable = false;
   /** 上下文预算的最近一次决策（随 run_completed 带出供界面展示，不参与任何业务判定） */
   let budgetDecision: import('../../shared/context-budget.ts').BudgetDecision | null = null;
   const budgetFailures = { consecutive: 0 };
@@ -574,22 +591,33 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     for (let i = 0; i < budgeted.messages.length; i += 1) messages[i] = budgeted.messages[i]!;
     budgetDecision = budgeted.decision;
 
-    for await (const ev of streamChatWithFallback({ messages, tools: toolsForMode(a.mode ?? 'task'), signal: a.signal }, a.mode ?? 'task', a.log, (spec) => {
-      // 记录**真正**发起请求的模型（fallback 后会被覆盖）——界面要显示的是它，不是配置里的第一个
-      usedModel = spec.model;
-    })) {
-      if (ev.type === 'text') {
-        roundText += ev.text;
-        answer += ev.text;
+    // A10：模型链中途死亡（配额/超时/网络）但**已拿到确定性工具结果**时，
+    // 不再 run_failed——用已渲染的 verifiedAnswers 如实作答并标注"未经大模型润色"。
+    // 没有任何已得结果时原样抛出（交给上层的确定性引擎兜底或 run_failed）。
+    modelUnavailable = false;
+    try {
+      for await (const ev of streamChatWithFallback({ messages, tools: toolsForMode(a.mode ?? 'task'), signal: a.signal }, a.mode ?? 'task', a.log, (spec) => {
+        // 记录**真正**发起请求的模型（fallback 后会被覆盖）——界面要显示的是它，不是配置里的第一个
+        usedModel = spec.model;
+      })) {
+        if (ev.type === 'text') {
+          roundText += ev.text;
+          answer += ev.text;
 
-      } else if (ev.type === 'tool_calls') {
-        calls = ev.calls as ChatMessage['tool_calls'];
-      } else if (ev.type === 'usage') {
-        usage = {promptTokens:(usage?.promptTokens ?? 0)+ev.usage.promptTokens,completionTokens:(usage?.completionTokens ?? 0)+ev.usage.completionTokens,totalTokens:(usage?.totalTokens ?? 0)+ev.usage.totalTokens};
+        } else if (ev.type === 'tool_calls') {
+          calls = ev.calls as ChatMessage['tool_calls'];
+        } else if (ev.type === 'usage') {
+          usage = {promptTokens:(usage?.promptTokens ?? 0)+ev.usage.promptTokens,completionTokens:(usage?.completionTokens ?? 0)+ev.usage.completionTokens,totalTokens:(usage?.totalTokens ?? 0)+ev.usage.totalTokens};
+        }
       }
+    } catch (err) {
+      const code = (err as AgnesError)?.code;
+      modelUnavailable = ['agnes_quota_exhausted', 'agnes_not_configured', 'agnes_timeout', 'agnes_network_error', 'llm_not_configured'].includes(code ?? '');
+      if (!modelUnavailable || verifiedAnswers.length === 0 || a.signal?.aborted) throw err;
+      a.log.warn('llm_midrun_render_fallback', { code, verified: verifiedAnswers.length, reason: '模型链中途不可用，用已取得的工具结果作答' });
     }
 
-    if (!calls || calls.length === 0) {modelFinal=roundText;break;} // 停止条件③：不再需要工具
+    if (modelUnavailable || (!calls || calls.length === 0)) {if(!modelUnavailable)modelFinal=roundText;break;} // 停止条件③：不再需要工具（或模型中途不可用）
 
     messages.push({
       role: 'assistant',
@@ -754,6 +782,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   if (verifiedAnswers.length) {
     const explanation=verifiedRecommendation(modelFinal,businessFacts);
     answer = verifiedAnswers.join('\n\n')+(explanation?'\n\n'+explanation:'');
+    // A10：模型链中途死亡时如实标注——答案是工具结果的确定性渲染，不是大模型润色稿
+    if (modelUnavailable) answer += '\n\n（模型链中途不可用：以上为工具结果的确定性渲染，未经大模型润色。）';
   } else if (!lastToolFailure && !SMALLTALK_RE.test(a.question.trim())) {
     answer='我还需要更明确的实验室查询条件。请说明房间、日期或要办理的事项，例如“E310 今天有哪些课？”。';
   } else if (!SMALLTALK_RE.test(a.question.trim())) {
@@ -819,11 +849,13 @@ function fnKey(args: Record<string, unknown>): string {
 
 function toRunFailed(err: unknown, wallClockMs: number): RunFailedPayload {
   if (err instanceof AgnesError) {
+    // A10：修复提示按实际出错链区分（聊天=DashScope / 任务=Agnes），聊天模式不得让用户去查 AGNES_API_KEY
+    const keyHint = err.provider === 'dashscope' ? 'DASHSCOPE_API_KEY（聊天链）' : 'AGNES_API_KEY（任务链）';
     const hint =
       err.code === 'agnes_not_configured'
-        ? '在 .env 里配置 AGNES_API_KEY 后重启服务端；未配置时会使用演示引擎。'
+        ? `未配置 ${keyHint}，对应模式无法调用大模型；未配置时部分场景会用确定性引擎如实作答。`
         : err.code === 'agnes_auth_failed'
-          ? '检查 .env 中的 AGNES_API_KEY 是否有效、是否被撤销。'
+          ? `检查 .env 中的 ${keyHint} 是否有效、是否被撤销。`
           : err.code === 'agnes_quota_exhausted'
             ? '模型服务账号的免费额度/余额已用尽：重试与切换模型都不会自愈，请在服务商控制台充值或调整配额模式后再试。'
             : err.code === 'agnes_model_not_found'

@@ -55,6 +55,8 @@ export class AgnesError extends Error {
   readonly code: string;
   readonly status: number | null;
   readonly retryable: boolean;
+  /** A10：出错的是哪条链（dashscope=聊天 / agnes=任务）。错误文案与修复提示都按它区分，聊天模式不得出现"Agnes"字样 */
+  provider?: string;
   constructor(code: string, message: string, status: number | null, retryable: boolean) {
     super(message);
     this.name = 'AgnesError';
@@ -62,6 +64,11 @@ export class AgnesError extends Error {
     this.status = status;
     this.retryable = retryable;
   }
+}
+
+/** A10：用户可见的供应商称谓——错误消息里必须说清是哪条链出问题 */
+export function providerLabel(name?: string): string {
+  return name === 'dashscope' ? '聊天模型（DashScope）' : name === 'agnes' ? '工作模型（Agnes）' : '大模型';
 }
 
 /**
@@ -77,27 +84,29 @@ export function isQuotaExhaustedResponse(status: number, body: string): boolean 
   return status === 403 && QUOTA_BODY_RE.test(body);
 }
 
-function classify(status: number, body: string): AgnesError {
+function classify(status: number, body: string, provider?: { name: string; model: string }): AgnesError {
   const snippet = body.slice(0, 400);
+  const label = providerLabel(provider?.name);
+  const keyName = provider?.name === 'dashscope' ? 'DASHSCOPE_API_KEY' : 'AGNES_API_KEY';
   if (isQuotaExhaustedResponse(status, body)) {
-    return new AgnesError('agnes_quota_exhausted', `模型服务账号配额/额度已用尽（HTTP 403）。这不是网络或密钥问题。${snippet}`, status, false);
+    return new AgnesError('agnes_quota_exhausted', `${label}账号配额/额度已用尽（HTTP 403）。这不是网络或密钥问题。${snippet}`, status, false);
   }
   if (status === 401 || status === 403) {
-    return new AgnesError('agnes_auth_failed', `Agnes 鉴权失败（HTTP ${status}）：请检查 AGNES_API_KEY 是否有效。${snippet}`, status, false);
+    return new AgnesError('agnes_auth_failed', `${label}鉴权失败（HTTP ${status}）：请检查 ${keyName} 是否有效。${snippet}`, status, false);
   }
   if (status === 404) {
-    return new AgnesError('agnes_model_not_found', `Agnes 返回 404：模型名或 Base URL 可能不对（当前模型 ${getConfig().agnes.model}）。${snippet}`, status, false);
+    return new AgnesError('agnes_model_not_found', `${label} 返回 404：模型名或 Base URL 可能不对（当前模型 ${provider?.model ?? getConfig().agnes.model}）。${snippet}`, status, false);
   }
   if (status === 400 || status === 422) {
-    return new AgnesError('agnes_bad_request', `Agnes 拒绝了请求（HTTP ${status}）：请求参数不符合接口要求。${snippet}`, status, false);
+    return new AgnesError('agnes_bad_request', `${label}拒绝了请求（HTTP ${status}）：请求参数不符合接口要求。${snippet}`, status, false);
   }
   if (status === 429) {
-    return new AgnesError('agnes_rate_limited', `Agnes 限流（HTTP 429）。${snippet}`, status, true);
+    return new AgnesError('agnes_rate_limited', `${label}限流（HTTP 429）。${snippet}`, status, true);
   }
   if (status >= 500) {
-    return new AgnesError('agnes_upstream_error', `Agnes 服务端错误（HTTP ${status}）。${snippet}`, status, true);
+    return new AgnesError('agnes_upstream_error', `${label}服务端错误（HTTP ${status}）。${snippet}`, status, true);
   }
-  return new AgnesError('agnes_http_error', `Agnes 返回未预期的状态码 ${status}。${snippet}`, status, false);
+  return new AgnesError('agnes_http_error', `${label}返回未预期的状态码 ${status}。${snippet}`, status, false);
 }
 
 /**
@@ -172,7 +181,14 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
     ? { ...base, apiKey: opts.provider.apiKey, baseUrl: opts.provider.baseUrl, model: opts.provider.model }
     : base;
   if (!c.apiKey) {
-    throw new AgnesError('agnes_not_configured', '未配置大模型 API Key，无法调用。', null, false);
+    const e = new AgnesError(
+      'agnes_not_configured',
+      `未配置${providerLabel(opts.provider?.name)}的 API Key（${opts.provider?.name === 'dashscope' ? 'DASHSCOPE_API_KEY' : 'AGNES_API_KEY'}），无法调用。`,
+      null,
+      false
+    );
+    e.provider = opts.provider?.name ?? 'agnes';
+    throw e;
   }
 
   const url = `${c.baseUrl}/chat/completions`;
@@ -240,10 +256,15 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
           attempt -= 1; // 抵消本轮 for 自增：降级重发不计入重试次数
           continue;
         }
-        throw classify(res.status, text);
+        // A10：错误消息与 provider 标注按实际调用链（聊天=DashScope / 任务=Agnes）
+        const e = classify(res.status, text, { name: opts.provider?.name ?? 'agnes', model: c.model });
+        e.provider = opts.provider?.name ?? 'agnes';
+        throw e;
       }
       if (!res.body) {
-        throw new AgnesError('agnes_empty_body', 'Agnes 返回了空响应体，无法流式读取。', res.status, true);
+        const e = new AgnesError('agnes_empty_body', `${providerLabel(opts.provider?.name)}返回了空响应体，无法流式读取。`, res.status, true);
+        e.provider = opts.provider?.name ?? 'agnes';
+        throw e;
       }
 
       started = true;
@@ -263,10 +284,11 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
       } else if (outerAborted) {
         e = new AgnesError('run_cancelled', '任务已被取消。', null, false);
       } else if (aborted) {
-        e = new AgnesError('agnes_timeout', `调用 Agnes 超时（>${c.timeoutMs} ms）。`, null, true);
+        e = new AgnesError('agnes_timeout', `${providerLabel(opts.provider?.name)}调用超时（>${c.timeoutMs} ms）。`, null, true);
       } else {
-        e = new AgnesError('agnes_network_error', `调用 Agnes 时发生网络错误：${(err as Error).message}`, null, true);
+        e = new AgnesError('agnes_network_error', `${providerLabel(opts.provider?.name)}网络错误：${(err as Error).message}`, null, true);
       }
+      e.provider = opts.provider?.name ?? 'agnes';
 
       lastError = e;
       const canRetry = e.retryable && !started && !outerAborted && attempt < c.maxRetries;

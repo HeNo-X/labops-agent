@@ -36,6 +36,7 @@ delete process.env['AGNES_API_KEY'];
 const { streamChatWithFallback } = await import('../../server/llm/router.ts');
 
 let code: string | null = null;
+let lastErr: unknown = null;
 try {
   for await (const ev of streamChatWithFallback(
     { messages: [{ role: 'user', content: '探针：只测上游分类，不需要真回答' }], tools: [] },
@@ -45,8 +46,9 @@ try {
   }
 } catch (err) {
   code = (err as { code?: string }).code ?? 'unknown';
+  lastErr = err;
 }
-console.log(JSON.stringify({ code, hits }));
+console.log(JSON.stringify({ code, hits, message: (lastErr as { message?: string }).message ?? null }));
 server.close();
 // 调过一次 streamChat 后，circuit/超时计时器会让事件循环挂着不退出——探针打完即退。
 // 延迟 100ms 再退：Windows 上 process.exit 撞上 server 句柄关闭中的窗口会触发

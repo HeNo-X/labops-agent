@@ -15,15 +15,17 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { isQuotaExhaustedResponse } from '../server/llm/agnes.ts';
+import { isQuotaExhaustedResponse, providerLabel } from '../server/llm/agnes.ts';
 
 const PROBE = fileURLToPath(new URL('./fixtures/quota-probe.ts', import.meta.url));
+const FALLBACK_PROBE = fileURLToPath(new URL('./fixtures/fallback-probe.ts', import.meta.url));
 
 interface ProbeResult {
   code: string | null;
   hits: number;
+  message?: string | null;
 }
 
 function runProbe(scenario: 'quota' | 'auth'): Promise<ProbeResult> {
@@ -61,14 +63,37 @@ test('A6-01 分类：403+配额签名 → 配额耗尽；403 裸响应仍是鉴�
   assert.equal(isQuotaExhaustedResponse(200, 'ok'), false);
 });
 
-test('A6-02 配额耗尽短路整条链：两个模型只打上游一次，错误码如实', async () => {
+test('A6-02 配额耗尽短路整条链：两个模型只打上游一次，错误码与文案按链归属', async () => {
   const r = await runProbe('quota');
   assert.equal(r.code, 'agnes_quota_exhausted', '不得误报为 agnes_auth_failed');
   assert.equal(r.hits, 1, '账号级配额不得再试链上第二个模型（试了也白烧）');
+  // A10：聊天链的配额错误必须说"聊天模型（DashScope）"，不得出现 Agnes 字样
+  assert.match(r.message ?? '', /聊天模型（DashScope）账号配额\/额度已用尽/);
+  assert.ok(!/Agnes/.test(r.message ?? ''), '聊天模式的用户可见文案不得出现 Agnes：' + r.message);
 });
 
 test('A6-03 非配额的 403（真鉴权失败）仍照常走完整条链', async () => {
   const r = await runProbe('auth');
   assert.equal(r.code, 'agnes_auth_failed');
   assert.equal(r.hits, 2, '普通鉴权失败保留原 fallback 行为：两个模型都试过');
+});
+
+test('A10 配额耗尽时确定性引擎兜底：run_completed（非 run_failed），310当前有人吗 照答并如实标注', async () => {
+  const out = JSON.parse(execFileSync(process.execPath, [FALLBACK_PROBE], { encoding: 'utf8', timeout: 60000 }).trim().split('\n').filter(Boolean).pop() as string) as {
+    type: string; engine: string | null; code: string | null; answer: string; hits: number;
+  };
+  assert.equal(out.type, 'run_completed', '配额耗尽必须兜底为确定性回答，不得 run_failed');
+  assert.equal(out.engine, 'demo', '兜底回答的 engine 如实标 demo');
+  assert.equal(out.hits, 1, '假上游只被打一次（短路后立刻兜底）');
+  assert.match(out.answer, /E310/, '310 → E310 解析照常工作');
+  // 披露语按数据源分两种：demo 源=「演示引擎」，live 源=「确定性事实引擎」——都必须如实标注未用大模型
+  assert.match(out.answer, /确定性事实引擎|演示引擎：/, '兜底回答必须如实标注未用大模型');
+  assert.match(out.answer, /未调用大模型/, '标注必须明说没用大模型');
+  assert.ok(!/在室人数：\d+ 人/.test(out.answer), '无业务通道时不得编造在室人数');
+});
+
+test('A10 用户可见称谓：聊天链说 DashScope、任务链说 Agnes，未知名称说"大模型"', () => {
+  assert.equal(providerLabel('dashscope'), '聊天模型（DashScope）');
+  assert.equal(providerLabel('agnes'), '工作模型（Agnes）');
+  assert.equal(providerLabel(undefined), '大模型');
 });

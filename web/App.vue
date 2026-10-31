@@ -240,22 +240,22 @@ type ConvMode = 'chat' | 'task';
 const draftMode = ref<ConvMode>(preferences.value.defaultMode);
 watch(()=>preferences.value.defaultMode,value=>{if(!session.currentId)draftMode.value=value;});
 const convMode = computed<ConvMode>(() => session.currentMode());
-const modeLabel = (m: ConvMode): string => (m === 'chat' ? '聊天会话' : '工作会话');
-const modeSwitchTip = computed(
-  () => tr('点击切换为{mode}。模式随发送时刻生效：历史消息保持其发生时的语义；切换为聊天后只查询、不准备办理单。', { mode: modeLabel(convMode.value === 'chat' ? 'task' : 'chat') })
+const modeTip = (m: ConvMode): string => tr(
+  m === 'chat'
+    ? '聊天会话：只查询数据，不准备办理单。模式随发送时刻生效，历史消息保持其发生时的语义。'
+    : '工作会话：可查询、可准备办理单并执行（执行仍需本人确认）。模式随发送时刻生效，历史消息保持其发生时的语义。'
 );
 const modeSwitching = ref(false);
 const modeNotice = ref<string | null>(null);
 watch(()=>session.currentId,()=>{modeNotice.value=null;});
-async function onToggleMode(): Promise<void> {
+async function setMode(m: ConvMode): Promise<void> {
   const id = session.currentId;
-  if (!id || modeSwitching.value || store.inputLocked) return;
-  const next: ConvMode = convMode.value === 'chat' ? 'task' : 'chat';
+  if (!id || modeSwitching.value || store.inputLocked || m === convMode.value) return;
   modeSwitching.value = true;
   modeNotice.value = null;
   try {
-    await session.changeConversationMode(id, next);
-    modeNotice.value = next === 'chat'
+    await session.changeConversationMode(id, m);
+    modeNotice.value = m === 'chat'
       ? tr('已切换为聊天会话：之后只查询数据，不准备办理单')
       : tr('已切换为工作会话：之后可准备办理单，执行仍需本人确认');
   } catch (e) {
@@ -825,10 +825,12 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
           <button type="button" class="chat__navtoggle" @click="navOpen = !navOpen">{{tr("会话")}}</button>
           <h1 class="chat__title">{{ currentTitle }}</h1>
           <span class="chat__count">{{ session.currentMessages.length }} {{tr("条消息")}}</span>
-          <!-- A8：模式胶囊即切换入口（点击 chat↔task）；历史消息语义不变 -->
-          <button type="button" class="chat__mode" :class="`chat__mode--${convMode}`" :title="modeSwitchTip" :aria-label="modeSwitchTip" :disabled="modeSwitching" @click="onToggleMode">
-            {{ modeLabel(convMode) }}
-          </button>
+          <!-- A10：会话模式开关——主区顶部水平中央、左右分栏醒目切换；
+               模式随发送时刻生效，历史消息语义不变 -->
+          <div class="mode-switch" role="group" :aria-label="tr('会话模式')">
+            <button type="button" class="mode-switch__opt" :class="{'is-active': convMode==='task'}" :disabled="modeSwitching" :aria-pressed="convMode==='task'" :title="modeTip('task')" @click="setMode('task')">{{ tr('工作会话') }}</button>
+            <button type="button" class="mode-switch__opt" :class="{'is-active': convMode==='chat'}" :disabled="modeSwitching" :aria-pressed="convMode==='chat'" :title="modeTip('chat')" @click="setMode('chat')">{{ tr('聊天会话') }}</button>
+          </div>
         </header>
         <p v-if="modeNotice" class="chat__err" role="status">{{ modeNotice }}</p>
         <p v-if="session.currentMessagesError" class="chat__err" role="alert">{{ session.currentMessagesError }}</p>
@@ -1016,6 +1018,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   color: var(--text-faint);
 }
 .chat__head {
+  position: relative;
   display: flex;
   align-items: baseline;
   gap: var(--sp-3);
@@ -1038,32 +1041,47 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* A10：给居中的模式开关留出空间，长标题截断而不压到控件下面 */
+  max-width: min(38%, 420px);
 }
 .chat__count {
   font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--text-faint);
   flex: 0 0 auto;
 }
-/* A8：会话模式胶囊 = 切换入口（点击 chat↔task；运行中禁用） */
-.chat__mode {
-  margin-left: auto;
-  flex: 0 0 auto;
-  font-size: calc(var(--ui-font-size) * 0.84615);
-  line-height: 1.6;
-  color: var(--text-muted);
+/* A10：会话模式开关——主区顶部水平中央、左右分栏（左=工作，右=聊天），醒目切换 */
+.mode-switch {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 2px;
+  padding: 2px;
   background: var(--surface-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
-  padding: 1px 10px;
+  z-index: 2;
+}
+.mode-switch__opt {
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+  padding: 5px 20px;
+  font: 600 calc(var(--ui-font-size) * 1.0) var(--font-sans);
+  color: var(--text-muted);
   cursor: pointer;
   white-space: nowrap;
-  font-family: inherit;
 }
-.chat__mode:hover { border-color: var(--border-strong); color: var(--text); }
-.chat__mode:disabled { cursor: wait; opacity: 0.6; }
-.chat__mode--chat {
-  color: var(--info, var(--primary));
-  border-color: currentColor;
+.mode-switch__opt:hover { color: var(--text); }
+.mode-switch__opt.is-active {
+  background: var(--primary);
+  color: var(--primary-contrast, #fff);
+}
+.mode-switch__opt:disabled { cursor: wait; opacity: 0.6; }
+@media(max-width:860px){
+  .mode-switch{position:static;transform:none;margin-left:auto;order:3}
+  .mode-switch__opt{padding:4px 12px}
 }
 .chat__err {
   margin: 0;

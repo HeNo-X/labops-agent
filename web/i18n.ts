@@ -562,6 +562,10 @@ Object.assign(en,{
  '点击切换为{mode}。模式随发送时刻生效：历史消息保持其发生时的语义；切换为聊天后只查询、不准备办理单。':'Click to switch to {mode}. The mode applies from the moment of sending: past messages keep the semantics they were created with; in Chat mode only queries are answered, no business drafts.',
  '已切换为聊天会话：之后只查询数据，不准备办理单':'Switched to Chat: only queries from now on, no business drafts.',
  '已切换为工作会话：之后可准备办理单，执行仍需本人确认':'Switched to Work: business drafts can be prepared, execution still requires your confirmation.',
- '模式切换失败：':'Mode switch failed: '
+ '模式切换失败：':'Mode switch failed: ',
+ // A10 会话模式开关（主区顶部居中左右分栏）
+ '会话模式':'Conversation mode',
+ '聊天会话：只查询数据，不准备办理单。模式随发送时刻生效，历史消息保持其发生时的语义。':'Chat: read-only queries, no business drafts. The mode applies from the moment of sending; past messages keep the semantics they were created with.',
+ '工作会话：可查询、可准备办理单并执行（执行仍需本人确认）。模式随发送时刻生效，历史消息保持其发生时的语义。':'Work: queries, business drafts and execution (still requires your confirmation). The mode applies from the moment of sending; past messages keep the semantics they were created with.'
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

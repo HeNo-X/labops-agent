@@ -52,6 +52,12 @@ export const RUN_EVENT_TYPES = [
   'task_updated',
   /** ops.v1：一次业务副作用的结果（SSE 侧登记备用；本轮经 REST 返回） */
   'operation_result',
+  /**
+   * A5 任务计划复述（todo recitation）：模型经 maintain_task_plan 工具登记/更新
+   * 多步任务计划后发出。payload 是**模型自己的工作记录**，不是业务事实；
+   * UI 呈现为计划面板，用户据此看到 Agent 打算做什么、做到了哪一步。
+   */
+  'plan_updated',
   /** 协议层收尾（传输结束 + 保存确认 payload.saved）；不是业务终态 */
   'end'
 ] as const;
@@ -124,6 +130,24 @@ export interface RunSnapshot {
   endedAt: string | null;
   /** 实际写出该回答的模型；未配置大模型（规则引擎）时为 null */
   assistantMessageId: string | null;
+  /** A5：该轮最后登记的任务计划（meta.plan）；没有就是 null */
+  plan: TaskPlanStep[] | null;
+}
+
+// ===========================================================================
+// A5 任务计划（todo recitation）
+// ===========================================================================
+
+/** 模型自己的工作步骤记录；状态只有三种，UI 用 ○/✓/— 呈现 */
+export interface TaskPlanStep {
+  id: string;
+  text: string;
+  status: 'pending' | 'done' | 'dropped';
+}
+
+export interface TaskPlanUpdatedPayload {
+  steps: TaskPlanStep[];
+  updatedAt: string;
 }
 
 export interface RunStartedPayload {
@@ -174,7 +198,7 @@ export interface ToolStartedPayload {
 }
 
 /** 结构化结果的类别。前端据此选择渲染器，不再假设所有工具都返回课表 */
-export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation';
+export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation' | 'task_plan';
 
 export interface ToolResultPayload {
   step: number;
@@ -189,7 +213,7 @@ export interface ToolResultPayload {
   /** 结果类别，决定前端用哪个渲染器 */
   resultKind?: ToolResultKind;
   /** 结构化结果，前端只接受这一份（绝不插入模型返回的任意 HTML） */
-  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult | EvidenceObservationResult;
+  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult | EvidenceObservationResult | { steps: TaskPlanStep[]; updatedAt: string };
   error?: { code: string; message: string };
 }
 

@@ -8,7 +8,7 @@ import type {RunSnapshot} from '../shared/types.ts';
 const snap=(over:Partial<RunSnapshot>={}):RunSnapshot=>({
   runId:'run-1',conversationId:'c1',phase:null,toolCalls:[],answerText:'',proposals:[],
   sourceType:'snapshot',engine:'demo',model:null,lastSeq:null,terminal:null,saved:false,
-  startedAt:'2026-10-30T02:00:00.000Z',endedAt:null,assistantMessageId:null,...over
+  startedAt:'2026-10-30T02:00:00.000Z',endedAt:null,assistantMessageId:null,plan:null,...over
 });
 
 test('T5-06 未拿到明确终态时不得判定为已收敛（awaiting_confirm 也不算完成）',()=>{

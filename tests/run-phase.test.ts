@@ -123,3 +123,18 @@ test('A6-04 run_completed.usage 捕获：provider 真实值入库展示，resetR
   feed(store,1,'run_completed',{steps:1,toolCalls:0,ms:100,answer:'x',usage:{promptTokens:1}});
   assert.equal(store.usage,null);
 });
+
+test('A5-08 plan_updated 摄取：合法 steps 进 store.plan，非法载荷不造假，resetRun 清空',()=>{
+  setActivePinia(createPinia());
+  const store=useRunStore();
+  store.beginRun('多步任务');
+  feed(store,0,'run_started',{engine:'demo',sourceType:'snapshot',serverNow:{iso:'',date:'',time:'',weekday:1,weekdayLabel:'',timezone:''},term:{term:'',termStart:null,weekNo:null,weekDeterminable:false,note:''},allowedTools:[]});
+  feed(store,1,'plan_updated',{steps:[{id:'s1',text:'查询 D517 状态',status:'done'},{id:'s2',text:'汇总给用户',status:'pending'}]});
+  assert.equal(store.plan.length,2);
+  assert.equal(store.plan[0].status,'done');
+  // 非法载荷（steps 不是数组）不落 plan——宁可空缺不造假（R4）
+  feed(store,2,'plan_updated',{steps:'oops'});
+  assert.equal(store.plan.length,2,'非法载荷不得覆盖已有计划');
+  store.resetRun();
+  assert.equal(store.plan.length,0,'resetRun 必须清空计划');
+});

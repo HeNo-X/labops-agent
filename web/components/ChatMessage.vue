@@ -8,7 +8,7 @@ import {t as tr} from "../i18n";
  *    活跃轮的工具数据由 run store 实时驱动，历史轮来自持久化 meta —— 同一组件两种来源
  *  · 状态不只靠颜色：符号 + 文字（✓ 完成 / ✕ 失败 / ⏹ 已取消 / ◌ 生成中 / ‼ 中断）
  */
-import type { KnowledgeResult, BusinessPlanResult } from '@shared/types';
+import type { KnowledgeResult, BusinessPlanResult, TaskPlanStep } from '@shared/types';
 import { computed, ref } from 'vue';
 import type { ChatMessage, ToolCallRecord } from '../stores/session';
 import { useRunStore } from '../stores/run';
@@ -17,6 +17,7 @@ import type { OperationsReportResult } from '@shared/types';
 import type { Proposal } from '@shared/operations-contract';
 import MarkdownText from './MarkdownText.vue';
 import StatusTag from './StatusTag.vue';
+import PlanPanel from './PlanPanel.vue';
 import TaskResult from './TaskResult.vue';
 import BusinessPlanCard from './BusinessPlanCard.vue';
 import {useSessionStore} from '../stores/session';
@@ -61,6 +62,16 @@ const evidenceArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind=
 const businessArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind==='business_plan'&&t.result).map(t=>({key:t.toolCallId,result:t.result as BusinessPlanResult})));
 
 const isUser = computed(() => props.msg.role === 'user');
+
+/**
+ * A5 计划步骤：活跃轮（streaming）读 run store 的 plan（plan_updated 实时更新），
+ * 历史轮读消息 meta.plan（服务端终态落库）。谁有值用谁——历史轮回放与活跃轮同口径。
+ */
+const planSteps = computed<TaskPlanStep[]>(() => {
+  const live = run.runStatus === 'running' && props.msg.status === 'streaming';
+  if (live) return run.plan;
+  return Array.isArray(props.msg.plan) ? props.msg.plan : [];
+});
 
 /**
  * 轮次渲染单元（T2）—— 活跃轮从 run store 的实时轨迹重建，历史轮从持久化的
@@ -213,6 +224,10 @@ const engineTitle = computed(() => {
           {{tr(copied ? '已复制' : '复制')}}
         </button>
       </div>
+
+      <!-- A5 任务计划面板：活跃轮来自 plan_updated 事件（run store），历史轮来自
+           消息 meta.plan —— 同一组件同一口径。计划是模型的工作记录，不是业务结果。 -->
+      <PlanPanel v-if="!textOnly && planSteps.length" :steps="planSteps" />
 
       <!-- 执行过程（T2）：活跃轮与历史轮同一口径 —— 运行中/中断/失败强制展开，
            正常完成默认收起成一行；每步带状态标签与耗时 -->

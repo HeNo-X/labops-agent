@@ -1,6 +1,7 @@
 import { isBusinessConnected, effectiveRole } from '../business/bridge.ts';
 import { runKnowledge } from './knowledge.ts';
 import { runAnalyzeEvidenceImage } from './analyze-evidence-image.ts';
+import { executeTaskPlan } from './task-plan.ts';
 import { prepareSchedule, queryDuty, queryBusiness, prepareWorkflow, queryIncident, prepareIncident,queryScheduled,prepareScheduled } from './business.ts';
 import type { KnowledgeResult, BusinessPlanResult, EvidenceObservationResult } from '../../shared/types.ts';
 /**
@@ -83,6 +84,7 @@ export type ToolExecution =
   | { ok: true; resultKind:'knowledge'; result:KnowledgeResult; summary:string }
   | { ok: true; resultKind:'business_plan'; result:BusinessPlanResult; summary:string }
   | { ok: true; resultKind:'evidence_observation'; result:EvidenceObservationResult; summary:string }
+  | { ok: true; resultKind: 'task_plan'; result: { steps: import('../../shared/types.ts').TaskPlanStep[]; updatedAt: string }; summary: string }
   | { ok: false; code: string; message: string; suggestions: string[]; summary: string };
 
 // ===========================================================================
@@ -454,7 +456,37 @@ export const REGISTRY: RegisteredTool[] = [
   { spec: PREPARE_CLOSURE_SPEC, execute: runPrepareRoomClosure, effect: 'draft' },
   { spec: PREPARE_NOTICE_SPEC, execute: runPrepareNotification, effect: 'draft' },
   { spec: PREPARE_DUTY_SPEC, execute: runPrepareDutySession, effect: 'draft' },
-  { spec: REPORT_SPEC, execute: runCreateOperationsReport, effect: 'draft' }
+  { spec: REPORT_SPEC, execute: runCreateOperationsReport, effect: 'draft' },
+  // A5 任务计划复述：effect='read'（chat/task 都可用），是工作记录不是业务结果
+  {
+    spec: {
+      name: 'maintain_task_plan',
+      description: '维护本轮任务计划（最多12步）。仅当预计需要≥2次工具调用的多步任务时使用：开工前登记步骤，每完成或放弃一步立即重发全量更新状态。这是你自己的工作记录，不是业务结果，不得据此向用户报告任何业务事实；业务结论仍必须来自查询类工具。',
+      parameters: {
+        type: 'object',
+        properties: {
+          steps: {
+            type: 'array',
+            maxItems: 12,
+            items: {
+              type: 'object',
+              properties: {
+                text: { type: 'string', maxLength: 80 },
+                status: { type: 'string', enum: ['pending', 'done', 'dropped'] }
+              },
+              required: ['text', 'status'],
+              additionalProperties: false
+            }
+          }
+        },
+        required: ['steps'],
+        additionalProperties: false
+      },
+      danger: false
+    },
+    execute: (args) => executeTaskPlan(args),
+    effect: 'read'
+  }
 ];
 
 const BY_NAME = new Map(REGISTRY.map((t) => [t.spec.name, t]));

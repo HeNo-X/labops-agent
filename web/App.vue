@@ -379,6 +379,8 @@ function convergeFromSnapshot(snapshot: RunSnapshot): void {
     live.model = snapshot.model;
     live.sourceType = snapshot.sourceType;
     if (ms !== null) live.ms = ms;
+    // A5：计划随快照回放（历史轮展示读消息 meta.plan；这里同步进 store 供活跃轮）
+    live.plan = snapshot.plan ?? null;
     // 快照里的错误信息没有落库字段（如实缺省），不编造失败原因
     live.error = null;
   }

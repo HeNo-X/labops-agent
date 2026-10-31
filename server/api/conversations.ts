@@ -118,7 +118,9 @@ function buildRunSnapshot(conversationId: string, run: Record<string, unknown>):
     saved: assistant !== null && assistant.status !== 'streaming',
     startedAt: (run['startedAt'] as string | null) ?? null,
     endedAt: (run['endedAt'] as string | null) ?? null,
-    assistantMessageId: assistant?.id ?? null
+    assistantMessageId: assistant?.id ?? null,
+    // A5：meta.plan 回放（没有登记过计划就是 null）
+    plan: Array.isArray(meta['plan']) ? (meta['plan'] as RunSnapshot['plan']) : null
   };
 }
 
@@ -464,6 +466,8 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
   let elapsedMs = 0;
   let failedError: { code: string; message: string; hint?: string } | null = null;
   const toolCalls: Array<Record<string, unknown>> = [];
+  /** A5：本轮最后一次登记的任务计划（plan_updated 事件载荷；终态随 meta 落库） */
+  let planSteps: Array<Record<string, unknown>> | null = null;
   let completedPayload: Record<string, unknown> | null = null;
   let cancelEventSent = false;
   const lastContext: { labName: string | null; date: string | null; task: string | null } = {
@@ -536,6 +540,18 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
           cur['error'] = p['error'] ?? null;
         }
         flush(true);
+      } else if (ev.type === 'plan_updated') {
+        // A5：计划落 meta.plan（流式期间即时刷写，刷新后仍能看到）
+        const p = ev.payload as { steps?: unknown };
+        if (Array.isArray(p.steps)) {
+          planSteps = p.steps as Array<Record<string, unknown>>;
+          try {
+            updateAssistantPartial(assistant.id, answerText, undefined, planSteps);
+            lastFlushAt = Date.now();
+          } catch {
+            /* 刷写失败不中断流；终态 finalize 会带全量 meta 再写一次 */
+          }
+        }
       } else if (ev.type === 'run_completed') {
         terminal = true;
         finalStatus = 'completed';
@@ -607,6 +623,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         error: failedError,
         clientRequestId,
         usage: completedPayload?.['usage'] ?? null,
+        plan: planSteps,
         context: lastContext
       });
     } catch (err) {

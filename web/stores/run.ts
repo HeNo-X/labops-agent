@@ -30,6 +30,7 @@ import type {
   RunEvent,
   ScheduleLesson,
   ScheduleQueryResult,
+  TaskPlanStep,
   ToolResultKind
 } from '@shared/types';
 import { DATA_SOURCE_LABELS, RUN_EVENT_TYPES } from '@shared/types';
@@ -197,6 +198,11 @@ export const useRunStore = defineStore('run', () => {
    * 只为展示；拿不到（流中断/老服务端）就是 null，绝不前端估数冒充。
    */
   const usage = ref<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(null);
+  /**
+   * A5 任务计划（plan_updated 事件载荷）：模型自己的工作步骤记录，UI 计划面板展示。
+   * 不是业务事实；历史轮不走这里（历史轮读消息 meta.plan）。
+   */
+  const plan = ref<TaskPlanStep[]>([]);
   /** 最近一次收到事件的时间（毫秒）。前台恢复时据此判断"是否已超过 5s 无新事件" */
   const lastEventAt = ref<number | null>(null);
   /** ops.v1：活跃轮的待确认提案（need_confirm 事件载荷）。历史轮由消息内的提案卡自持 */
@@ -569,6 +575,7 @@ export const useRunStore = defineStore('run', () => {
     extraResult.value = null;
     pendingConfirm.value = null;
     usage.value = null;
+    plan.value = [];
   }
 
   function beginRun(q: string): string {
@@ -647,6 +654,12 @@ export const useRunStore = defineStore('run', () => {
         // 它们由消息内的提案卡 / 日报卡渲染（活跃与历史同一组件）
         // ★ 注意：这里**不改 runStatus** —— 工具结果只是中间产物，
         //   输入框要等 run_completed / run_failed / run_cancelled + 流收尾才解锁。
+        break;
+      }
+      case 'plan_updated': {
+        // A5：计划面板数据源。只接受带 steps 数组的合法载荷（R4：宁可空缺不造假）
+        const pp = ev.payload as { steps?: unknown };
+        if (Array.isArray(pp.steps)) plan.value = pp.steps as TaskPlanStep[];
         break;
       }
       case 'run_completed': {
@@ -842,6 +855,7 @@ export const useRunStore = defineStore('run', () => {
     elapsedMs,
     serverMs,
     usage,
+    plan,
     lastEventAt,
     engine,
     model,

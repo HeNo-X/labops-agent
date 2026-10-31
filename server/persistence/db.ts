@@ -412,14 +412,26 @@ export function insertAssistantPlaceholder(conversationId: string, runId: string
   return row;
 }
 
-/** 流式期间增量刷写助手消息（text + 可选 toolCalls） */
-export function updateAssistantPartial(messageId: string, text: string, toolCalls?: unknown[]): void {
-  if (toolCalls !== undefined) {
+/** 流式期间增量刷写助手消息（text + 可选 toolCalls + 可选 plan[A5]） */
+export function updateAssistantPartial(messageId: string, text: string, toolCalls?: unknown[], plan?: unknown[]): void {
+  if (toolCalls !== undefined && plan !== undefined) {
+    getDb()
+      .prepare(
+        `UPDATE messages SET text = ?, meta = json_set(COALESCE(meta,'{}'), '$.toolCalls', json(?), '$.plan', json(?)) WHERE id = ?`
+      )
+      .run(text, JSON.stringify(toolCalls), JSON.stringify(plan), messageId);
+  } else if (toolCalls !== undefined) {
     getDb()
       .prepare(
         `UPDATE messages SET text = ?, meta = json_set(COALESCE(meta,'{}'), '$.toolCalls', json(?)) WHERE id = ?`
       )
       .run(text, JSON.stringify(toolCalls), messageId);
+  } else if (plan !== undefined) {
+    getDb()
+      .prepare(
+        `UPDATE messages SET text = ?, meta = json_set(COALESCE(meta,'{}'), '$.plan', json(?)) WHERE id = ?`
+      )
+      .run(text, JSON.stringify(plan), messageId);
   } else {
     getDb().prepare(`UPDATE messages SET text = ? WHERE id = ?`).run(text, messageId);
   }

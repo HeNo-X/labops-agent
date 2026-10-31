@@ -668,7 +668,12 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
       if (exec.ok) {
         consecutiveToolFailures = 0;
         if(exec.resultKind==='business_plan')businessFacts.push(exec.result);
-        verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label}));
+        // A5：计划是模型自己的工作记录，不是业务答案——不进 verifiedAnswers，
+        // 单独以 plan_updated 事件广播给界面（计划面板）。
+        if(exec.resultKind!=='task_plan')verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label}));
+        if(exec.resultKind==='task_plan'){
+          yield a.emit('plan_updated',{steps:(exec.result as {steps:import('../../shared/types.ts').TaskPlanStep[]}).steps,updatedAt:nowIso()} satisfies import('../../shared/types.ts').TaskPlanUpdatedPayload);
+        }
         yield a.emit('tool_result', {
           step: steps,
           toolCallId,
@@ -697,7 +702,9 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
             summary: exec.summary,
             data: exec.result,
             dataSource: a.ds.sourceLabel,
-            reminder: '只能依据本结果作答；本结果未包含的信息一律回答"查不到"；notes 字段必须原样转达给用户。'
+            reminder: exec.resultKind === 'task_plan'
+              ? '这是你自己的任务计划记录，不是业务结果；不能据此向用户报告业务事实或当作查询依据。继续按计划执行，状态变化就重发全量更新。'
+              : '只能依据本结果作答；本结果未包含的信息一律回答"查不到"；notes 字段必须原样转达给用户。'
           })
         });
       } else {

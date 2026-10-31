@@ -551,6 +551,11 @@ Object.assign(en,{
  '切换演示身份为志愿者':'Switch demo role to volunteer',
  '切换演示身份为学生':'Switch demo role to student',
  // A6 token 用量（provider 真实上报才显示）
- 'tokens':'tokens'
+ 'tokens':'tokens',
+ // A5 任务计划面板
+ '任务计划':'Task plan',
+ '已完成':'Done',
+ '已放弃':'Dropped',
+ '待办':'To do'
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

@@ -25,6 +25,7 @@ import { describeConfig, getConfig, PROJECT_ROOT } from './config.ts';
 import { handleAgentChat, readJsonBody } from './api/agent-chat.ts';
 import { handleTranscribe } from './api/transcribe.ts';
 import { handleVisionApi } from './api/vision-api.ts';
+import { handleServiceAgent } from './api/service-agent.ts';
 import { handleConversations } from './api/conversations.ts';
 import { handleTasksApi } from './api/tasks.ts';
 import { loadDataset, verifySnapshotIntegrity } from './data/store.ts';
@@ -232,6 +233,12 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   // 其余子路径沿用统一登录身份。数据面见 server/vision/monitor.ts。
   if (p.startsWith('/api/vision/')) {
     await handleVisionApi(req, res, p, url.searchParams);
+    return;
+  }
+
+  // 主系统调度器的机器到机器通道：到点让 Agent 真跑一轮（HMAC 自鉴权，见 security/http.ts 豁免）
+  if (p.startsWith('/api/service/')) {
+    await handleServiceAgent(req, res, p);
     return;
   }
 

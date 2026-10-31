@@ -72,6 +72,8 @@ export interface ToolContext {
   actor?: SandboxActor;
   /** 发起本轮的会话 id（任务与提案挂靠用；直连 /api/agent/chat 时为空） */
   conversationId?: string | null;
+  /** 工具白名单：传了就只允许这些工具（定时任务的"到点执行"通道用）；不传 = 不限制 */
+  allowedTools?: string[];
 }
 
 /** 可判别联合：resultKind 与 result 的类型一一对应，调用方按 kind 收窄 */
@@ -522,6 +524,17 @@ export function isRegisteredTool(name: unknown): boolean {
  */
 export async function executeTool(name: unknown, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolExecution> {
   const tool = typeof name === 'string' ? BY_NAME.get(name) : undefined;
+  // 白名单是**运行时硬拦**，不只靠提示词里少列几个工具：
+  // 模型完全可能凭记忆调一个没列出来但真实存在的工具，那一步必须挡在这里。
+  if (tool && ctx.allowedTools && ctx.allowedTools.length && !ctx.allowedTools.includes(tool.spec.name)) {
+    return {
+      ok: false,
+      code: 'tool_not_allowed',
+      message: `本轮不允许调用工具 ${tool.spec.name}`,
+      suggestions: ctx.allowedTools,
+      summary: `工具 ${tool.spec.name} 不在本轮允许范围内`
+    };
+  }
   if (!tool) {
     return {
       ok: false,
@@ -604,9 +617,10 @@ export function roomListHint(ds: Dataset): string {
 }
 
 /** Prompt, model tools and executor share this exact mode policy. */
-export function toolsForMode(mode: 'chat' | 'task'): ToolSpec[] {
+export function toolsForMode(mode: 'chat' | 'task', allowedTools?: string[]): ToolSpec[] {
+  const allow=allowedTools&&allowedTools.length?new Set(allowedTools):null;
   const connected=isBusinessConnected();const role=effectiveRole('student');
   const studentReads=new Set(['query_schedule','query_free_rooms','query_lab_status','query_knowledge','query_business_context']);
   const sandbox=new Set(['prepare_issue_ticket','prepare_room_closure','prepare_notification','prepare_duty_session','create_operations_report']);
-  return REGISTRY.filter(t => (!connected||role!=='student'||mode==='chat'&&studentReads.has(t.spec.name))&&(mode === 'task' || t.effect === 'read')&&(!connected||!sandbox.has(t.spec.name))&&(!connected||role==='admin'||t.spec.name!=='prepare_schedule_adjustment'&&t.spec.name!=='prepare_incident_plan')).map(t => t.spec);
+  return REGISTRY.filter(t => (!connected||role!=='student'||mode==='chat'&&studentReads.has(t.spec.name))&&(mode === 'task' || t.effect === 'read')&&(!connected||!sandbox.has(t.spec.name))&&(!connected||role==='admin'||t.spec.name!=='prepare_schedule_adjustment'&&t.spec.name!=='prepare_incident_plan')&&(!allow||allow.has(t.spec.name))).map(t => t.spec);
 }

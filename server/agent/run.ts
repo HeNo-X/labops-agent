@@ -62,6 +62,12 @@ export interface RunInput {
   mode?: 'chat' | 'task';
   /** ops.v1：服务端解析的沙盒演示身份（写操作准备必需；不传则 prepare 工具报 no_actor） */
   actor?: SandboxActor;
+  /**
+   * 工具白名单（2026-10-31 定时任务"到点让 Agent 跑"用）。
+   * 传了就**只能**用这些工具：提示词里只列这些，运行时也硬拦（见 executeTool）。
+   * 不传 = 沿用 mode 的原规则，行为与改造前完全一致。
+   */
+  allowedTools?: string[];
   /** 客户端断开时置位：模型请求与流式输出随即停止，不再产生新事件 */
   signal?: AbortSignal;
   /** N07：本轮结束时回传最终可信上下文（会话 API 落库用） */
@@ -202,7 +208,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   // 会话类型：chat=聊天（可查询真实数据，不能办理业务）；task=任务（可生成办理单）
   // 用户口径：聊天模式只是不能"执行操作"，数据读取与回答照常 —— 查询类工具全部保留
   const convMode: 'chat' | 'task' = input.mode === 'chat' ? 'chat' : 'task';
-  const modeTools = toolsForMode(convMode);
+  const modeTools = toolsForMode(convMode, input.allowedTools);
   const toolListText =
     '【可用工具】\n' + modeTools.map((t) => `- ${t.name}：${t.description}`).join('\n');
   const injectionSuspected = detectInjection(question);
@@ -250,7 +256,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
     }
     if(transformation.kind==='query'){
       yield emit('tool_started',{step:1,toolCallId:'transform-query',tool:'query_schedule',args:transformation.args,sourceType} satisfies ToolStartedPayload);
-      const result=await executeTool('query_schedule',transformation.args,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode,signal:input.signal});
+      const result=await executeTool('query_schedule',transformation.args,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode,signal:input.signal,allowedTools:input.allowedTools});
       if(!result.ok||result.resultKind!=='schedule'){yield emit('run_failed',{code:result.ok?'unexpected_result':result.code,message:result.ok?'未取得课表':result.message});return;}
       yield emit('tool_result',{step:1,toolCallId:'transform-query',tool:'query_schedule',ok:true,ms:0,sourceType,resultKind:result.resultKind,result:result.result,summary:result.summary} satisfies ToolResultPayload);
       // Store the newly verified object before applying its requested presentation.
@@ -264,7 +270,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
     }
     commitContext();
     if (engine === 'demo'||(convMode==='chat'&&isBusinessConnected()&&planNativeDialogue(question,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode}))) {
-      yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode });
+      yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode, allowedTools: input.allowedTools });
     } else {
       yield* runAgnesEngine({
         question,
@@ -319,6 +325,8 @@ interface DemoArgs {
   conversationId?: string | null;
   /** 会话类型：chat=纯聊天（无工具，演示引擎下诚实说明能力边界） */
   mode?: 'chat' | 'task';
+  /** 工具白名单（定时任务服务端调用用）：传了就只用这些工具 */
+  allowedTools?: string[];
 }
 
 async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
@@ -337,7 +345,7 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
   // 用户口径（2A.4 复核）：聊天模式可以查真实数据，只是不能办理业务。
   // 演示引擎在聊天模式下照常路由查询工具；仅当问题指向业务办理（prepare_*/报告单）时
   // 诚实告知需切换任务模式。
-  if (plan.callTool && !toolsForMode(a.mode ?? 'task').some(t => t.name === plan.tool)) {
+  if (plan.callTool && !toolsForMode(a.mode ?? 'task', a.allowedTools).some(t => t.name === plan.tool)) {
     const OPS_NAMES: Record<string, string> = {
       prepare_issue_ticket: '报修工单',
       prepare_room_closure: '房间停用',
@@ -660,7 +668,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
         dataset: a.ds,
         now: a.now,
         actor: a.actor,
-        conversationId: a.conversationId ?? null, mode: a.mode, signal:a.signal
+        conversationId: a.conversationId ?? null, mode: a.mode, signal:a.signal, allowedTools: a.allowedTools
       });
       const ms = Date.now() - t0;
       toolCalls += 1;

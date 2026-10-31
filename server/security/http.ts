@@ -37,6 +37,13 @@ async function authenticateRequest(req:IncomingMessage,res:ServerResponse,next:(
   const mode=authMode();
   if(!['demo','native'].includes(mode))return reject(res,503,'认证模式无效，请配置native（主系统统一登录）或明确的隔离demo');
   if(req.url.startsWith('/api/auth/'))return next();
+  // 视觉边缘上报（POST /api/vision/report）是机器到机器通道：自带 HMAC-SHA256
+  // 签名 + 时间窗 + nonce 防重放（server/vision/monitor.ts），不持登录 Cookie，
+  // 必须在身份分支之前放行——放行后仍要过签名校验，并非无鉴权端点。
+  if(req.url.startsWith('/api/vision/report'))return next();
+  // 主系统调度器的服务调用（/api/service/agent-run）：同样是机器到机器，
+  // 自带 HMAC 签名 + 时间窗 + nonce 防重放，不持登录 Cookie；放行后仍必须验签。
+  if(req.url.startsWith('/api/service/'))return next();
   if(mode==='native'||req.url.startsWith('/api/shared-chat/')){
     try{const delegated=await authenticateNative(req);await withNativeDelegation(delegated,async()=>{
       const actor=requestIdentity.getStore()!;

@@ -29,6 +29,7 @@ import {
   statusMeta,
   triggerText
 } from '../../business/automation-format';
+import { kindHint } from '../../business/automation-format';
 import AutomationTaskCard from './AutomationTaskCard.vue';
 import AutomationComposer from './AutomationComposer.vue';
 import AutomationHistory from './AutomationHistory.vue';
@@ -56,6 +57,28 @@ const showResults = ref(false);
 const showPreference = ref(false);
 const prefDraft = ref(automation.preference.value);
 const savedNotice = ref('');
+  // A-Z：模板网格的静态展示元数据（图标 + 示例节奏），点击即按该模板新建
+  const TEMPLATE_META: Record<string, { icon: string; schedule: string }> = {
+    daily_report: { icon: 'clock', schedule: '每天 08:00' },
+    tomorrow_courses: { icon: 'room', schedule: '每天 17:30' },
+    duty_reminder: { icon: 'clock', schedule: '班前 30 分钟' },
+    due_followup: { icon: 'bell', schedule: '每天 18:00' },
+    notice_reminder: { icon: 'bell', schedule: '每天 09:00' },
+    lab_open_reminder: { icon: 'room', schedule: '开门前 30 分钟' },
+    session_checkin_reminder: { icon: 'star', schedule: '按值班班次' },
+    patrol_reminder: { icon: 'file', schedule: '按值班班次' },
+    agent_prompt: { icon: 'new', schedule: '你说时间，Agent 执行' }
+  };
+  const startCreateWith = (kind: string): void => {
+    if (props.readonly) return;
+    if (props.inline) session.startDraft();
+    editing.value = null;
+    composerOpen.value = true;
+    automation.cancelPlan();
+    spec.value = newSpec(business.profile?.username || '');
+    spec.value.kind = kind;
+    spec.value.name = automation.templates.value[kind] || kind;
+  };
 // A-G4：示例话术复制（剪贴板不可用时如实降级——不假装复制成功）
 const copied = ref(false);
 async function copyExample(): Promise<void> {
@@ -351,8 +374,12 @@ useVisibleRefresh(
           @cancel="cancelComposer"
         />
 
-        <!-- 列表 -->
+        <!-- 列表（A-Z：ZCode 式标题块 + 任务卡 + 模板网格） -->
         <template v-else>
+          <div class="auto-hero">
+            <h1>自动化 <span class="auto-hero__muted">定时任务</span></h1>
+            <p class="auto-hero__sub">{{ tr('到点自动执行：生成日报、提醒值班，或让 Agent 替你查询与整理。') }}</p>
+          </div>
           <div class="auto-list">
             <AutomationTaskCard
               v-for="job in automation.jobs.value"
@@ -366,21 +393,44 @@ useVisibleRefresh(
             />
           </div>
 
-          <div v-if="!automation.jobs.value.length && !busy" class="auto-empty">
-            <p>{{ tr('还没有自动化。让 LabOps 每天/每周替你做重复的事，例如生成日报、提醒值班。') }}</p>
+          <div v-if="!automation.jobs.value.length && !busy" class="auto-empty-card">
+            <p class="auto-empty-card__title">{{ tr('还没有定时任务') }}</p>
+            <button type="button" class="auto-primary" :disabled="busy" @click="startCreate">
+              {{ tr('创建定时任务') }}
+            </button>
             <!-- A-G4：ZCode 的自动化就是"跟 Agent 说一句话"——把这条最短的路径显性化 -->
             <p class="auto-empty__try">
               {{ tr('也可以在会话里直接对我说：') }}
               <code>每天早上 8 点给我发昨天的日报</code>
               <button type="button" class="auto-link" @click="copyExample">{{ tr(copied ? '已复制' : '复制这句话') }}</button>
             </p>
-            <p class="auto-empty__hint">{{ tr('我会核对其影响后建成为自动化；上面的「新建自动化」走表单，效果一样。') }}</p>
           </div>
 
           <div v-if="!readonly" class="auto-actions">
             <button type="button" class="auto-primary" :disabled="busy" @click="startCreate">
               {{ tr('新建自动化') }}
             </button>
+          </div>
+
+          <div class="auto-tpl-section">
+            <h3 class="auto-tpl-section__title">{{ tr('定时任务模板') }}</h3>
+            <div class="auto-tpl-grid">
+              <button
+                v-for="(meta, kind) in TEMPLATE_META"
+                :key="kind"
+                type="button"
+                class="auto-tpl-card"
+                :disabled="busy"
+                @click="startCreateWith(String(kind))"
+              >
+                <span class="auto-tpl-card__head">
+                  <UiIcon :name="meta.icon" :size="15"/>
+                  <b>{{ tr(automation.templates.value[String(kind)] || String(kind)) }}</b>
+                </span>
+                <span class="auto-tpl-card__hint">{{ tr(kindHint(String(kind))) }}</span>
+                <span class="auto-tpl-card__sched">{{ tr(meta.schedule) }}</span>
+              </button>
+            </div>
           </div>
 
           <!-- 影响核对（列表页的新建/立即运行/归档） -->
@@ -788,4 +838,40 @@ useVisibleRefresh(
     min-height: 40px;
   }
 }
+</style>
+<style scoped>
+/* A-Z：ZCode 式标题块（列表页） */
+.auto-hero { margin: 0 0 18px; }
+.auto-hero h1 { margin: 0 0 6px; font-size: calc(var(--ui-font-size) * 1.7); font-weight: 700; }
+.auto-hero__muted { color: var(--text-faint); font-weight: 600; margin-left: 8px; }
+.auto-hero__sub { margin: 0; color: var(--text-faint); font-size: calc(var(--ui-font-size) * 1.0); }
+/* 空态大卡：居中按钮的大边框卡 */
+.auto-empty-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  padding: 56px 20px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.auto-empty-card__title { margin: 0; color: var(--text-faint); font-size: calc(var(--ui-font-size) * 1.0); }
+.auto-empty-card .auto-empty__try { margin: 6px 0 0; }
+/* 模板网格：PC 两列、窄屏单列 */
+.auto-tpl-section { margin-top: 26px; }
+.auto-tpl-section__title { margin: 0 0 10px; font-size: calc(var(--ui-font-size) * 1.0); color: var(--text-muted); font-weight: 600; }
+.auto-tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.auto-tpl-card {
+  display: flex; flex-direction: column; gap: 6px; text-align: left;
+  border: 1px solid var(--border); border-radius: var(--radius-lg, 12px);
+  background: var(--surface); color: var(--text);
+  padding: 14px 16px; cursor: pointer; font: inherit;
+}
+.auto-tpl-card:hover { border-color: var(--border-strong, var(--primary)); }
+.auto-tpl-card:disabled { opacity: .6; cursor: wait; }
+.auto-tpl-card__head { display: flex; align-items: center; gap: 8px; font-size: calc(var(--ui-font-size) * 1.0); }
+.auto-tpl-card__hint { color: var(--text-muted); font-size: calc(var(--ui-font-size) * 0.92308); line-height: 1.55; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.auto-tpl-card__sched { color: var(--text-faint); font-size: calc(var(--ui-font-size) * 0.84615); }
+@media(max-width: 720px) { .auto-tpl-grid { grid-template-columns: 1fr; } }
 </style>

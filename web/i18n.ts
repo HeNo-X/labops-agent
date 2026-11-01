@@ -580,6 +580,16 @@ Object.assign(en,{
  '最多运行次数（可选）':'Max runs (optional)', '不限':'Unlimited',
  '已按次数完成，历史保留':'Completed after the set number of runs; history retained',
  '已运行':'Runs done', '次':'×',
+ // A-Z：ZCode 式自动化界面（列表页/创建页）
+ '定时任务模板':'Scheduled task templates', '还没有定时任务':'No scheduled tasks yet',
+ '创建定时任务':'Create scheduled task', '新建定时任务':'New scheduled task',
+ '编辑定时任务':'Edit scheduled task', '新建任务':'New task',
+ '配置任务的执行时间、指令和运行方式。':'Configure when it runs, the instruction, and how it runs.',
+ '任务标题':'Task title', '未命名定时任务':'Untitled scheduled task',
+ '所在位置':'Location', '设置与历史':'Settings and history',
+ '你说时间，Agent 执行':'You set the time, the Agent runs it',
+ '调度':'Schedule', '打开这条规则的详情与历史':"Open this rule's detail and history",
+ '运行历史在保存后开始累积；编辑完成后在列表点开这条规则即可看到完整历史与执行摘要。':'Run history accumulates after saving; open the rule from the list after editing to see full history and summaries.',
  // A10 会话模式开关（主区顶部居中左右分栏）
  '会话模式':'Conversation mode',
  '聊天会话：只查询数据，不准备办理单。模式随发送时刻生效，历史消息保持其发生时的语义。':'Chat: read-only queries, no business drafts. The mode applies from the moment of sending; past messages keep the semantics they were created with.',

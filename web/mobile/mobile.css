@@ -387,3 +387,6 @@
 .mobile-voice-time{color:var(--text-muted);font-variant-numeric:tabular-nums;margin-left:auto}
 .mobile-voice-bar button{min-height:32px;border-radius:var(--m-radius,10px)}
 .mobile-voice-hint{flex-basis:100%;margin:0;color:var(--danger);font-size:calc(var(--ui-font-size) * 1.0)}
+/* 自动化入口（会话抽屉）：与抽屉行风格一致的纵向入口 */
+.m-drawer__automation{display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;margin:0 0 8px;border:1px solid var(--m-hairline,var(--border));border-radius:var(--m-radius,10px);background:var(--m-tonal,var(--surface-3));color:var(--text);font:calc(var(--ui-font-size) * 1.0) var(--font-sans);cursor:pointer}
+.m-drawer__automation:hover{border-color:var(--border-strong,var(--border-strong))}

@@ -36,6 +36,8 @@ const emit = defineEmits<{ requestPlan: []; confirm: []; cancel: [] }>();
 
 const applicable = params as Record<string, string[]>;
 const advanced = ref(false);
+// A-Z：设置|历史页签（编辑已有规则时才有历史）
+const tab = ref<'settings' | 'history'>('settings');
 const isAgentTemplate = computed(() => spec.value.kind === 'agent_prompt');
 const execMode = computed<'message' | 'agent'>(() => (spec.value.execMode === 'agent' ? 'agent' : 'message'));
 const agentTools = computed<string[]>(() => (Array.isArray(spec.value.agentTools) ? spec.value.agentTools : []));
@@ -105,6 +107,7 @@ const maxRunsInput = computed<number | undefined>({
 
 const hint = computed(() => kindHint(spec.value.kind));
 const templateLabel = computed(() => props.templates[spec.value.kind] || spec.value.kind);
+watch(() => props.editing, () => { tab.value = 'settings'; });
 
 /** duty 触发只对值班类模板有意义，其它模板不显示这个选项 */
 const availableTriggers = computed(() =>
@@ -214,12 +217,23 @@ watch(
 
 <template>
   <section class="auto-composer">
+    <nav class="auto-crumb" :aria-label="tr('所在位置')">{{ tr('自动化') }} › {{ tr(editing ? '编辑定时任务' : '新建任务') }}</nav>
     <header class="auto-composer__head">
-      <h2>{{ tr(editing ? '编辑自动化' : '新建自动化') }}</h2>
-      <button type="button" class="auto-link" @click="advanced = !advanced">
-        {{ tr(advanced ? '改用简明设置' : '完整设置') }}
-      </button>
+      <div class="auto-composer__headtext">
+        <h2>{{ tr(editing ? '编辑定时任务' : '新建定时任务') }}</h2>
+        <p class="auto-composer__sub">{{ tr('配置任务的执行时间、指令和运行方式。') }}</p>
+      </div>
+      <div class="auto-composer__top">
+        <div v-if="editing" class="auto-tabs" role="tablist" :aria-label="tr('设置与历史')">
+          <button type="button" role="tab" :aria-selected="tab === 'settings'" :class="{ 'is-on': tab === 'settings' }" :disabled="busy" @click="tab = 'settings'">{{ tr('设置') }}</button>
+          <button type="button" role="tab" :aria-selected="tab === 'history'" :class="{ 'is-on': tab === 'history' }" :disabled="busy" @click="tab = 'history'">{{ tr('历史') }}</button>
+        </div>
+        <button type="button" class="auto-primary" :disabled="busy" @click="submit">
+          {{ tr(editing ? '保存修改' : '创建定时任务') }}
+        </button>
+      </div>
     </header>
+    <p v-if="tab === 'history'" class="auto-note">{{ tr('运行历史在保存后开始累积；编辑完成后在列表点开这条规则即可看到完整历史与执行摘要。') }}</p>
 
     <!-- 完整设置：保留旧版全部字段，一个都不删，只是不再默认展示 -->
     <div v-if="advanced" class="auto-composer__advanced">
@@ -235,6 +249,74 @@ watch(
 
     <!-- 简明设置：主流 Agent APP 的默认路径 -->
     <div v-else class="auto-composer__simple">
+      <!-- A-Z：ZCode 式字段顺序——任务标题最上，其后是调度与指令 -->
+      <label class="auto-field">
+        <span class="auto-field__label">{{ tr('任务标题') }}</span>
+        <input v-model="spec.name" maxlength="120" :disabled="busy" :placeholder="tr('未命名定时任务')">
+      </label>
+      <fieldset class="auto-field auto-field--trigger">
+        <legend class="auto-field__label">{{ tr('调度') }}</legend>
+        <div class="auto-seg" role="radiogroup" :aria-label="tr('运行频率')">
+          <button
+            v-for="option in availableTriggers"
+            :key="option.value"
+            type="button"
+            role="radio"
+            :aria-checked="triggerType === option.value"
+            :class="{ 'is-on': triggerType === option.value }"
+            :disabled="busy"
+            @click="setSimpleTrigger(option.value)"
+          >
+            {{ tr(option.label) }}
+          </button>
+        </div>
+
+        <div class="auto-field__row">
+          <label v-if="triggerType === 'interval'" class="auto-inline">
+            <span>{{ tr('每隔') }}</span>
+            <input v-model.number="intervalMinutes" type="number" min="15" max="10080" step="15" :disabled="busy" required />
+            <span>{{ tr('分钟（15—10080）') }}</span>
+          </label>
+          <label v-if="triggerType !== 'once' && triggerType !== 'duty'" class="auto-inline">
+            <span>{{ tr('最多运行次数（可选）') }}</span>
+            <input v-model.number="maxRunsInput" type="number" min="1" max="99" :disabled="busy" :placeholder="tr('不限')" />
+          </label>
+          <label v-if="triggerType === 'daily' || triggerType === 'weekly'" class="auto-inline">
+            <span>{{ tr('北京时间') }}</span>
+            <input v-model="spec.trigger.time" type="time" :disabled="busy" required />
+          </label>
+
+          <label v-if="triggerType === 'once'" class="auto-inline">
+            <span>{{ tr('运行时间') }}</span>
+            <input v-model="onceLocal" type="datetime-local" :disabled="busy" required />
+          </label>
+
+          <label v-if="triggerType === 'duty'" class="auto-inline">
+            <span>{{ tr('提前') }}</span>
+            <input v-model.number="spec.trigger.minutesBefore" type="number" min="0" max="120" :disabled="busy" />
+            <span>{{ tr('分钟') }}</span>
+          </label>
+        </div>
+
+        <div v-if="triggerType === 'weekly'" class="auto-weekdays" role="group" :aria-label="tr('星期')">
+          <button
+            v-for="(day, index) in WEEKDAY"
+            :key="index"
+            type="button"
+            :aria-pressed="weekdayList.includes(index)"
+            :class="{ 'is-on': weekdayList.includes(index) }"
+            :disabled="busy"
+            @click="toggleWeekday(index)"
+          >
+            {{ day }}
+          </button>
+        </div>
+
+        <p class="auto-field__hint">
+          {{ tr('日历') }}：{{ tr(calendarText(spec.calendarPolicy)) }} ·
+          {{ tr('接收') }}：{{ tr(recipientsText(spec.recipients)) }}
+        </p>
+      </fieldset>
       <label class="auto-field">
         <span class="auto-field__label">{{ tr('要做什么') }}</span>
         <select :value="spec.kind" :disabled="busy" @change="setTemplate">
@@ -299,69 +381,6 @@ watch(
         </fieldset>
       </template>
 
-      <fieldset class="auto-field auto-field--trigger">
-        <legend class="auto-field__label">{{ tr('多久一次') }}</legend>
-        <div class="auto-seg" role="radiogroup" :aria-label="tr('运行频率')">
-          <button
-            v-for="option in availableTriggers"
-            :key="option.value"
-            type="button"
-            role="radio"
-            :aria-checked="triggerType === option.value"
-            :class="{ 'is-on': triggerType === option.value }"
-            :disabled="busy"
-            @click="setSimpleTrigger(option.value)"
-          >
-            {{ tr(option.label) }}
-          </button>
-        </div>
-
-        <div class="auto-field__row">
-          <label v-if="triggerType === 'interval'" class="auto-inline">
-            <span>{{ tr('每隔') }}</span>
-            <input v-model.number="intervalMinutes" type="number" min="15" max="10080" step="15" :disabled="busy" required />
-            <span>{{ tr('分钟（15—10080）') }}</span>
-          </label>
-          <label v-if="triggerType !== 'once' && triggerType !== 'duty'" class="auto-inline">
-            <span>{{ tr('最多运行次数（可选）') }}</span>
-            <input v-model.number="maxRunsInput" type="number" min="1" max="99" :disabled="busy" :placeholder="tr('不限')" />
-          </label>
-          <label v-if="triggerType === 'daily' || triggerType === 'weekly'" class="auto-inline">
-            <span>{{ tr('北京时间') }}</span>
-            <input v-model="spec.trigger.time" type="time" :disabled="busy" required />
-          </label>
-
-          <label v-if="triggerType === 'once'" class="auto-inline">
-            <span>{{ tr('运行时间') }}</span>
-            <input v-model="onceLocal" type="datetime-local" :disabled="busy" required />
-          </label>
-
-          <label v-if="triggerType === 'duty'" class="auto-inline">
-            <span>{{ tr('提前') }}</span>
-            <input v-model.number="spec.trigger.minutesBefore" type="number" min="0" max="120" :disabled="busy" />
-            <span>{{ tr('分钟') }}</span>
-          </label>
-        </div>
-
-        <div v-if="triggerType === 'weekly'" class="auto-weekdays" role="group" :aria-label="tr('星期')">
-          <button
-            v-for="(day, index) in WEEKDAY"
-            :key="index"
-            type="button"
-            :aria-pressed="weekdayList.includes(index)"
-            :class="{ 'is-on': weekdayList.includes(index) }"
-            :disabled="busy"
-            @click="toggleWeekday(index)"
-          >
-            {{ day }}
-          </button>
-        </div>
-
-        <p class="auto-field__hint">
-          {{ tr('日历') }}：{{ tr(calendarText(spec.calendarPolicy)) }} ·
-          {{ tr('接收') }}：{{ tr(recipientsText(spec.recipients)) }}
-        </p>
-      </fieldset>
 
       <p v-if="localError" class="auto-error" role="alert">{{ localError }}</p>
 
@@ -665,4 +684,20 @@ watch(
     flex: 1 1 auto;
   }
 }
+</style>
+<style scoped>
+/* A-Z：ZCode 式创建页（面包屑 + 标题块 + 页签 + 右上主按钮） */
+.auto-crumb { margin: 0 0 14px; color: var(--text-faint); font-size: calc(var(--ui-font-size) * 0.84615); }
+.auto-composer__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.auto-composer__headtext h2 { margin: 0 0 4px; font-size: calc(var(--ui-font-size) * 1.3); }
+.auto-composer__sub { margin: 0; color: var(--text-faint); font-size: calc(var(--ui-font-size) * 0.92308); }
+.auto-composer__top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.auto-tabs { display: flex; gap: 2px; background: var(--surface-2, var(--surface)); border: 1px solid var(--border); border-radius: 999px; padding: 2px; }
+.auto-tabs button { border: 0; background: transparent; border-radius: 999px; padding: 5px 16px; font: 600 calc(var(--ui-font-size) * 0.92308) var(--font-sans); color: var(--text-muted); cursor: pointer; }
+.auto-tabs button.is-on { background: var(--primary); color: var(--primary-contrast, #fff); }
+.auto-tabs button:disabled { opacity: .6; cursor: wait; }
+.auto-composer__history-note { margin: 0 0 10px; }
+.auto-composer__simple > .auto-field--sched { border: 1px solid var(--border); border-radius: var(--radius-lg, 12px); padding: 12px 14px; margin: 0 0 12px; }
+.auto-composer__simple > .auto-field--sched > .auto-field__label { font-weight: 700; color: var(--text); }
+@media(max-width: 640px) { .auto-composer__top { width: 100%; } }
 </style>

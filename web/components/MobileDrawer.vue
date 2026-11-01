@@ -16,7 +16,7 @@ import UiIcon from './UiIcon.vue';
 import SwipeRow from './SwipeRow.vue';
 import {useFeedback} from '../mobile/feedback';
 
-const emit = defineEmits<{ close: []; select: [id: string]; new: [] }>();
+const emit = defineEmits<{ close: []; select: [id: string]; new: []; automation: [] }>();
 const session = useSessionStore();
 const business = useBusinessStore();
 const feedback = useFeedback();
@@ -86,6 +86,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
   <aside class="m-drawer" role="dialog" aria-modal="true" :aria-label="tr('会话导航')">
     <button type="button" class="mobile-primary m-drawer__new" @click="emit('new'); emit('close')">
       <UiIcon name="new" :size="16"/>{{ tr('新会话') }}
+    </button>
+    <!-- 自动化入口：会话抽屉直达定时任务（与 PC 侧栏同能力） -->
+    <button type="button" class="m-drawer__automation" @click="emit('automation'); emit('close')">
+      <UiIcon name="clock" :size="16"/>{{ tr('自动化') }}
     </button>
     <label class="m-drawer__search">
       <UiIcon name="search" :size="14"/>

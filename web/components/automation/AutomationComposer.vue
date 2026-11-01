@@ -18,7 +18,7 @@ import { computed, ref, watch } from 'vue';
 import { t as tr } from '../../i18n';
 import { autoRuleName, type ScheduledSpec } from '../../business/scheduled-form';
 import params from '@shared/scheduled-params.json';
-import { effectsText, formatDateTime, recipientsText, triggerText } from '../../business/automation-format';
+import { formatDateTime, triggerText } from '../../business/automation-format';
 import type { AutomationPlan } from '../../composables/useAutomation';
 
 const spec = defineModel<ScheduledSpec>({ required: true });
@@ -54,6 +54,8 @@ const PARAM_LABEL: Record<string, string> = {
   maxMissedHours: '错过补报窗口（小时，缺省 6）',
   thresholdHours: '工单超时阈值（小时）'
 };
+// A-Z2：指令未填 → 主按钮禁用变灰
+const createDisabled = computed(() => isAgentTemplate.value && !String(spec.value.prompt ?? '').trim());
 const schedSummary = computed(() => {
   if (schedOpen.value) return tr('收起调度设置');
   return schedTouched.value ? triggerText(spec.value) : tr('+ 添加计划');
@@ -231,14 +233,9 @@ watch(
         <h2>{{ tr(editing ? '编辑定时任务' : '新建定时任务') }}</h2>
         <p class="auto-composer__sub">{{ tr('配置任务的执行时间、指令和运行方式。') }}</p>
       </div>
-      <div class="auto-composer__top">
-        <div v-if="editing" class="auto-tabs" role="tablist" :aria-label="tr('设置与历史')">
-          <button type="button" role="tab" :aria-selected="tab === 'settings'" :class="{ 'is-on': tab === 'settings' }" :disabled="busy" @click="tab = 'settings'">{{ tr('设置') }}</button>
-          <button type="button" role="tab" :aria-selected="tab === 'history'" :class="{ 'is-on': tab === 'history' }" :disabled="busy" @click="tab = 'history'">{{ tr('历史') }}</button>
-        </div>
-        <button type="button" class="auto-primary" :disabled="busy" @click="submit">
-          {{ tr(editing ? '保存修改' : '创建定时任务') }}
-        </button>
+      <div v-if="editing" class="auto-tabs" role="tablist" :aria-label="tr('设置与历史')">
+        <button type="button" role="tab" :aria-selected="tab === 'settings'" :class="{ 'is-on': tab === 'settings' }" :disabled="busy" @click="tab = 'settings'">{{ tr('设置') }}</button>
+        <button type="button" role="tab" :aria-selected="tab === 'history'" :class="{ 'is-on': tab === 'history' }" :disabled="busy" @click="tab = 'history'">{{ tr('历史') }}</button>
       </div>
     </header>
     <p v-if="tab === 'history'" class="auto-note">{{ tr('运行历史在保存后开始累积；编辑完成后在列表点开这条规则即可看到完整历史与执行摘要。') }}</p>
@@ -359,6 +356,18 @@ watch(
         </template>
       </div>
 
+      <!-- A-Z：主按钮在指令框下方右侧；指令未填时禁用变灰（A-Z2） -->
+      <div class="auto-actions auto-actions--end">
+        <button
+          type="button"
+          class="auto-primary auto-primary--big"
+          :disabled="busy || createDisabled"
+          @click="submit"
+        >
+          {{ tr(editing ? '保存修改' : '创建定时任务') }}
+        </button>
+      </div>
+
       <p v-if="localError" class="auto-error" role="alert">{{ localError }}</p>
     </div>
 
@@ -366,11 +375,7 @@ watch(
     <section v-if="plan" class="auto-review" :aria-label="tr('影响核对')">
       <h3>{{ tr('确认后才会生效') }}</h3>
       <dl class="auto-review__grid">
-        <div><dt>{{ tr('规则') }}</dt><dd>{{ plan.spec.name || templateLabel }}</dd></div>
         <div><dt>{{ tr('频率') }}</dt><dd>{{ tr(triggerText(plan.spec)) }}</dd></div>
-        <div><dt>{{ tr('接收') }}</dt><dd>{{ tr(recipientsText(plan.spec.recipients)) }}</dd></div>
-        <div><dt>{{ tr('效果') }}</dt><dd>{{ tr(effectsText(plan.effects)) }}</dd></div>
-        <div><dt>{{ tr('时区') }}</dt><dd>{{ plan.spec.timezone || timezone || 'Asia/Shanghai' }}</dd></div>
         <div><dt>{{ tr('方案有效至') }}</dt><dd>{{ formatDateTime(plan.expiresAt) }}</dd></div>
       </dl>
 
@@ -379,11 +384,6 @@ watch(
         <li v-for="item in plan.futureOccurrences.slice(0, 3)" :key="item.at">{{ item.local }}</li>
       </ol>
       <p v-else class="auto-review__warn">{{ tr('没有可用的未来触发时间 —— 请检查时间、正式排班或校历设置。') }}</p>
-
-      <details v-if="plan.sample?.text" class="auto-review__sample">
-        <summary>{{ tr('看看输出长什么样') }}</summary>
-        <pre>{{ plan.sample.text }}</pre>
-      </details>
 
       <details v-if="plan.changes?.length" class="auto-review__diff">
         <summary>{{ tr('本次修改的字段') }}</summary>
@@ -699,4 +699,15 @@ watch(
 .auto-params { display: flex; flex-wrap: wrap; gap: 10px; }
 .auto-params .auto-inline { display: flex; flex-direction: column; gap: 4px; min-width: 200px; }
 .auto-params .auto-inline span { font-size: calc(var(--ui-font-size) * 0.84615); color: var(--text-muted); }
+</style>
+<style scoped>
+/* A-Z2：指令框下方右侧的主按钮——圆角、稍大；禁用变灰 */
+.auto-actions--end { justify-content: flex-end; margin-top: 4px; }
+.auto-primary--big {
+  border-radius: 12px;
+  padding: 12px 28px;
+  font-size: calc(var(--ui-font-size) * 1.07692);
+  font-weight: 700;
+}
+.auto-primary--big:disabled { opacity: .45; cursor: not-allowed; }
 </style>

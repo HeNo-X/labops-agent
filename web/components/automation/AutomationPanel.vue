@@ -66,6 +66,17 @@ const savedNotice = ref('');
     patrol_reminder: { icon: 'file', schedule: '按值班班次' },
     agent_prompt: { icon: 'new', schedule: '你说时间，Agent 执行' }
   };
+  // A-Z2：模板卡预填推荐指令（新建统一指令驱动）
+  const PROMPT_PRESETS: Record<string, string> = {
+    daily_report: '汇总今天的值班、报修与站内通知，生成今日日报',
+    tomorrow_courses: '查一下明天有哪些课、哪些教室要用，提前一天整理成清单',
+    duty_reminder: '查一下下一次正式值班，提醒我带好钥匙并按时到岗',
+    due_followup: '查一下有没有快到截止时间还没处理的工单，提醒跟进',
+    notice_reminder: '查一下我还没读的站内通知，挑重要的简单说一遍',
+    lab_open_reminder: '查明天要上课的实验室，提醒志愿者提前开门',
+    session_checkin_reminder: '对照今天的签到记录，提醒还没到岗的值班缺口',
+    patrol_reminder: '按值班班次巡查实验室：服务状态、未关闭工单与异常情况'
+  };
   const startCreateWith = (kind: string): void => {
     if (props.readonly) return;
     if (props.inline) session.startDraft();
@@ -73,7 +84,10 @@ const savedNotice = ref('');
     composerOpen.value = true;
     automation.cancelPlan();
     spec.value = newSpec(business.profile?.username || '');
-    spec.value.kind = kind;
+    // A-Z2：新建统一指令驱动——kind=agent_prompt，模板卡预填推荐指令
+    spec.value.kind = 'agent_prompt';
+    spec.value.execMode = 'agent';
+    spec.value.prompt = PROMPT_PRESETS[kind] ?? '';
     spec.value.name = automation.templates.value[kind] || kind;
   };
 // A-G4：示例话术复制（剪贴板不可用时如实降级——不假装复制成功）
@@ -121,7 +135,9 @@ function startCreate(): void {
   composerOpen.value = true;
   automation.cancelPlan();
   spec.value = newSpec(business.profile?.username || '');
-  spec.value.name = automation.templates.value[spec.value.kind] || spec.value.kind;
+  // A-Z2：新建统一指令驱动——执行方式默认让 Agent 去做，标题留空由用户起
+  spec.value.kind = 'agent_prompt';
+  spec.value.execMode = 'agent';
 }
 
 function startEdit(job: AutomationJob): void {
@@ -356,12 +372,9 @@ useVisibleRefresh(
 
         <!-- 列表（A-Z：ZCode 式标题块 + 任务卡 + 模板网格） -->
         <template v-else>
-          <div class="auto-hero auto-hero--row">
-            <div>
-              <h1>自动化 <span class="auto-hero__muted">定时任务</span></h1>
-              <p class="auto-hero__sub">{{ tr('到点自动执行：生成日报、提醒值班，或让 Agent 替你查询与整理。') }}</p>
-            </div>
-            <button type="button" class="auto-primary" :disabled="busy || readonly" @click="startCreate">{{ tr('新建') }}</button>
+          <div class="auto-hero">
+            <h1>自动化 <span class="auto-hero__muted">定时任务</span></h1>
+            <p class="auto-hero__sub">{{ tr('到点自动执行：生成日报、提醒值班，或让 Agent 替你查询与整理。') }}</p>
           </div>
           <div class="auto-list">
             <AutomationTaskCard
@@ -414,10 +427,7 @@ useVisibleRefresh(
           <section v-if="plan" class="auto-review">
             <h3>{{ tr('确认后才会生效') }}</h3>
             <dl class="auto-review__grid">
-              <div><dt>{{ tr('规则') }}</dt><dd>{{ plan.spec.name }}</dd></div>
               <div><dt>{{ tr('频率') }}</dt><dd>{{ tr(triggerText(plan.spec)) }}</dd></div>
-              <div><dt>{{ tr('接收') }}</dt><dd>{{ tr(recipientsText(plan.spec.recipients)) }}</dd></div>
-              <div><dt>{{ tr('效果') }}</dt><dd>{{ tr(effectsText(plan.effects)) }}</dd></div>
               <div><dt>{{ tr('方案有效至') }}</dt><dd>{{ formatDateTime(plan.expiresAt) }}</dd></div>
             </dl>
             <ol v-if="plan.futureOccurrences?.length" class="auto-review__occ">

@@ -286,7 +286,13 @@ useVisibleRefresh(
             <div v-if="!readonly && detail.job.canManage" class="auto-actions">
               <button type="button" :disabled="busy" @click="startEdit(detail.job)">{{ tr('编辑') }}</button>
               <button type="button" :disabled="busy" @click="runNow(detail.job)">{{ tr('立即运行') }}</button>
-              <button type="button" :disabled="busy" @click="toggleJob(detail.job)">
+              <!-- B：已完成（maxRuns 用尽）的任务不再提供暂停/恢复——历史保留，语义已终结 -->
+              <button
+                v-if="detail.job.displayStatus !== 'completed'"
+                type="button"
+                :disabled="busy"
+                @click="toggleJob(detail.job)"
+              >
                 {{ tr(detail.job.status === 'active' ? '暂停' : '恢复') }}
               </button>
               <button

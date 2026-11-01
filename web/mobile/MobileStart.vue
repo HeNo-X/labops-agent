@@ -4,8 +4,12 @@ import {preferences} from '../preferences';import {t as tr} from '../i18n';
 import {useSessionStore} from '../stores/session';import {useRunStore} from '../stores/run';import {useBusinessStore} from '../stores/business';
 import type {useConversationController} from '../composables/useConversationController';
 import type {Target} from '@shared/labops-targets.js';import UiIcon from '../components/UiIcon.vue';
+import {useVoiceInput} from '../composables/useVoiceInput';import {useHoldToTalk} from '../composables/useHoldToTalk';
 const props=defineProps<{section?:string;controller:ReturnType<typeof useConversationController>}>(),emit=defineEmits<{navigate:[Target]}>();
 const session=useSessionStore(),run=useRunStore(),business=useBusinessStore(),draft=ref(session.draftFor('__new'));
+// 长按说话（与桌面 CommandBar 共用同一组合式函数）：按住录音、松手识别回填
+const voice=useVoiceInput();
+const hold=useHoldToTalk({voice,onText:(recognized)=>{draft.value=draft.value?`${draft.value.replace(/\s+$/,'')} ${recognized}`:recognized;}});
 const mode=ref<'chat'|'task'>(props.section==='chat'?'chat':props.section==='work'?'task':preferences.value.defaultMode);
 const busy=computed(()=>run.inputLocked||props.controller.submitting.value);
 watch(()=>props.section,value=>{if(value)mode.value=value==='chat'?'chat':'task';});
@@ -18,16 +22,23 @@ async function ask(text:string){if(busy.value)return;session.startDraft();await 
 /** 身份驱动的开场与建议（U05）：志愿者偏值班/报修，管理员偏办理与查询 */
 const identity=computed(()=>business.profile?.identity??'');
 const greeting=computed(()=>business.profile?.username?business.profile.username+tr('，要处理什么实验室事务？'):tr('需要处理什么实验室事务？'));
+/** 语音错误诚实提示（与 MobileConversation 同口径） */
+const voiceHint=computed(()=>{const code=voice.errorCode.value;if(!code||code==='aborted')return '';const messages:Partial<Record<string,string>>={unsupported:tr('当前浏览器不支持录音'),insecure:tr('语音输入需要 HTTPS 或 localhost 环境'),denied:tr('麦克风权限被拒绝，请在浏览器地址栏允许后重试'),no_device:tr('未检测到可用麦克风'),busy:tr('已有录音在进行'),network:tr('网络异常，转写失败'),not_configured:tr('语音识别未配置：请在服务端 .env 设置 ASR_API_KEY'),rate_limited:tr('语音转写已达每小时配额，请稍后再试'),upstream:tr('识别服务暂不可用，请稍后重试'),empty:tr('没有听清，请靠近一点再说一次'),unknown:tr('语音识别失败，请重试')};return messages[code]||'';});
 const suggestions=computed(()=>identity.value==='volunteer'
  ?[{label:'开始值班',text:'开始今天的值班'},{label:'查实验室',text:'查找今天的空闲实验室'},{label:'准备报修',text:'我想报修实验室设备，请先列出需要提供的信息'}]
  :[{label:'查询课表',text:'查询今天的实验室课表'},{label:'查找空闲实验室',text:'查找今天的空闲实验室'},{label:'准备报修',text:'我想报修实验室设备，请先列出需要提供的信息'}]);
-/** 最近会话卡（U05）：最多 3 条，点击直达 */
-const recent=computed(()=>session.workConversations.slice(0,3));
 </script>
-<template><section class="mobile-start"><div class="mobile-start-intro"><UiIcon name="lab" :size="32"/><h1>{{tr(greeting)}}</h1></div>
-<form class="mobile-start-composer" @submit.prevent="send"><label class="sr-only" for="mobile-question">{{tr('查询实验室，或准备办理工作…')}}</label><textarea id="mobile-question" v-model="draft" rows="3" maxlength="3000" :disabled="busy" :placeholder="tr('查询实验室，或准备办理工作…')" @keydown="key"/><div class="mobile-start-composer-row"><button type="button" class="mobile-start-mode" :aria-pressed="mode==='task'" :title="tr('工作模式：可查询并准备办理单')" @click="mode=mode==='task'?'chat':'task'"><UiIcon name="chevron" :size="12"/>{{tr(mode==='task'?'模式 · 工作':'模式 · 聊天')}}</button><button class="mobile-primary" :disabled="busy||!draft.trim()" type="submit"><UiIcon name="send"/>{{tr(busy?'生成中…':'发送')}}</button></div></form>
-<p v-if="controller.error.value" role="alert">{{controller.error.value}}</p>
+<template><section class="mobile-start">
+<div class="mobile-start-scroll">
+<div class="mobile-start-intro"><span class="mobile-start-eyebrow">{{tr('实验室工作助手')}}</span><h1>{{tr(greeting)}}</h1></div>
 <div class="mobile-start-suggestions"><button v-for="item in suggestions" :key="item.label" :disabled="busy" @click="ask(item.text)"><UiIcon name="chevron" :size="14"/>{{tr(item.label)}}</button></div>
-<div v-if="recent.length" class="mobile-start-recent"><h2>{{tr('最近会话')}}</h2><button v-for="c in recent" :key="c.id" class="mobile-start-recent-row" @click="emit('navigate',{view:'conversation',conversationId:c.id})"><b>{{c.title||tr('新会话')}}</b><span>{{c.preview||tr('尚未开始对话')}}</span><small>{{session.timeLabel(c.lastActivityAt)}}</small></button><button class="mobile-history-link" @click="emit('navigate',{view:'sessions',section:mode==='chat'?'chat':'work'})"><UiIcon name="history"/>{{tr('全部历史会话')}}</button></div>
-<button v-else class="mobile-history-link" @click="emit('navigate',{view:'sessions',section:mode==='chat'?'chat':'work'})"><UiIcon name="history"/>{{tr('历史会话')}}</button>
+</div>
+<form class="mobile-start-composer" @submit.prevent="send">
+<div class="mobile-start-mode-row" role="group" :aria-label="tr('会话模式')"><button type="button" class="mobile-start-mode" :aria-pressed="mode==='chat'" @click="mode='chat'">{{tr('聊天')}}</button><button type="button" class="mobile-start-mode" :aria-pressed="mode==='task'" @click="mode='task'">{{tr('工作')}}</button></div>
+<p class="mobile-start-mode-hint">{{tr(mode==='task'?'可查询并准备办理单':'只查询，不办理业务')}}</p>
+<div v-if="voice.working.value" class="mobile-voice-bar" role="status" aria-live="polite"><span class="mobile-voice-dot" aria-hidden="true"></span><b>{{tr(voice.status.value==='transcribing'?'识别中…':voice.status.value==='requesting'?'等待麦克风…':'正在聆听')}}</b><span class="mobile-voice-time">{{Math.floor(voice.seconds.value)}}s / 60s</span><button type="button" @click="hold.cancel">{{tr('取消')}}</button></div>
+<div class="mobile-start-input-row"><label class="sr-only" for="mobile-question">{{tr('查询实验室，或准备办理工作…')}}</label><textarea id="mobile-question" v-model="draft" rows="2" maxlength="3000" :disabled="busy||voice.working.value" :placeholder="voice.working.value?tr('正在聆听，松手结束…'):tr('查询实验室，或准备办理工作…')" @keydown="key"/><button v-if="voice.supported.value" type="button" class="mobile-mic" :class="{'is-recording':voice.status.value==='recording'}" :disabled="busy" :aria-label="tr(voice.status.value==='recording'?'松手结束并识别':'按住说话')" v-on="hold.handlers"><UiIcon name="mic"/></button><button class="mobile-primary" :disabled="busy||!draft.trim()" type="submit"><UiIcon name="send"/>{{tr(busy?'生成中…':'发送')}}</button></div>
+<p v-if="controller.error.value" class="mobile-start-error" role="alert">{{controller.error.value}}</p>
+<p v-if="voiceHint" class="mobile-voice-hint" role="alert">{{voiceHint}}</p>
+</form>
 </section></template>

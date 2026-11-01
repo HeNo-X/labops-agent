@@ -170,14 +170,15 @@ export function useDragClose(onClose: () => void): DragClose {
         const el = e.currentTarget as HTMLElement;
         const rect = el.getBoundingClientRect();
         if (e.clientY - rect.top > 44) return; // 仅顶部 grabber 区起拖
-        // 显式指针捕获：sheet 被拖离指针下方后，move/up 仍回本元素（触摸有隐式捕获，鼠标没有）
-        el.setPointerCapture?.(e.pointerId);
         drag = { id: e.pointerId, active: true, horizontal: null, vertical: null, x0: e.clientX, y0: e.clientY, t0: performance.now() };
         animating.value = false;
       },
       pointermove(e: PointerEvent) {
         if (!drag || e.pointerId !== drag.id) return;
         dy = Math.max(0, e.clientY - drag.y0);
+        // 指针捕获必须在**首次显著位移**时才设置：down 时捕获会把派生的 click
+        // 重定向到弹层本体，吞掉弹层内所有按钮的点击（H 批实测事故）。
+        if (dy > 4) (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
         offset.value = dy;
       },
       pointerup(e: PointerEvent) {
@@ -217,6 +218,61 @@ export const refreshBus = {
 export function usePullRefreshRegistration(view: string, fn: () => void | Promise<void>): void {
   onMounted(() => refreshBus.register(view, fn));
   onUnmounted(() => refreshBus.unregister(view));
+}
+
+/**
+ * H2：左缘拖出会话抽屉 —— 从屏幕左缘向右拖 ≥56px 即触发 onOpen（一次性触发，
+ * 抽屉随后以标准动画滑入；不跟手渲染抽屉本体，避免与视图层耦合）。
+ * 仅在 enabled() 为真（助手视图、无弹层）时接管；与 swipe-back 互斥使用场景不同。
+ */
+export function useEdgeDrawerOpen(enabled: () => boolean, onOpen: () => void): void {
+  let drag: DragState | null = null;
+  let fired = false;
+
+  const clear = (): void => {
+    drag = null;
+    fired = false;
+  };
+
+  const down = (e: PointerEvent): void => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (!enabled() || isInteractiveTarget(e.target)) return;
+    if (e.clientX > EDGE) return;
+    drag = { id: e.pointerId, active: true, horizontal: null, vertical: null, x0: e.clientX, y0: e.clientY, t0: performance.now() };
+    fired = false;
+  };
+
+  const move = (e: PointerEvent): void => {
+    if (!drag || e.pointerId !== drag.id || fired) return;
+    const dx = e.clientX - drag.x0;
+    const dy = e.clientY - drag.y0;
+    if (drag.horizontal === null && drag.vertical === null) {
+      if (Math.abs(dx) < INTENT_WINDOW && Math.abs(dy) < INTENT_WINDOW) return;
+      if (Math.abs(dx) > Math.abs(dy)) drag.horizontal = true;
+      else { clear(); return; }
+    }
+    if (dx >= 56) {
+      fired = true;
+      onOpen();
+    }
+  };
+
+  const up = (e: PointerEvent): void => {
+    if (!drag || e.pointerId !== drag.id) return;
+    clear();
+  };
+
+  onMounted(() => {
+    window.addEventListener('pointerdown', down, { passive: true });
+    window.addEventListener('pointermove', move, { passive: true });
+    window.addEventListener('pointerup', up, { passive: true });
+    window.addEventListener('pointercancel', () => drag && clear(), { passive: true });
+  });
+  onUnmounted(() => {
+    window.removeEventListener('pointerdown', down);
+    window.removeEventListener('pointermove', move);
+    window.removeEventListener('pointerup', up);
+  });
 }
 
 export interface PullToRefresh {

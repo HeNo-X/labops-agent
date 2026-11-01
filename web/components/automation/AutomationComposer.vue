@@ -16,10 +16,9 @@
  */
 import { computed, ref, watch } from 'vue';
 import { t as tr } from '../../i18n';
-import { changeTemplate, autoRuleName, type ScheduledSpec } from '../../business/scheduled-form';
+import { autoRuleName, type ScheduledSpec } from '../../business/scheduled-form';
 import params from '@shared/scheduled-params.json';
-import { calendarText, effectsText, formatDateTime, kindHint, recipientsText, triggerText } from '../../business/automation-format';
-import ScheduledSpecForm from '../ScheduledSpecForm.vue';
+import { effectsText, formatDateTime, recipientsText, triggerText } from '../../business/automation-format';
 import type { AutomationPlan } from '../../composables/useAutomation';
 
 const spec = defineModel<ScheduledSpec>({ required: true });
@@ -35,9 +34,30 @@ const props = defineProps<{
 const emit = defineEmits<{ requestPlan: []; confirm: []; cancel: [] }>();
 
 const applicable = params as Record<string, string[]>;
-const advanced = ref(false);
+
 // A-Z：设置|历史页签（编辑已有规则时才有历史）
 const tab = ref<'settings' | 'history'>('settings');
+// ZCode 式调度：默认只是一行「+ 添加计划」，点击展开频率/时间/次数；编辑已有规则时默认展开。
+// schedTouched=用户动过调度——动过之后折叠行显示节奏摘要，否则保持「+ 添加计划」
+const schedOpen = ref(false);
+const schedTouched = ref(false);
+watch(schedOpen, (open) => { if (open && props.editing) schedTouched.value = true; });
+watch(() => JSON.stringify([spec.value.trigger?.time, spec.value.trigger?.minutes, spec.value.trigger?.maxRuns, spec.value.trigger?.weekdays]), () => { if (schedOpen.value) schedTouched.value = true; });
+function setParam(key: string, event: Event, numeric = false): void {
+  const value = (event.target as HTMLInputElement).value;
+  if (value === '') delete spec.value.params[key];
+  else spec.value.params[key] = numeric ? Number(value) : value;
+}
+const PARAM_LABEL: Record<string, string> = {
+  roomId: '房间编号（如 E310）',
+  className: '班级名称',
+  maxMissedHours: '错过补报窗口（小时，缺省 6）',
+  thresholdHours: '工单超时阈值（小时）'
+};
+const schedSummary = computed(() => {
+  if (schedOpen.value) return tr('收起调度设置');
+  return schedTouched.value ? triggerText(spec.value) : tr('+ 添加计划');
+});
 const isAgentTemplate = computed(() => spec.value.kind === 'agent_prompt');
 const execMode = computed<'message' | 'agent'>(() => (spec.value.execMode === 'agent' ? 'agent' : 'message'));
 const agentTools = computed<string[]>(() => (Array.isArray(spec.value.agentTools) ? spec.value.agentTools : []));
@@ -74,6 +94,7 @@ watch(spec, () => {
   nameTouched.value = false;
   lastAutoName.value = spec.value.name || templateLabel.value;
 }, { immediate: true });
+watch(() => spec.value.kind, () => { schedOpen.value = false; });
 
 type SimpleTrigger = 'daily' | 'weekly' | 'once' | 'duty' | 'interval';
 const TRIGGERS: Array<{ value: SimpleTrigger; label: string }> = [
@@ -105,9 +126,8 @@ const maxRunsInput = computed<number | undefined>({
   }
 });
 
-const hint = computed(() => kindHint(spec.value.kind));
 const templateLabel = computed(() => props.templates[spec.value.kind] || spec.value.kind);
-watch(() => props.editing, () => { tab.value = 'settings'; });
+watch(() => props.editing, () => { tab.value = 'settings'; schedOpen.value = Boolean(props.editing); });
 
 /** duty 触发只对值班类模板有意义，其它模板不显示这个选项 */
 const availableTriggers = computed(() =>
@@ -144,19 +164,7 @@ const weekdayList = computed<number[]>(() => {
   return list.length ? list : [1];
 });
 
-function setTemplate(event: Event): void {
-  const kind = (event.target as HTMLSelectElement).value;
-  const result = changeTemplate(spec.value, kind, applicable);
-  const next = result.spec;
-  // 模板名作为默认规则名，让用户不必先想名字 —— 主流 APP 的做法
-  // （A-G3：切模板重置自动命名基线，agent 模板的命名随后跟随指令正文）
-  if (!spec.value.name.trim()) next.name = props.templates[kind] || kind;
-  nameTouched.value = false;
-  lastAutoName.value = next.name;
-  // 切到非值班模板时，若原来是 duty 触发则回到 daily
-  if (next.trigger?.type === 'duty' && kind !== 'duty_reminder') next.trigger = { type: 'daily', time: '20:30' };
-  spec.value = next;
-}
+
 
 function setSimpleTrigger(type: SimpleTrigger): void {
   if (type === 'interval') { spec.value.trigger = { type: 'interval', minutes: Number(spec.value.trigger?.['minutes'] ?? 30) }; return; }
@@ -235,27 +243,18 @@ watch(
     </header>
     <p v-if="tab === 'history'" class="auto-note">{{ tr('运行历史在保存后开始累积；编辑完成后在列表点开这条规则即可看到完整历史与执行摘要。') }}</p>
 
-    <!-- 完整设置：保留旧版全部字段，一个都不删，只是不再默认展示 -->
-    <div v-if="advanced" class="auto-composer__advanced">
-      <ScheduledSpecForm
-        v-model="spec"
-        :templates="templates"
-        :busy="busy"
-        :editing="editing"
-        @preview="submit"
-        @cancel="emit('cancel')"
-      />
-    </div>
-
-    <!-- 简明设置：主流 Agent APP 的默认路径 -->
+    <!-- A-Z：ZCode 式三字段——任务标题 / 调度（默认折叠的「+ 添加计划」行）/ 指令（核心大输入） -->
     <div v-else class="auto-composer__simple">
-      <!-- A-Z：ZCode 式字段顺序——任务标题最上，其后是调度与指令 -->
       <label class="auto-field">
         <span class="auto-field__label">{{ tr('任务标题') }}</span>
         <input v-model="spec.name" maxlength="120" :disabled="busy" :placeholder="tr('未命名定时任务')">
       </label>
-      <fieldset class="auto-field auto-field--trigger">
-        <legend class="auto-field__label">{{ tr('调度') }}</legend>
+
+      <button type="button" class="auto-sched-row" :aria-expanded="schedOpen" :disabled="busy" @click="schedOpen = !schedOpen">
+        <span class="auto-sched-row__plus" aria-hidden="true">+</span>
+        <span>{{ schedOpen ? tr('收起调度设置') : schedSummary }}</span>
+      </button>
+      <div v-if="schedOpen" class="auto-sched-panel">
         <div class="auto-seg" role="radiogroup" :aria-label="tr('运行频率')">
           <button
             v-for="option in availableTriggers"
@@ -277,7 +276,7 @@ watch(
             <input v-model.number="intervalMinutes" type="number" min="15" max="10080" step="15" :disabled="busy" required />
             <span>{{ tr('分钟（15—10080）') }}</span>
           </label>
-          <label v-if="triggerType !== 'once' && triggerType !== 'duty'" class="auto-inline">
+          <label v-if="triggerType === 'daily' || triggerType === 'weekly' || triggerType === 'interval'" class="auto-inline">
             <span>{{ tr('最多运行次数（可选）') }}</span>
             <input v-model.number="maxRunsInput" type="number" min="1" max="99" :disabled="busy" :placeholder="tr('不限')" />
           </label>
@@ -312,84 +311,55 @@ watch(
           </button>
         </div>
 
-        <p class="auto-field__hint">
-          {{ tr('日历') }}：{{ tr(calendarText(spec.calendarPolicy)) }} ·
-          {{ tr('接收') }}：{{ tr(recipientsText(spec.recipients)) }}
-        </p>
-      </fieldset>
-      <label class="auto-field">
-        <span class="auto-field__label">{{ tr('要做什么') }}</span>
-        <select :value="spec.kind" :disabled="busy" @change="setTemplate">
-          <option v-for="(label, key) in templates" :key="key" :value="key">{{ tr(label) }}</option>
-        </select>
-        <small class="auto-field__hint">{{ tr(hint) }}</small>
-      </label>
+        <label v-if="triggerType === 'duty'" class="auto-note">{{ tr('正式值班提醒需工作人员账号，触发时间由排班决定。') }}</label>
+      </div>
 
-      <template v-if="isAgentTemplate">
-        <label class="auto-field">
-          <span class="auto-field__label">{{ tr('指令正文') }}</span>
+      <div class="auto-field auto-field--cmd">
+        <span class="auto-field__label">{{ tr('指令') }}</span>
+        <template v-if="isAgentTemplate">
           <textarea
             v-model="spec.prompt"
-            class="auto-textarea"
-            rows="3"
+            class="auto-textarea auto-textarea--big"
+            rows="6"
             maxlength="2000"
-            :placeholder="tr('到点后让 Agent 做什么，例如：查一下今天有哪些课，用一句话总结')"
+            :placeholder="tr('例如：每天早上查一下 E310 的课表，用一句话总结')"
           ></textarea>
-        </label>
-
-        <fieldset class="auto-field">
-          <legend class="auto-field__label">{{ tr('执行方式') }}</legend>
-          <div class="auto-seg" role="radiogroup" :aria-label="tr('执行方式')">
-            <button
-              type="button"
-              role="radio"
-              :aria-checked="execMode === 'message'"
-              :class="{ 'is-on': execMode === 'message' }"
-              :disabled="busy"
-              @click="setExecMode('message')"
-            >
-              {{ tr('只发消息') }}
-            </button>
-            <button
-              type="button"
-              role="radio"
-              :aria-checked="execMode === 'agent'"
-              :class="{ 'is-on': execMode === 'agent' }"
-              :disabled="busy"
-              @click="setExecMode('agent')"
-            >
-              {{ tr('让 Agent 去做') }}
-            </button>
+          <div class="auto-chiprow">
+            <div class="auto-seg auto-seg--chip" role="radiogroup" :aria-label="tr('执行方式')">
+              <button type="button" role="radio" :aria-checked="execMode === 'message'" :class="{ 'is-on': execMode === 'message' }" :disabled="busy" @click="setExecMode('message')">{{ tr('只发消息') }}</button>
+              <button type="button" role="radio" :aria-checked="execMode === 'agent'" :class="{ 'is-on': execMode === 'agent' }" :disabled="busy" @click="setExecMode('agent')">{{ tr('让 Agent 去做') }}</button>
+            </div>
+            <span v-if="execMode === 'agent'" class="auto-chip auto-chip--note">{{ tr('仍需本人确认') }}</span>
           </div>
-          <small class="auto-field__hint">
-            {{
-              tr(
-                execMode === 'agent'
-                  ? '到点由 Agent 自己查数据并给结论，结果写进站内信与报告'
-                  : '只把上面的正文当一条消息发出去，不调用 Agent'
-              )
-            }}
-          </small>
-        </fieldset>
-
-        <fieldset v-if="execMode === 'agent'" class="auto-field">
-          <legend class="auto-field__label">{{ tr('额外允许的动作（默认只读）') }}</legend>
-          <label v-for="tool in DRAFT_TOOLS" :key="tool.name" class="auto-check">
-            <input type="checkbox" :checked="agentTools.includes(tool.name)" :disabled="busy" @change="toggleTool(tool.name)">
-            <span>{{ tr(tool.label) }}</span>
-          </label>
-        </fieldset>
-      </template>
-
+          <fieldset v-if="execMode === 'agent'" class="auto-field auto-field--tools">
+            <legend class="auto-field__label">{{ tr('额外允许的动作（默认只读）') }}</legend>
+            <label v-for="tool in DRAFT_TOOLS" :key="tool.name" class="auto-check">
+              <input type="checkbox" :checked="agentTools.includes(tool.name)" :disabled="busy" @change="toggleTool(tool.name)">
+              <span>{{ tr(tool.label) }}</span>
+            </label>
+          </fieldset>
+        </template>
+        <template v-else>
+          <p class="auto-field__hint">{{ tr('固定模板：到点按模板生成并投递，参数如下（留空项按缺省口径）。') }}</p>
+          <div class="auto-params">
+            <label v-for="key in (applicable[spec.kind] || [])" :key="key" class="auto-inline">
+              <span>{{ tr(PARAM_LABEL[key] || key) }}</span>
+              <input
+                :value="spec.params[key]"
+                :type="key === 'maxMissedHours' || key === 'thresholdHours' ? 'number' : 'text'"
+                :min="key === 'maxMissedHours' ? 1 : undefined"
+                :max="key === 'maxMissedHours' ? 24 : undefined"
+                maxlength="100"
+                :disabled="busy"
+                @input="setParam(key, $event, key === 'maxMissedHours' || key === 'thresholdHours')"
+              >
+            </label>
+          </div>
+          <p class="auto-field__hint">{{ tr('接收：本人账号；要发给其他人，可在会话里让 Agent 建并按提示选择收件人。') }}</p>
+        </template>
+      </div>
 
       <p v-if="localError" class="auto-error" role="alert">{{ localError }}</p>
-
-      <div class="auto-actions">
-        <button type="button" class="auto-primary" :disabled="busy" @click="submit">
-          {{ tr(editing ? '查看影响并保存' : '查看影响并创建') }}
-        </button>
-        <button type="button" :disabled="busy" @click="emit('cancel')">{{ tr('取消') }}</button>
-      </div>
     </div>
 
     <!-- 影响核对：与表单同页，用户看到"会被通知谁、会在哪几次运行"后才落库 -->
@@ -700,4 +670,33 @@ watch(
 .auto-composer__simple > .auto-field--sched { border: 1px solid var(--border); border-radius: var(--radius-lg, 12px); padding: 12px 14px; margin: 0 0 12px; }
 .auto-composer__simple > .auto-field--sched > .auto-field__label { font-weight: 700; color: var(--text); }
 @media(max-width: 640px) { .auto-composer__top { width: 100%; } }
+</style>
+<style scoped>
+/* A-Z：ZCode 式调度折叠行与指令大输入 */
+.auto-sched-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  border: 1px solid var(--border); border-radius: var(--radius, 10px);
+  background: var(--surface-2, var(--surface)); color: var(--text-muted);
+  padding: 11px 14px; cursor: pointer; font: calc(var(--ui-font-size) * 1.0) var(--font-sans);
+  margin: 0 0 4px;
+}
+.auto-sched-row:hover { border-color: var(--border-strong, var(--primary)); color: var(--text); }
+.auto-sched-row__plus { font-size: calc(var(--ui-font-size) * 1.15); color: var(--text-faint); }
+.auto-sched-panel {
+  border: 1px solid var(--border); border-radius: var(--radius, 10px);
+  padding: 12px 14px; margin: 0 0 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  background: var(--surface-2, var(--surface));
+}
+.auto-field--cmd { display: flex; flex-direction: column; gap: 6px; }
+.auto-textarea--big { width: 100%; resize: vertical; line-height: 1.65; }
+.auto-chiprow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.auto-seg--chip { display: inline-flex; gap: 2px; border: 1px solid var(--border); border-radius: 999px; padding: 2px; }
+.auto-seg--chip button { border: 0; background: transparent; border-radius: 999px; padding: 4px 12px; font: calc(var(--ui-font-size) * 0.92308) var(--font-sans); color: var(--text-muted); cursor: pointer; }
+.auto-seg--chip button.is-on { background: var(--primary); color: var(--primary-contrast, #fff); }
+.auto-chip { display: inline-flex; align-items: center; padding: 4px 12px; border: 1px solid var(--border); border-radius: 999px; font-size: calc(var(--ui-font-size) * 0.84615); color: var(--text-muted); }
+.auto-chip--note { border-style: dashed; }
+.auto-params { display: flex; flex-wrap: wrap; gap: 10px; }
+.auto-params .auto-inline { display: flex; flex-direction: column; gap: 4px; min-width: 200px; }
+.auto-params .auto-inline span { font-size: calc(var(--ui-font-size) * 0.84615); color: var(--text-muted); }
 </style>

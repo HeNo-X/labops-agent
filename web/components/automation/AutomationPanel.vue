@@ -53,9 +53,6 @@ const open = ref(Boolean(props.inline));
 const composerOpen = ref(false);
 const editing = ref<AutomationJob | null>(null);
 const spec = ref<ScheduledSpec>(newSpec(business.profile?.username || ''));
-const showResults = ref(false);
-const showPreference = ref(false);
-const prefDraft = ref(automation.preference.value);
 const savedNotice = ref('');
   // A-Z：模板网格的静态展示元数据（图标 + 示例节奏），点击即按该模板新建
   const TEMPLATE_META: Record<string, { icon: string; schedule: string }> = {
@@ -188,16 +185,6 @@ function onTarget(event: Event): void {
   })();
 }
 
-async function savePreference(): Promise<void> {
-  if (!prefDraft.value) return;
-  const ok = await automation.savePreference(prefDraft.value);
-  savedNotice.value = ok ? tr('提醒偏好已保存') : '';
-}
-
-function syncPrefDraft(): void {
-  prefDraft.value = automation.preference.value ? { ...automation.preference.value } : null;
-}
-
 onMounted(() => {
   window.addEventListener('labops-target', onTarget);
   if (props.inline) {
@@ -224,16 +211,9 @@ watch(
     automation.reset();
     composerOpen.value = false;
     editing.value = null;
-    syncPrefDraft();
     if (!props.inline) open.value = false;
     if (props.inline) void automation.load();
   }
-);
-
-watch(
-  () => automation.preference.value,
-  () => syncPrefDraft(),
-  { immediate: true }
 );
 
 useVisibleRefresh(
@@ -376,9 +356,12 @@ useVisibleRefresh(
 
         <!-- 列表（A-Z：ZCode 式标题块 + 任务卡 + 模板网格） -->
         <template v-else>
-          <div class="auto-hero">
-            <h1>自动化 <span class="auto-hero__muted">定时任务</span></h1>
-            <p class="auto-hero__sub">{{ tr('到点自动执行：生成日报、提醒值班，或让 Agent 替你查询与整理。') }}</p>
+          <div class="auto-hero auto-hero--row">
+            <div>
+              <h1>自动化 <span class="auto-hero__muted">定时任务</span></h1>
+              <p class="auto-hero__sub">{{ tr('到点自动执行：生成日报、提醒值班，或让 Agent 替你查询与整理。') }}</p>
+            </div>
+            <button type="button" class="auto-primary" :disabled="busy || readonly" @click="startCreate">{{ tr('新建') }}</button>
           </div>
           <div class="auto-list">
             <AutomationTaskCard
@@ -404,12 +387,6 @@ useVisibleRefresh(
               <code>每天早上 8 点给我发昨天的日报</code>
               <button type="button" class="auto-link" @click="copyExample">{{ tr(copied ? '已复制' : '复制这句话') }}</button>
             </p>
-          </div>
-
-          <div v-if="!readonly" class="auto-actions">
-            <button type="button" class="auto-primary" :disabled="busy" @click="startCreate">
-              {{ tr('新建自动化') }}
-            </button>
           </div>
 
           <div class="auto-tpl-section">
@@ -452,42 +429,7 @@ useVisibleRefresh(
             </div>
           </section>
 
-          <!-- 以下三项原本与主任务混排在同一屏，现在降级为折叠区 -->
-          <details class="auto-fold" @toggle="(e) => (showPreference = (e.target as HTMLDetailsElement).open)">
-            <summary>{{ tr('本人提醒偏好') }}</summary>
-            <form v-if="prefDraft" class="auto-pref" @submit.prevent="savePreference">
-              <label class="auto-check"><input v-model="prefDraft.enabled" type="checkbox" />{{ tr('启用站内提醒') }}</label>
-              <label>{{ tr('静默开始') }}<input v-model="prefDraft.quietStart" type="time" /></label>
-              <label>{{ tr('静默结束') }}<input v-model="prefDraft.quietEnd" type="time" /></label>
-              <label>{{ tr('每日上限') }}<input v-model.number="prefDraft.maxPerDay" type="number" min="1" max="50" /></label>
-              <label>{{ tr('同一依据最多提醒次数') }}<input v-model.number="prefDraft.maxPerEvent" type="number" min="1" max="20" /></label>
-              <label>{{ tr('最短间隔（分钟）') }}<input v-model.number="prefDraft.minIntervalMinutes" type="number" min="0" max="1440" /></label>
-              <fieldset class="auto-pref__cats">
-                <legend>{{ tr('要接收哪几类') }}</legend>
-                <label v-for="(label, key) in automation.templates.value" :key="key" class="auto-check">
-                  <input v-model="prefDraft.categories" type="checkbox" :value="key" />{{ tr(label) }}
-                </label>
-              </fieldset>
-              <button type="submit" :disabled="busy || readonly">{{ tr('保存本人偏好') }}</button>
-            </form>
-            <p v-else class="auto-note">{{ tr('未取得提醒偏好，无法编辑。') }}</p>
-          </details>
-
-          <details class="auto-fold" @toggle="(e) => (showResults = (e.target as HTMLDetailsElement).open)">
-            <summary>{{ tr('已保存的结果') }}</summary>
-            <p v-if="!automation.results.value.length" class="auto-note">{{ tr('尚无当前账号可读的结果。') }}</p>
-            <details v-for="result in automation.results.value" :key="result.id" class="auto-result">
-              <summary>{{ result.title }} · {{ result.id }}</summary>
-              <pre>{{ result.text }}</pre>
-            </details>
-          </details>
-
-          <details class="auto-fold">
-            <summary>{{ tr('下次使用的准备包') }}</summary>
-            <button type="button" :disabled="busy" @click="automation.loadPreparation">{{ tr('生成准备包') }}</button>
-            <pre v-if="automation.preparation.value">{{ automation.preparation.value }}</pre>
-          </details>
-        </template>
+    </template>
       </section>
     </div>
   </Teleport>

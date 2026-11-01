@@ -71,7 +71,7 @@ function formatShort(iso: string): string {
         {{ tr(triggerText(job.spec)) }} · {{ tr(calendarText(job.spec.calendarPolicy)) }}
       </span>
       <span class="auto-card__meta auto-card__meta--next">
-        {{ on ? tr('下次') + ' ' + tr(nextRunText(job.nextRunAt)) : tr('已暂停，不会自动运行') }}
+        {{ job.displayStatus === 'completed' ? tr('已按次数完成，历史保留') : on ? tr('下次') + ' ' + tr(nextRunText(job.nextRunAt)) : tr('已暂停，不会自动运行') }}
       </span>
       <span class="auto-card__meta auto-card__meta--last">{{ tr(lastText) }}</span>
     </button>

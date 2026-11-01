@@ -90,6 +90,10 @@ export function triggerText(spec: Pick<ScheduledSpec, 'trigger'>): string {
       const days = weekdaysText(t['weekdays']);
       return days ? `${days} ${hhmm(t['time'])}` : `每周 ${hhmm(t['time'])}`;
     }
+    case 'interval': {
+      const m = Number(t['minutes'] ?? 30);
+      return m % 60 === 0 ? `每 ${m / 60} 小时` : `每 ${m} 分钟`;
+    }
     case 'once': {
       const at = String(t['at'] ?? '');
       return at ? `仅一次 ${formatDateTime(at)}` : '仅一次（未指定时间）';
@@ -174,13 +178,13 @@ export function nextRunText(iso: string | null | undefined, now: number = Date.n
 /** 模板的一句话说明 —— 让用户在"选模板"这一步就知道后果，而不是看参数名 */
 export const KIND_HINT: Record<string, string> = {
   daily_report: '汇总当日值班、报修、通知，生成当天日报',
-  weekly_report: '汇总本周运营情况，生成周报',
   tomorrow_courses: '明天有哪些课、哪些教室要用，提前告知',
   duty_reminder: '正式班次开始前提醒值班人员',
   due_followup: '工单超过时限仍未处理时提醒跟进',
-  resource_risk: '房间设备或容量出现风险时提醒',
-  closure_expiry: '临时停用即将到期时提醒复核',
-  notice_reminder: '有未读通知时提醒本人'
+  notice_reminder: '有未读通知时提醒本人',
+  lab_open_reminder: '上机课前提醒志愿者提前开门：接下来要上课的实验室、设备需求与交接事项',
+  session_checkin_reminder: '上机课进行中提醒签到缺口：应到、实到与未签到人数差异',
+  patrol_reminder: '按固定时间提醒志愿者巡检实验室：服务状态、未关闭工单与异常情况'
 };
 
 export function kindHint(kind: string | null | undefined): string {

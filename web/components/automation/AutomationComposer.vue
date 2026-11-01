@@ -73,17 +73,34 @@ watch(spec, () => {
   lastAutoName.value = spec.value.name || templateLabel.value;
 }, { immediate: true });
 
-type SimpleTrigger = 'daily' | 'weekly' | 'once' | 'duty';
+type SimpleTrigger = 'daily' | 'weekly' | 'once' | 'duty' | 'interval';
 const TRIGGERS: Array<{ value: SimpleTrigger; label: string }> = [
   { value: 'daily', label: '每天' },
   { value: 'weekly', label: '每周' },
+  { value: 'interval', label: '每隔' },
   { value: 'once', label: '仅一次' },
   { value: 'duty', label: '班次前' }
 ];
 
 const triggerType = computed<SimpleTrigger>(() => {
   const type = String(spec.value.trigger?.type ?? 'daily');
-  return type === 'weekly' || type === 'once' || type === 'duty' ? type : 'daily';
+  return type === 'weekly' || type === 'once' || type === 'duty' || type === 'interval' ? type : 'daily';
+});
+
+// B/C：interval 的友好输入（数字 + 单位），落库统一为 minutes（15—10080）
+const intervalMinutes = computed<number>({
+  get: () => Number(spec.value.trigger?.['minutes'] ?? 30),
+  set: (v: number) => { if (Number.isFinite(v)) spec.value.trigger = { type: 'interval', minutes: Math.max(15, Math.min(10080, Math.round(v))) }; }
+});
+// B：maxRuns 有限次（可选；留空=不限，到次自动停止并保留历史）
+const maxRunsInput = computed<number | undefined>({
+  get: () => (spec.value.trigger?.['maxRuns'] as number | undefined) ?? undefined,
+  set: (v: number | undefined) => {
+    const next = { ...spec.value.trigger } as Record<string, unknown>;
+    if (v === undefined || Number.isNaN(v)) delete next['maxRuns'];
+    else next['maxRuns'] = Math.max(1, Math.min(99, Math.round(v)));
+    spec.value.trigger = next;
+  }
 });
 
 const hint = computed(() => kindHint(spec.value.kind));
@@ -139,6 +156,7 @@ function setTemplate(event: Event): void {
 }
 
 function setSimpleTrigger(type: SimpleTrigger): void {
+  if (type === 'interval') { spec.value.trigger = { type: 'interval', minutes: Number(spec.value.trigger?.['minutes'] ?? 30) }; return; }
   const prev = spec.value.trigger ?? {};
   const time = String(prev['time'] ?? '20:30');
   if (type === 'daily') spec.value.trigger = { type: 'daily', time };
@@ -165,6 +183,11 @@ function submit(): void {
     return;
   }
   if (!spec.value.name.trim()) spec.value.name = templateLabel.value;
+  // B/C 客户端校验：把必然失败的请求挡在本地
+  if (spec.value.kind === 'agent_prompt' && spec.value.trigger?.type === 'once' && spec.value.trigger.maxRuns !== undefined) { localError.value = '单次任务不需要 maxRuns'; return; }
+  if (spec.value.trigger?.type === 'interval') { const m = Number(spec.value.trigger.minutes); if (!Number.isInteger(m) || m < 15 || m > 10080) { localError.value = '间隔应为 15—10080 分钟'; return; } }
+  const mr = spec.value.trigger?.maxRuns;
+  if (mr !== undefined && (!Number.isInteger(Number(mr)) || Number(mr) < 1 || Number(mr) > 99)) { localError.value = '最多运行次数应为 1—99 的整数'; return; }
   if (spec.value.kind === 'agent_prompt' && !String(spec.value.prompt ?? '').trim()) {
     localError.value = '请填写指令正文：到点要让 Agent 做什么';
     return;
@@ -294,6 +317,15 @@ watch(
         </div>
 
         <div class="auto-field__row">
+          <label v-if="triggerType === 'interval'" class="auto-inline">
+            <span>{{ tr('每隔') }}</span>
+            <input v-model.number="intervalMinutes" type="number" min="15" max="10080" step="15" :disabled="busy" required />
+            <span>{{ tr('分钟（15—10080）') }}</span>
+          </label>
+          <label v-if="triggerType !== 'once' && triggerType !== 'duty'" class="auto-inline">
+            <span>{{ tr('最多运行次数（可选）') }}</span>
+            <input v-model.number="maxRunsInput" type="number" min="1" max="99" :disabled="busy" :placeholder="tr('不限')" />
+          </label>
           <label v-if="triggerType === 'daily' || triggerType === 'weekly'" class="auto-inline">
             <span>{{ tr('北京时间') }}</span>
             <input v-model="spec.trigger.time" type="time" :disabled="busy" required />

@@ -575,6 +575,11 @@ Object.assign(en,{
  '我会核对其影响后建成为自动化；上面的「新建自动化」走表单，效果一样。':'I will verify the impact and turn it into an automation; the New button above does the same via the form.',
  '最近修改':'Last modified',
  '复制失败，请手动选择复制：':'Copy failed — please select and copy manually:',
+ // B/C：maxRuns 有限次运行 + interval 友好触发
+ '每隔':'Every', '分钟（15—10080）':'minutes (15–10080)',
+ '最多运行次数（可选）':'Max runs (optional)', '不限':'Unlimited',
+ '已按次数完成，历史保留':'Completed after the set number of runs; history retained',
+ '已运行':'Runs done', '次':'×',
  // A10 会话模式开关（主区顶部居中左右分栏）
  '会话模式':'Conversation mode',
  '聊天会话：只查询数据，不准备办理单。模式随发送时刻生效，历史消息保持其发生时的语义。':'Chat: read-only queries, no business drafts. The mode applies from the moment of sending; past messages keep the semantics they were created with.',

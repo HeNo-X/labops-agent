@@ -273,6 +273,8 @@ useVisibleRefresh(
             <dl class="auto-detail__grid">
               <div><dt>{{ tr('频率') }}</dt><dd>{{ tr(triggerText(detail.job.spec)) }}</dd></div>
               <div><dt>{{ tr('下次运行') }}</dt><dd>{{ formatDateTime(detail.job.nextRunAt) }}</dd></div>
+              <!-- 批次 B：maxRuns 用尽后 displayStatus=completed，这里显示进度 -->
+              <div v-if="detail.job.spec.trigger.maxRuns"><dt>{{ tr('已运行') }}</dt><dd>{{ detail.runs.length }} / {{ detail.job.spec.trigger.maxRuns }} {{ tr('次') }}</dd></div>
               <div><dt>{{ tr('日历') }}</dt><dd>{{ tr(calendarText(detail.job.spec.calendarPolicy)) }}</dd></div>
               <div><dt>{{ tr('接收') }}</dt><dd>{{ tr(recipientsText(detail.job.spec.recipients)) }}</dd></div>
               <div><dt>{{ tr('效果') }}</dt><dd>{{ tr(effectsText(detail.job.spec.approvedEffects)) }}</dd></div>

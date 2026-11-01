@@ -56,6 +56,19 @@ const showResults = ref(false);
 const showPreference = ref(false);
 const prefDraft = ref(automation.preference.value);
 const savedNotice = ref('');
+// A-G4：示例话术复制（剪贴板不可用时如实降级——不假装复制成功）
+const copied = ref(false);
+async function copyExample(): Promise<void> {
+  const phrase = '每天早上 8 点给我发昨天的日报';
+  try {
+    await navigator.clipboard.writeText(phrase);
+    copied.value = true;
+  } catch {
+    copied.value = false;
+    window.prompt(tr('复制失败，请手动选择复制：'), phrase);
+  }
+  setTimeout(() => { copied.value = false; }, 2000);
+}
 
 const detail = automation.detail;
 const plan = automation.plan;
@@ -263,7 +276,9 @@ useVisibleRefresh(
               <div><dt>{{ tr('日历') }}</dt><dd>{{ tr(calendarText(detail.job.spec.calendarPolicy)) }}</dd></div>
               <div><dt>{{ tr('接收') }}</dt><dd>{{ tr(recipientsText(detail.job.spec.recipients)) }}</dd></div>
               <div><dt>{{ tr('效果') }}</dt><dd>{{ tr(effectsText(detail.job.spec.approvedEffects)) }}</dd></div>
-              <div><dt>{{ tr('所有者') }}</dt><dd>{{ detail.job.ownerId }} · v{{ detail.job.version }}</dd></div>
+              <div><dt>{{ tr('所有者') }}</dt><dd>{{ detail.job.ownerId }}</dd></div>
+              <!-- A-G5：编辑走版本化 change，这里让"上次改动"可见 -->
+              <div v-if="detail.job.updatedAt"><dt>{{ tr('最近修改') }}</dt><dd>{{ formatDateTime(detail.job.updatedAt) }} · v{{ detail.job.version }}</dd></div>
             </dl>
 
             <div v-if="!readonly && detail.job.canManage" class="auto-actions">
@@ -345,6 +360,13 @@ useVisibleRefresh(
 
           <div v-if="!automation.jobs.value.length && !busy" class="auto-empty">
             <p>{{ tr('还没有自动化。让 LabOps 每天/每周替你做重复的事，例如生成日报、提醒值班。') }}</p>
+            <!-- A-G4：ZCode 的自动化就是"跟 Agent 说一句话"——把这条最短的路径显性化 -->
+            <p class="auto-empty__try">
+              {{ tr('也可以在会话里直接对我说：') }}
+              <code>每天早上 8 点给我发昨天的日报</code>
+              <button type="button" class="auto-link" @click="copyExample">{{ tr(copied ? '已复制' : '复制这句话') }}</button>
+            </p>
+            <p class="auto-empty__hint">{{ tr('我会核对其影响后建成为自动化；上面的「新建自动化」走表单，效果一样。') }}</p>
           </div>
 
           <div v-if="!readonly" class="auto-actions">

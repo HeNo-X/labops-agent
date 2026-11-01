@@ -45,11 +45,13 @@ function runProbe(scenario: 'quota' | 'auth'): Promise<ProbeResult> {
     child.on('error', (e) => { clearTimeout(timer); reject(e); });
     child.on('exit', (code_) => {
       clearTimeout(timer);
+      // 结果以**打印出的 JSON 行**为准：探针在打印完成后才退出，Windows 上偶发的
+      // libuv 退出竞态（非零码）不推翻已打印的结果
       const line = out.trim().split('\n').filter(Boolean).pop();
-      if (code_ === 0 && line) {
+      if (line && line.startsWith('{')) {
         try { resolve(JSON.parse(line) as ProbeResult); return; } catch (e) { reject(e); return; }
       }
-      reject(new Error(`探针异常退出 code=${code_}：${err.slice(-400)}`));
+      reject(new Error(`探针异常退出 code=${code_}：${(err || out).slice(-400)}`));
     });
   });
 }

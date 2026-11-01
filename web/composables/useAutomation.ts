@@ -28,6 +28,8 @@ export interface AutomationJob {
   nextRunAt: string | null;
   lastRunAt?: string;
   lastRunStatus?: string;
+  /** RAG 之外的批次 A（G5）：最近修改时间（主系统 Job.updatedAt 透传，缺省无） */
+  updatedAt?: string;
   canViewDetails: boolean;
   canManage: boolean;
 }

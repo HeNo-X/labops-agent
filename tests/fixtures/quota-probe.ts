@@ -49,8 +49,7 @@ try {
   lastErr = err;
 }
 console.log(JSON.stringify({ code, hits, message: (lastErr as { message?: string }).message ?? null }));
-server.close();
 // 调过一次 streamChat 后，circuit/超时计时器会让事件循环挂着不退出——探针打完即退。
-// 延迟 100ms 再退：Windows 上 process.exit 撞上 server 句柄关闭中的窗口会触发
-// libuv 断言（src\win\async.c）以非零码崩掉，让父进程误判探针失败。
+// 不调 server.close()：Windows 上 close 与 process.exit 同帧会触发 libuv 断言
+// （src\win\async.c，间歇性非零退出码）。结果已在上一行打印，句柄由 exit 直接回收。
 setTimeout(() => process.exit(0), 100);

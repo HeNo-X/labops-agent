@@ -568,6 +568,13 @@ Object.assign(en,{
  '向量索引已重建：内置 {n} 块':'Vector index rebuilt: {n} built-in chunks',
  '，手册 {n} 块':', {n} manual chunks',
  '（⚠️ 查询期未启用向量路：EMBEDDING_ENABLED=0）':'(warning: vector recall is not enabled at query time: EMBEDDING_ENABLED=0)',
+ // A-G3/G4/G5 自动化对标 ZCode（批次 A）
+ '也可以在会话里直接对我说：':'Or just tell me in the chat:',
+ '每天早上 8 点给我发昨天的日报':'Every day at 8am, send me yesterday\'s daily report',
+ '复制这句话':'Copy this sentence',
+ '我会核对其影响后建成为自动化；上面的「新建自动化」走表单，效果一样。':'I will verify the impact and turn it into an automation; the New button above does the same via the form.',
+ '最近修改':'Last modified',
+ '复制失败，请手动选择复制：':'Copy failed — please select and copy manually:',
  // A10 会话模式开关（主区顶部居中左右分栏）
  '会话模式':'Conversation mode',
  '聊天会话：只查询数据，不准备办理单。模式随发送时刻生效，历史消息保持其发生时的语义。':'Chat: read-only queries, no business drafts. The mode applies from the moment of sending; past messages keep the semantics they were created with.',

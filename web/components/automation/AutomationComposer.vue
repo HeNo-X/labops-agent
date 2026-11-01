@@ -16,7 +16,7 @@
  */
 import { computed, ref, watch } from 'vue';
 import { t as tr } from '../../i18n';
-import { changeTemplate, type ScheduledSpec } from '../../business/scheduled-form';
+import { changeTemplate, autoRuleName, type ScheduledSpec } from '../../business/scheduled-form';
 import params from '@shared/scheduled-params.json';
 import { calendarText, effectsText, formatDateTime, kindHint, recipientsText, triggerText } from '../../business/automation-format';
 import ScheduledSpecForm from '../ScheduledSpecForm.vue';
@@ -54,6 +54,24 @@ function toggleTool(name: string): void {
   spec.value.agentTools = [...set];
 }
 const localError = ref('');
+
+// A-G3（对标 ZCode：标题保留用户原话短语）：agent 模板的指令正文变化时，
+// 规则名默认跟随原话前 16 字；用户在完整设置里改过名（nameTouched）就绝不覆盖。
+const lastAutoName = ref('');
+const nameTouched = ref(false);
+watch(() => spec.value.prompt, (prompt) => {
+  if (nameTouched.value) return;
+  const next = autoRuleName(spec.value.kind, prompt, spec.value.name, lastAutoName.value, templateLabel.value);
+  if (next) { lastAutoName.value = next; spec.value.name = next; }
+});
+watch(() => spec.value.name, (name) => {
+  if (name !== undefined && name !== lastAutoName.value) { nameTouched.value = true; lastAutoName.value = name; }
+});
+// 换模板/换 spec（新建、编辑、模板切换都会整体替换）→ 重置跟踪基线
+watch(spec, () => {
+  nameTouched.value = false;
+  lastAutoName.value = spec.value.name || templateLabel.value;
+}, { immediate: true });
 
 type SimpleTrigger = 'daily' | 'weekly' | 'once' | 'duty';
 const TRIGGERS: Array<{ value: SimpleTrigger; label: string }> = [
@@ -111,7 +129,10 @@ function setTemplate(event: Event): void {
   const result = changeTemplate(spec.value, kind, applicable);
   const next = result.spec;
   // 模板名作为默认规则名，让用户不必先想名字 —— 主流 APP 的做法
+  // （A-G3：切模板重置自动命名基线，agent 模板的命名随后跟随指令正文）
   if (!spec.value.name.trim()) next.name = props.templates[kind] || kind;
+  nameTouched.value = false;
+  lastAutoName.value = next.name;
   // 切到非值班模板时，若原来是 duty 触发则回到 daily
   if (next.trigger?.type === 'duty' && kind !== 'duty_reminder') next.trigger = { type: 'daily', time: '20:30' };
   spec.value = next;

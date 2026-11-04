@@ -41,6 +41,13 @@ export function useHoldToTalk(options: HoldToTalkOptions) {
   let arming = false;
   let startedAt = 0;
   let suppressClick = false;
+  /**
+   * 上滑取消（微信手感）：按下后手指上移超过阈值即进入"松开取消"态。
+   * 阈值 60px 是经验值——小于这个数容易把音量抖动误判成取消。
+   */
+  const SLIDE_CANCEL_PX = 60;
+  const sliding = ref(false);
+  let startY = 0;
 
   async function begin(): Promise<void> {
     if (pressed || voice.working.value) return;
@@ -80,12 +87,15 @@ export function useHoldToTalk(options: HoldToTalkOptions) {
   function cancel(): void {
     pressed = false;
     holding.value = false;
+    sliding.value = false;
     voice.cancel();
   }
 
   // ---------------- pointer（鼠标 / 触摸） ----------------
   function onPointerdown(event: PointerEvent): void {
     if (event.button !== 0 && event.pointerType === 'mouse') return;
+    startY = event.clientY;
+    sliding.value = false;
     // 长按在移动端会触发选中/呼出菜单，必须拦掉
     event.preventDefault();
     try {
@@ -98,16 +108,26 @@ export function useHoldToTalk(options: HoldToTalkOptions) {
     void begin();
   }
 
+  function onPointermove(event: PointerEvent): void {
+    if (!holding.value) return;
+    sliding.value = startY - event.clientY > SLIDE_CANCEL_PX;
+  }
+
   function onPointerup(event: PointerEvent): void {
     try {
       (event.currentTarget as HTMLElement | null)?.releasePointerCapture?.(event.pointerId);
     } catch {
       /* 忽略 */
     }
+    if (sliding.value) {
+      cancel();
+      return;
+    }
     void end();
   }
 
   function onPointercancel(): void {
+    sliding.value = false;
     void end();
   }
 
@@ -150,8 +170,10 @@ export function useHoldToTalk(options: HoldToTalkOptions) {
      * Vue 的 v-on 对象语法按事件名 addEventListener，写 `onClick` 等于监听一个
      * 永远不会触发的事件 —— 按钮点了没反应（实测踩过）。
      */
+    sliding,
     handlers: {
       pointerdown: onPointerdown,
+      pointermove: onPointermove,
       pointerup: onPointerup,
       pointercancel: onPointercancel,
       click: onClick,

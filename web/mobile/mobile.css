@@ -288,7 +288,7 @@
 .m-drawer__more:hover,.m-drawer__more[aria-expanded=true]{color:var(--text);background:var(--m-tonal,var(--surface-3))}
 .m-drawer__menu{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;padding:6px 0 8px;border-bottom:1px solid var(--m-hairline,var(--border))}
 .m-drawer__menu button{display:flex;align-items:center;justify-content:center;gap:4px;min-height:38px;font-size:calc(var(--ui-font-size) * 0.92308);background:var(--m-tonal,var(--surface-3));border:0;border-radius:var(--m-radius,10px)}
-.m-drawer__menu-danger{color:#fff!important;background:var(--danger,#b91c1c)!important}
+.m-drawer__menu-danger{color:var(--danger-contrast,#fff)!important;background:var(--danger,#b91c1c)!important}
 .m-drawer-mask{position:fixed;inset:0;background:#0007;z-index:120}/* 确认弹层(130)必须高于抽屉(120)：抽屉内触发确认时弹层盖在抽屉之上 */
 
 /* ---------- Toast（反馈） ---------- */
@@ -390,3 +390,151 @@
 /* 自动化入口（会话抽屉）：与抽屉行风格一致的纵向入口 */
 .m-drawer__automation{display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;margin:0 0 8px;border:1px solid var(--m-hairline,var(--border));border-radius:var(--m-radius,10px);background:var(--m-tonal,var(--surface-3));color:var(--text);font:calc(var(--ui-font-size) * 1.0) var(--font-sans);cursor:pointer}
 .m-drawer__automation:hover{border-color:var(--border-strong,var(--border-strong))}
+
+/* ==========================================================================
+   2026-11-04 移动端输入与语音（微信形态）
+   ========================================================================== */
+
+/* A. 输入控件常态 ≥16px
+      为什么：iOS Safari 对 font-size < 16px 的输入控件在聚焦时会强制放大页面，
+      而放大后不会自动缩回 —— 用户看到的就是"点一下输入框，字突然变大"。
+      旧实现的做法是「常态 13px、:focus 跳到 16px」，等于把缩放换成了肉眼可见的跳变。
+      正解是常态就 ≥16px；同时保留"界面字号"偏好的放大能力（取两者较大值）。
+      下面这批 :focus 规则用于覆盖文件上方同选择器里的 font-size:16px，不动其它声明。 */
+.mobile-shell input,
+.mobile-shell textarea,
+.mobile-shell select,
+.mobile-shell .native-form input,
+.mobile-shell .native-form textarea,
+.mobile-shell .native-form select,
+.mobile-shell .evidence-inline input,
+.mobile-shell .evidence-inline select,
+.mobile-shell .room-scope input,
+.mobile-shell .room-scope select {
+  font-size: max(16px, calc(var(--ui-font-size) * 1.2308));
+}
+.mobile-shell input:focus,
+.mobile-shell textarea:focus,
+.mobile-shell select:focus,
+.mobile-shell .native-form input:focus,
+.mobile-shell .native-form textarea:focus,
+.mobile-shell .native-form select:focus,
+.mobile-shell .evidence-inline input:focus,
+.mobile-shell .evidence-inline select:focus,
+.mobile-shell .room-scope input:focus,
+.mobile-shell .room-scope select:focus {
+  font-size: max(16px, calc(var(--ui-font-size) * 1.2308));
+}
+
+/* B. 语音条：占据输入框位置的长条按钮
+      touch-action / user-select / touch-callout 三个都必须有：
+      iOS 上长按可编辑元素会弹系统选择菜单并吞掉 pointerup，录音会被瞬间打断。 */
+.mobile-composer .mobile-speak {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--m-hairline, var(--border));
+  border-radius: var(--m-radius-card, 14px);
+  background: var(--m-card, var(--surface));
+  color: var(--text);
+  font: 600 calc(var(--ui-font-size) * 1.0) / 1.2 var(--font-sans);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+.mobile-composer .mobile-speak.is-recording {
+  background: var(--primary-weak, #eef4ff);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.mobile-composer .mobile-speak.is-sliding {
+  background: var(--danger-weak, #fdecec);
+  border-color: var(--danger, #d93026);
+  color: var(--danger, #d93026);
+}
+.mobile-composer .mobile-speak[disabled] {
+  opacity: .6;
+}
+.mobile-composer .mobile-mic {
+  flex: 0 0 auto;
+}
+
+/* ==========================================================================
+   2026-11-04 移动端输入与语音（微信形态）
+   ========================================================================== */
+
+/* A. 输入控件常态 ≥16px
+      为什么：iOS Safari 对 font-size < 16px 的输入控件在聚焦时会强制放大页面，
+      而放大后不会自动缩回 —— 用户看到的就是"点一下输入框，字突然变大"。
+      旧实现的做法是「常态 13px、:focus 跳到 16px」，等于把缩放换成了肉眼可见的跳变。
+      正解是常态就 ≥16px；同时保留"界面字号"偏好的放大能力（取两者较大值）。
+      下面这批 :focus 规则用于覆盖文件上方同选择器里的 font-size:16px，不动其它声明。 */
+.mobile-shell input,
+.mobile-shell textarea,
+.mobile-shell select,
+.mobile-shell .native-form input,
+.mobile-shell .native-form textarea,
+.mobile-shell .native-form select,
+.mobile-shell .evidence-inline input,
+.mobile-shell .evidence-inline select,
+.mobile-shell .room-scope input,
+.mobile-shell .room-scope select {
+  font-size: max(16px, calc(var(--ui-font-size) * 1.2308));
+}
+.mobile-shell input:focus,
+.mobile-shell textarea:focus,
+.mobile-shell select:focus,
+.mobile-shell .native-form input:focus,
+.mobile-shell .native-form textarea:focus,
+.mobile-shell .native-form select:focus,
+.mobile-shell .evidence-inline input:focus,
+.mobile-shell .evidence-inline select:focus,
+.mobile-shell .room-scope input:focus,
+.mobile-shell .room-scope select:focus {
+  font-size: max(16px, calc(var(--ui-font-size) * 1.2308));
+}
+
+/* B. 语音条：占据输入框位置的长条按钮
+      touch-action / user-select / touch-callout 三个都必须有：
+      iOS 上长按可编辑元素会弹系统选择菜单并吞掉 pointerup，录音会被瞬间打断。 */
+.mobile-composer .mobile-speak {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--m-hairline, var(--border));
+  border-radius: var(--m-radius-card, 14px);
+  background: var(--m-card, var(--surface));
+  color: var(--text);
+  font: 600 calc(var(--ui-font-size) * 1.0) / 1.2 var(--font-sans);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+.mobile-composer .mobile-speak.is-recording {
+  background: var(--primary-weak, #eef4ff);
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.mobile-composer .mobile-speak.is-sliding {
+  background: var(--danger-weak, #fdecec);
+  border-color: var(--danger, #d93026);
+  color: var(--danger, #d93026);
+}
+.mobile-composer .mobile-speak[disabled] {
+  opacity: .6;
+}
+.mobile-composer .mobile-mic {
+  flex: 0 0 auto;
+}

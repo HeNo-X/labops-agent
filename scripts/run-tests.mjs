@@ -23,6 +23,10 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export function sanitizedEnv(base = process.env) {
   const env = { ...base };
   for (const k of ['AGNES_API_KEY', 'DASHSCOPE_API_KEY', 'VISION_API_KEY']) delete env[k];
+  // 只删 Key 不够：config.ensureEnv() 会 loadEnvFile('.env')，而它只补「未设置」的
+  // 变量 —— 刚删掉的会被 .env 全部补回（含 BIGMODEL_/XFYUN_ 备用链与真实 Key），
+  // 导致夹具被真实配置污染、且真连外网。这个开关让子进程连 .env 都不读。
+  env.LABOPS_SKIP_ENV_FILE = '1';
   return env;
 }
 

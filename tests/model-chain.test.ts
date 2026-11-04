@@ -49,7 +49,7 @@ function probe(env: Record<string, string>): ProbeResult {
     if (typeof v === 'string' && !/^(AGNES|DASHSCOPE|BIGMODEL|XFYUN)_/.test(k)) base[k] = v;
   }
   const out = execFileSync(process.execPath, [PROBE], {
-    env: { ...base, LABOPS_AUTH_MODE: 'demo', ...env },
+    env: { ...base, LABOPS_AUTH_MODE: 'demo', LABOPS_SKIP_ENV_FILE: '1', ...env },
     encoding: 'utf8'
   });
   const line = out.trim().split('\n').filter(Boolean).pop();

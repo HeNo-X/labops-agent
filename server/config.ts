@@ -19,7 +19,11 @@ function ensureEnv(): void {
   if (envLoaded) return;
   envLoaded = true;
   const envPath = path.join(PROJECT_ROOT, '.env');
-  if (fs.existsSync(envPath)) {
+  // 测试要验证的是"给定 env → 链长什么样"这条纯函数关系，.env 是部署配置，
+  // 不该参与单测。loadEnvFile 只补「未设置」的变量 —— 测试把变量删干净后反而会被
+  // .env 全部补回（实测：夹具 3 个百炼模型，链里冒出 glm-4.7-flash / spark-x2.6-4b，
+  // 且带真实 Key 真连外网）。LABOPS_SKIP_ENV_FILE=1 由测试入口统一注入。
+  if (fs.existsSync(envPath) && process.env.LABOPS_SKIP_ENV_FILE !== '1') {
     try {
       process.loadEnvFile(envPath);
     } catch (err) {

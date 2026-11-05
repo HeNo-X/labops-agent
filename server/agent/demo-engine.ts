@@ -15,7 +15,7 @@ import type { KnowledgeResult, BusinessPlanResult } from '../../shared/types.ts'
  *  阶段 2A：支持三个工具的路由（query_schedule / query_lab_status / query_free_rooms）。
  */
 
-import type { FreeRoomsResult, LabStatusResult, OperationsReportResult, QueryScheduleArgs, ScheduleQueryResult, ToolResultKind } from '../../shared/types.ts';
+import type { CheckinStatusResult, FreeRoomsResult, LabStatusResult, OperationsReportResult, QueryScheduleArgs, ScheduleQueryResult, ToolResultKind, VisionFieldResult } from '../../shared/types.ts';
 import type { Proposal } from '../../shared/operations-contract.ts';
 import type { Dataset } from '../data/store.ts';
 import { weekdayOf } from '../time/term.ts';
@@ -507,6 +507,8 @@ export function renderDemoAnswer(
     }
     if (result.kind === 'business_plan') return renderBusinessFacts(result.payload as BusinessPlanResult);
     if (result.kind === 'lab_status') return renderLabStatusAnswer(result.payload as LabStatusResult, extras);
+    if (result.kind === 'checkin_status') return renderCheckinStatusAnswer(result.payload as CheckinStatusResult);
+    if (result.kind === 'vision_field') return renderVisionFieldAnswer(result.payload as VisionFieldResult);
     if (result.kind === 'free_rooms') return renderFreeRoomsAnswer(result.payload as FreeRoomsResult);
     if (result.kind === 'operation_proposal') return renderProposalAnswer(result.payload as Proposal);
     if (result.kind === 'operations_report') return renderReportAnswer(result.payload as OperationsReportResult);
@@ -591,6 +593,54 @@ function renderScheduleAnswer(
   for (const n of result.notes) {
     if (/⚠️|未带字母前缀|临时停用|仅为本人的课程|教学周不可确定|未做周次过滤/.test(n)) lines.push(`- ${n}`);
   }
+  return lines.join('\n');
+}
+
+/** 视觉现场事实回答：逐行转达边缘上报的剥离身份事实；红线说明必须随行转达 */
+function renderVisionFieldAnswer(r: VisionFieldResult): string {
+  if (!r.configured) return `**${r.note ?? '视觉边缘服务未接入'}**`;
+  const lines: string[] = [];
+  if (r.detailLines.length) lines.push(...r.detailLines);
+  else if (r.knownLabs) lines.push(`已接入房间：${r.knownLabs.join('、') || '无'}；${'暂无该房间数据'}`);
+  else lines.push('暂无上报数据');
+  if (r.note) lines.push(`（${r.note}）`);
+  return lines.join('\n');
+}
+
+/** 签到状态回答：如实转述主系统服务端判定的本人状态；引导本人在场签到，不代签 */
+function renderCheckinStatusAnswer(r: CheckinStatusResult): string {  if (r.note) return `**${r.note}**`;
+  if (!r.lessons.length) return `**${r.date} 没有本人的课程安排，无签到状态可查。**`;
+  const lines: string[] = [];
+  const head = r.currentPeriod ? `${r.date}（当前节次：${r.currentPeriod.label} ${r.currentPeriod.start}–${r.currentPeriod.end}）` : r.date;
+  const openUnsigned = r.lessons.find(l => l.status === 'unsigned' && l.phase === 'open');
+  if (openUnsigned) {
+    const late = openUnsigned.lateWindow ? '（已超过开课 20 分钟，现在签会记「补签到」）' : '';
+    lines.push(`**${openUnsigned.periodLabel || openUnsigned.periodKey}《${openUnsigned.courseName || '课程'}》在 ${openUnsigned.labName || '实验室'}，尚未签到${late}。**`);
+  } else {
+    const done = r.lessons.filter(l => l.status !== 'unsigned');
+    lines.push(`**${done.length ? done.length + ' 节已有签到记录' : '今日课程均未到签到时间'}（${head}）。**`);
+  }
+  for (const l of r.lessons) {
+    const time = l.start && l.end ? `${l.start}–${l.end}` : '时间未录入';
+    const course = `《${l.courseName || '未录入'}》`;
+    const room = l.labName || '实验室未录入';
+    if (l.status === 'signed_out') {
+      lines.push(`- ${time} ${l.periodLabel || l.periodKey}｜${course}｜${room}｜已签退${l.autoSignout ? '（系统自动签退）' : ''}${l.lateSignin ? '；签到时记补签到' : ''}`);
+    } else if (l.status === 'signed') {
+      lines.push(`- ${time} ${l.periodLabel || l.periodKey}｜${course}｜${room}｜已签到${l.lateSignin ? '（补签到）' : ''}${l.mismatch ? '；⚠️ 签到实验室与本课安排不一致' : ''}`);
+    } else if (l.phase === 'open') {
+      lines.push(`- ${time} ${l.periodLabel || l.periodKey}｜${course}｜${room}｜未签到，现可签到${l.lateWindow ? '（将记补签到）' : ''}`);
+    } else if (l.phase === 'ended') {
+      lines.push(`- ${time} ${l.periodLabel || l.periodKey}｜${course}｜${room}｜未签到，节次已结束`);
+    } else {
+      lines.push(`- ${time} ${l.periodLabel || l.periodKey}｜${course}｜${room}｜未签到，未到可签时间（开课前 10 分钟开放）`);
+    }
+  }
+  const entry = openUnsigned?.checkinPath;
+  if (entry) {
+    lines.push(`签到入口：${entry}（须由本人在场完成；身份、时间与课程归属由主系统服务端核验）。`);
+  }
+  lines.push('（Agent 不代签：签到须本人在实验室现场完成，扫码主链不变。）');
   return lines.join('\n');
 }
 

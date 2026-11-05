@@ -92,6 +92,8 @@ const TOOL_TITLES: Record<string, string> = {
   query_schedule: '查询课表',
   query_lab_status: '查询房间状态',
   query_free_rooms: '查找空闲房间',
+  query_checkin_status: '查询签到状态',
+  query_vision_status: '查询现场事实',
   prepare_issue_ticket: '准备报修单',
   prepare_room_closure: '准备停用计划',
   prepare_notification: '准备站内通知',

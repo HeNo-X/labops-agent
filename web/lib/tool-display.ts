@@ -13,7 +13,7 @@
  *  纯函数、无 Vue 依赖 —— 可直接单测。
  */
 
-export type ToolFamily = 'query' | 'knowledge' | 'draft' | 'vision' | 'report' | 'plan' | 'unknown';
+export type ToolFamily = 'query' | 'knowledge' | 'draft' | 'vision' | 'field' | 'report' | 'plan' | 'unknown';
 
 /**
  * 展示文本预算（**字符数**，不是字节数 —— 中文按字符计，UTF-8 下 1 字 3 字节）。
@@ -48,6 +48,7 @@ const FAMILY_BY_TOOL: Record<string, ToolFamily> = {
   query_business_context: 'query',
   query_scheduled_jobs: 'query',
   query_duty_context: 'query',
+  query_checkin_status: 'query',
   // 知识检索
   query_knowledge: 'knowledge',
   // 草稿类（effect:'draft'，只生成待确认方案，绝不自行执行）
@@ -61,6 +62,8 @@ const FAMILY_BY_TOOL: Record<string, ToolFamily> = {
   prepare_duty_session: 'draft',
   // 视觉观察（完整内容由 EvidenceObservationCard 承担）
   analyze_evidence_image: 'vision',
+  // 视觉边缘现场事实（数量/命中，剥离身份；完整内容由监控页承担）
+  query_vision_status: 'field',
   // 日报
   create_operations_report: 'report',
   // A5 任务计划（工作记录，不是业务结果；完整内容由 PlanPanel 承担）
@@ -77,6 +80,7 @@ const FAMILY_LABELS: Record<Exclude<ToolFamily, 'unknown'>, { running: string; f
   knowledge: { running: '正在检索说明', final: '说明检索' },
   draft: { running: '正在准备办理单', final: '待确认办理单' },
   vision: { running: '正在读取照片', final: '照片观察' },
+  field: { running: '正在读取现场事实', final: '现场事实' },
   report: { running: '正在生成日报', final: '运营日报' },
   plan: { running: '正在更新任务计划', final: '任务计划' }
 };

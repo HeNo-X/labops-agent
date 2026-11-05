@@ -360,11 +360,16 @@ test('能力协商：capabilities 描述沙盒环境与当前身份', async () =
   const caps = typeRegistry.toolNames();
   assert.ok(caps.includes('prepare_issue_ticket'));
   assert.ok(caps.includes('create_operations_report'));
-  assert.equal(caps.length,19,'9 个只读（含 analyze_evidence_image 视觉初判）+ 9 个准备/草稿工具 + 1 个任务计划（A5 maintain_task_plan，工作记录非业务工具）');
+  assert.equal(caps.length,21,'11 个只读（含 analyze_evidence_image 视觉初判、query_checkin_status、query_vision_status 现场事实）+ 9 个准备/草稿（8 个 prepare_* + create_operations_report）+ 1 个任务计划（A5 maintain_task_plan，工作记录非业务工具）');
   assert.ok(caps.includes('analyze_evidence_image'),'视觉初判必须是只读能力，不得带草稿效果');
   const visionTool = typeRegistry.REGISTRY.find((t) => t.spec.name === 'analyze_evidence_image');
   assert.equal(visionTool?.effect, 'read', '看图不得产生提案或任何业务写入');
   assert.equal(visionTool?.spec.danger, false);
+  // 视觉现场事实同为只读：剥离身份（只有数量与条目名），绝不产生提案
+  assert.ok(caps.includes('query_vision_status'),'视觉现场事实必须是只读能力');
+  const visionFieldTool = typeRegistry.REGISTRY.find((t) => t.spec.name === 'query_vision_status');
+  assert.equal(visionFieldTool?.effect, 'read', '现场查询不得产生提案或任何业务写入');
+  assert.equal(visionFieldTool?.spec.danger, false);
   assert.ok(caps.includes('query_scheduled_jobs'));
   assert.ok(caps.includes('prepare_scheduled_job'));
 });

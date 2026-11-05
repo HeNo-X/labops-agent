@@ -6,7 +6,7 @@
  *    ① 通道状态条 —— 接入状态 / 最新更新时间 / 手动刷新
  *    ② 实时画面卡 —— 探测内网 MJPEG 可达才展开（拓扑感知降级：
  *       云端部署只见结论，画面留在实验室；同机/内网部署才有画面）
- *    ③ 房间监测网格 —— AI 计数大数字 + 场景/护具徽章 + 快照与"让 Agent 核对"
+ *    ③ 房间监测网格 —— AI 计数大数字 + 容量/人脸命中/底库命中徽章 + 快照与"让 Agent 核对"
  *    ④ 事件流水 —— 最近上报（异常线索高亮）
  *    ⑤ 合规脚注 —— 画面与人脸不出内网、云端只见剥离身份 JSON、二维码主链
  *
@@ -25,12 +25,14 @@ const session = useSessionStore();
 
 interface VisionLabSummary {
   labId: string; online: boolean; lastSeenAt: string; lastSeenEpochMs: number; ageSeconds: number;
-  count: number; sceneState: string | null; sceneReason: string | null;
-  ppeState: string | null; ppeMissing: number | null; alert: boolean; snapshotAvailable: boolean;
+  count: number; capacity: number | null; recognized: number | null; unknownFaces: number | null;
+  library: Array<{ kind: string; name: string; score: number | null; mode: string | null }>;
+  sceneState: string | null; sceneReason: string | null; alert: boolean; snapshotAvailable: boolean;
 }
 interface VisionEventRow {
   labId: string; ts: number; receivedAt: number; alert: boolean; count: number;
-  sceneState: string | null; sceneReason: string | null; ppeState: string | null; cameraOnline: boolean;
+  recognized: number | null; library: Array<{ kind: string; name: string; score: number | null }>;
+  sceneState: string | null; sceneReason: string | null; cameraOnline: boolean;
 }
 interface VisionStatusResponse {
   ok: boolean; configured: boolean; labs: VisionLabSummary[]; eventCount: number; generatedAt: string; retentionNote: string;
@@ -80,15 +82,15 @@ function sceneLabel(lab: VisionLabSummary): string {
   const map: Record<string, string> = { occupied: '有人', empty: '无人', normal: '正常', over_capacity: '超容量', capacity_unknown: '容量未知', not_evaluable: '无法判定' };
   return tr(map[lab.sceneState] ?? lab.sceneState);
 }
-function ppeLabel(lab: VisionLabSummary): string | null {
-  if (!lab.ppeState || lab.ppeState === 'ppe_ok' || lab.ppeState === 'ppe_not_applicable') return null;
-  const map: Record<string, string> = { ppe_suspect: '护具疑似缺失', ppe_unknown: '护具无法判定' };
-  return tr(map[lab.ppeState] ?? lab.ppeState);
+/** 底库命中的一行人话（与 PC 端 VisionPanel 同口径） */
+function hitText(hit: { kind: string; name: string; score: number | null }): string {
+  const kind = hit.kind === 'scene' ? '场景' : '物品';
+  const score = hit.score !== null && hit.score !== undefined ? ` ${Math.round(hit.score * 100)}%` : '';
+  return `${kind}「${hit.name}」${score}`;
 }
 function alertLabel(lab: VisionLabSummary): string {
   if (!lab.online) return tr('摄像头离线');
-  if (lab.sceneState === 'over_capacity') return tr('超容量');
-  if (lab.ppeState === 'ppe_suspect') return tr('护具疑似缺失');
+  if (lab.capacity !== null && lab.count > lab.capacity) return tr('超容量');
   return tr('需要关注');
 }
 
@@ -222,11 +224,12 @@ onUnmounted(() => {
           </header>
           <div class="vision-count">
             <b>{{ lab.count }}</b>
-            <span>{{ tr('AI 在室人数') }}</span>
+            <span>{{ lab.capacity !== null ? tr('AI 在室人数 / {c} 容量', { c: lab.capacity }) : tr('AI 在室人数') }}</span>
           </div>
           <div class="vision-chips">
-            <span class="vision-chip is-neutral">{{ sceneLabel(lab) }}</span>
-            <span v-if="ppeLabel(lab)" class="vision-chip is-warn">{{ ppeLabel(lab) }}</span>
+            <span v-if="lab.recognized !== null" class="vision-chip is-neutral">{{ tr('人脸命中 {n}', { n: lab.recognized }) }}</span>
+            <span v-for="(hit, hi) in lab.library" :key="hi" class="vision-chip is-neutral">{{ hitText(hit) }}</span>
+            <span v-if="lab.sceneState" class="vision-chip is-neutral">{{ sceneLabel(lab) }}</span>
             <span class="vision-chip is-neutral">{{ relative(lab.lastSeenEpochMs) }}</span>
           </div>
           <p v-if="lab.sceneReason" class="vision-reason">{{ lab.sceneReason }}</p>
@@ -258,6 +261,8 @@ onUnmounted(() => {
             <b>{{ event.labId }}</b>
             <span class="vision-event-text">
               {{ event.cameraOnline ? tr('计数 {n} 人', { n: event.count }) : tr('摄像头离线') }}
+              <template v-if="event.recognized !== null"> · {{ tr('人脸命中 {n}', { n: event.recognized }) }}</template>
+              <template v-for="(hit, hi) in event.library" :key="hi"> · {{ hitText(hit) }}</template>
               <template v-if="event.sceneState"> · {{ sceneLabel({ sceneState: event.sceneState } as VisionLabSummary) }}</template>
             </span>
             <span v-if="event.sceneReason" class="vision-event-reason">{{ event.sceneReason }}</span>

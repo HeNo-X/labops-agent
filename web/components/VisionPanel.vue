@@ -41,21 +41,16 @@ const SCENE_LABEL: Record<string, string> = {
   capacity_unknown: '容量未知',
   not_evaluable: '无法判定'
 };
-const PPE_LABEL: Record<string, string> = {
-  ppe_ok: '护具齐全',
-  ppe_suspect: '护具疑似缺失',
-  ppe_unknown: '护具无法判定',
-  ppe_not_applicable: '画面无人，不判定着装'
-};
 
 function sceneText(value: string | null): string {
   if (!value) return '暂无场景结论';
   return SCENE_LABEL[value] ?? value;
 }
-function ppeText(value: string | null, missing: number | null): string {
-  if (!value) return '暂无护具结论';
-  const base = PPE_LABEL[value] ?? value;
-  return typeof missing === 'number' && missing > 0 ? `${base}（缺 ${missing}）` : base;
+/** 底库命中的一行人话：「物品「投影仪遥控器」94%」 */
+function hitText(hit: { kind: string; name: string; score: number | null }): string {
+  const kind = hit.kind === 'scene' ? '场景' : '物品';
+  const score = hit.score !== null && hit.score !== undefined ? ` ${Math.round(hit.score * 100)}%` : '';
+  return `${kind}「${hit.name}」${score}`;
 }
 
 const updatedLabel = computed(() => {
@@ -189,8 +184,10 @@ onUnmounted(() => {
                       <span class="vision-card__unit">{{ tr('AI 计数') }}</span>
                     </p>
                     <dl class="vision-card__facts">
-                      <div><dt>{{ tr('场景') }}</dt><dd>{{ tr(sceneText(lab.sceneState)) }}</dd></div>
-                      <div><dt>{{ tr('护具') }}</dt><dd>{{ tr(ppeText(lab.ppeState, lab.ppeMissing)) }}</dd></div>
+                      <div><dt>{{ tr('人数/容量') }}</dt><dd>{{ lab.capacity !== null ? `${lab.count} / ${lab.capacity}` : `${lab.count}` }}</dd></div>
+                      <div v-if="lab.recognized !== null"><dt>{{ tr('已录入人脸') }}</dt><dd>{{ tr('{n} 人命中（不含姓名）', { n: lab.recognized }) }}</dd></div>
+                      <div v-if="lab.sceneState"><dt>{{ tr('场景') }}</dt><dd>{{ tr(sceneText(lab.sceneState)) }}</dd></div>
+                      <div v-if="lab.library.length"><dt>{{ tr('底库命中') }}</dt><dd>{{ lab.library.map(hitText).join('、') }}</dd></div>
                       <div><dt>{{ tr('更新') }}</dt><dd>{{ tr(vision.staleLabel(lab)) }}</dd></div>
                     </dl>
                     <img
@@ -217,6 +214,8 @@ onUnmounted(() => {
                     <span class="vision-events__time">{{ eventTime(row) }}</span>
                     <b>{{ row.labId }}</b>
                     <span>{{ row.count }}{{ tr(' 人') }}</span>
+                    <span v-if="row.recognized !== null">{{ tr('人脸命中 {n}', { n: row.recognized }) }}</span>
+                    <span v-for="(hit, hi) in row.library" :key="hi">{{ hitText(hit) }}</span>
                     <span v-if="row.sceneState">{{ tr(sceneText(row.sceneState)) }}</span>
                     <span v-if="!row.cameraOnline" class="vision-events__off">{{ tr('摄像头离线') }}</span>
                   </li>

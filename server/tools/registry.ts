@@ -21,12 +21,14 @@ import type { KnowledgeResult, BusinessPlanResult, EvidenceObservationResult } f
  */
 
 import type {
+  CheckinStatusResult,
   FreeRoomsResult,
   LabStatusResult,
   OperationsReportResult,
   QueryScheduleArgs,
   ScheduleQueryResult,
-  ToolSpec
+  ToolSpec,
+  VisionFieldResult
 } from '../../shared/types.ts';
 import { DATA_SOURCE_LABELS } from '../../shared/types.ts';
 import type { Proposal, SandboxActor } from '../../shared/operations-contract.ts';
@@ -39,6 +41,8 @@ import {
 } from './query-schedule.ts';
 import { coerceLabStatusArgs, runQueryLabStatus } from './query-lab-status.ts';
 import { coerceFreeRoomsArgs, runQueryFreeRooms } from './query-free-rooms.ts';
+import { queryCheckinStatus } from './query-checkin-status.ts';
+import { VISION_STATUS_TOOL } from './vision-query.ts';
 import { PERIOD_KEYS, isPeriodKey } from '../../shared/periods.ts';
 import {
   runCreateOperationsReport,
@@ -86,6 +90,8 @@ export type ToolExecution =
   | { ok: true; resultKind:'knowledge'; result:KnowledgeResult; summary:string }
   | { ok: true; resultKind:'business_plan'; result:BusinessPlanResult; summary:string }
   | { ok: true; resultKind:'evidence_observation'; result:EvidenceObservationResult; summary:string }
+  | { ok: true; resultKind: 'checkin_status'; result: CheckinStatusResult; summary: string }
+  | { ok: true; resultKind: 'vision_field'; result: VisionFieldResult; summary: string }
   | { ok: true; resultKind: 'task_plan'; result: { steps: import('../../shared/types.ts').TaskPlanStep[]; updatedAt: string }; summary: string }
   | { ok: false; code: string; message: string; suggestions: string[]; summary: string };
 
@@ -179,6 +185,31 @@ const QUERY_FREE_ROOMS_SPEC: ToolSpec = {
         items: { type: 'string', enum: [...PERIOD_KEYS] },
         description:
           '可选。节次范围，如"下午"= ["pm1","pm2"]。与 periodKey 二选一；都不传则返回全部六个节次。'
+      }
+    },
+    required: [],
+    additionalProperties: false
+  },
+  danger: false
+};
+
+const QUERY_CHECKIN_STATUS_SPEC: ToolSpec = {
+  name: 'query_checkin_status',
+  description:
+    '查询【学生本人】当日的上机签到状态：本人班级当天的课程位置（节次、课程、实验室）、每节课已签到/已签退/未签到、' +
+    '当前节次与可签窗口（含超 20 分钟记补签到的提示），以及主系统签到页入口路径。数据来自主系统授权实时通道，' +
+    '按当前登录身份计算，只含本人记录。' +
+    '红线：Agent 不代签——签到必须本人在实验室现场完成（扫码主链），本工具只做查询与引导，' +
+    '不提供、不转述任何"代签方法"；身份、时间与课程归属以主系统服务端校验为准。' +
+    '非学生身份（管理员/志愿者）返回如实说明，没有本人课签数据。' +
+    '用户问"我签到了吗""我这节什么课在哪""现在能签到吗""我的签到状态"时用本工具；查询别人的签到情况不在范围内。',
+  parameters: {
+    type: 'object',
+    properties: {
+      date: {
+        type: 'string',
+        description: '可选。查询日期，YYYY-MM-DD。缺省为服务端当天（上海时区）。',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$'
       }
     },
     required: [],
@@ -454,6 +485,7 @@ export const REGISTRY: RegisteredTool[] = [
   { spec: QUERY_SCHEDULE_SPEC, execute: executeQuerySchedule, effect: 'read' },
   { spec: QUERY_LAB_STATUS_SPEC, execute: executeQueryLabStatus, effect: 'read' },
   { spec: QUERY_FREE_ROOMS_SPEC, execute: executeQueryFreeRooms, effect: 'read' },
+  { spec: QUERY_CHECKIN_STATUS_SPEC, execute: queryCheckinStatus, effect: 'read' },
   { spec: PREPARE_ISSUE_SPEC, execute: runPrepareIssueTicket, effect: 'draft' },
   { spec: PREPARE_CLOSURE_SPEC, execute: runPrepareRoomClosure, effect: 'draft' },
   { spec: PREPARE_NOTICE_SPEC, execute: runPrepareNotification, effect: 'draft' },
@@ -487,6 +519,13 @@ export const REGISTRY: RegisteredTool[] = [
       danger: false
     },
     execute: (args) => executeTaskPlan(args),
+    effect: 'read'
+  },
+  // 视觉边缘现场事实（剥离身份：只有数量与条目名）。现查现用，结果以
+  // resultKind='vision_field' 走独立渲染（demo-engine.renderVisionFieldAnswer）。
+  {
+    spec: VISION_STATUS_TOOL.spec,
+    execute: (args) => VISION_STATUS_TOOL.execute(args),
     effect: 'read'
   }
 ];
@@ -620,7 +659,7 @@ export function roomListHint(ds: Dataset): string {
 export function toolsForMode(mode: 'chat' | 'task', allowedTools?: string[]): ToolSpec[] {
   const allow=allowedTools&&allowedTools.length?new Set(allowedTools):null;
   const connected=isBusinessConnected();const role=effectiveRole('student');
-  const studentReads=new Set(['query_schedule','query_free_rooms','query_lab_status','query_knowledge','query_business_context']);
+  const studentReads=new Set(['query_schedule','query_free_rooms','query_lab_status','query_knowledge','query_business_context','query_checkin_status']);
   const sandbox=new Set(['prepare_issue_ticket','prepare_room_closure','prepare_notification','prepare_duty_session','create_operations_report']);
   return REGISTRY.filter(t => (!connected||role!=='student'||mode==='chat'&&studentReads.has(t.spec.name))&&(mode === 'task' || t.effect === 'read')&&(!connected||!sandbox.has(t.spec.name))&&(!connected||role==='admin'||t.spec.name!=='prepare_schedule_adjustment'&&t.spec.name!=='prepare_incident_plan')&&(!allow||allow.has(t.spec.name))).map(t => t.spec);
 }

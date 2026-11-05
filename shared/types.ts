@@ -198,7 +198,7 @@ export interface ToolStartedPayload {
 }
 
 /** 结构化结果的类别。前端据此选择渲染器，不再假设所有工具都返回课表 */
-export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation' | 'task_plan';
+export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation' | 'checkin_status' | 'vision_field' | 'task_plan';
 
 export interface ToolResultPayload {
   step: number;
@@ -213,7 +213,7 @@ export interface ToolResultPayload {
   /** 结果类别，决定前端用哪个渲染器 */
   resultKind?: ToolResultKind;
   /** 结构化结果，前端只接受这一份（绝不插入模型返回的任意 HTML） */
-  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult | EvidenceObservationResult | { steps: TaskPlanStep[]; updatedAt: string };
+  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult | EvidenceObservationResult | CheckinStatusResult | VisionFieldResult | { steps: TaskPlanStep[]; updatedAt: string };
   error?: { code: string; message: string };
 }
 
@@ -350,6 +350,85 @@ export interface LabStatusResult {
   suggestions: string[];
   notes: string[];
   provenance: ScheduleQueryResult['provenance'];
+}
+
+// ---------- query_checkin_status ----------
+
+export interface CheckinStatusArgs {
+  /** YYYY-MM-DD，缺省 = 服务端当天（上海时区） */
+  date?: string;
+}
+
+/** 单节课的本人签到状态（主系统按会话身份计算，只含本人记录） */
+export interface CheckinStatusLesson {
+  timetableId: string;
+  periodKey: string;
+  periodLabel: string | null;
+  start: string | null;
+  end: string | null;
+  courseId: string | null;
+  courseName: string | null;
+  teacher: string | null;
+  labId: string | null;
+  labName: string | null;
+  /** unsigned=未签到 signed=已签到 signed_out=已签退（含自动签退） */
+  status: 'unsigned' | 'signed' | 'signed_out';
+  /** 仅当天提供：upcoming=未到可签时间 open=可签（含补签窗） ended=已结束；非当天为 null */
+  phase: 'upcoming' | 'open' | 'ended' | null;
+  /** phase=open 且已超过开课后 20 分钟 → 现在去签会记「补签到」 */
+  lateWindow: boolean;
+  /** 已有记录本身是「补签到」 */
+  lateSignin: boolean;
+  autoSignout: boolean;
+  /** 签到记录与该课的实验室不一致（扫错实验室） */
+  mismatch: boolean;
+  locationFailed: boolean;
+  checkinTime: string | null;
+  checkoutTime: string | null;
+  /** 主系统签到页路径（相对主系统 origin；须本人在场完成，Agent 不代签） */
+  checkinPath: string | null;
+}
+
+export interface CheckinStatusResult {
+  actor: { username: string; identity: string; className: string };
+  date: string;
+  timezone: 'Asia/Shanghai';
+  /** 服务器当前节次（当天且处于节次窗口内才有） */
+  currentPeriod: { key: string; label: string; start: string; end: string } | null;
+  lessons: CheckinStatusLesson[];
+  /** 非学生身份 / 未关联班级等情形的如实说明；正常为 null */
+  note: string | null;
+  provenance: { source: 'authorized_api'; queriedAt: string; sourceRevision: string };
+  /** 固定口径：签到须本人在场完成，Agent 不代签 */
+  boundaryNote: string;
+}
+
+// ---------- query_vision_status（视觉边缘现场事实，剥离身份） ----------
+
+/** 单个房间的现场快照：只有数量与条目名，没有任何人脸/姓名/画面 */
+export interface VisionFieldLab {
+  labId: string;
+  online: boolean;
+  count: number;
+  /** 边缘随报的房间容量；null=边缘未提供 */
+  capacity: number | null;
+  /** 已录入人脸命中数（姓名永不出边缘机）；null=边缘未提供 */
+  recognized: number | null;
+  unknownFaces: number | null;
+  library: Array<{ kind: string; name: string; score: number | null }>;
+  alert: boolean;
+  ageSeconds: number;
+}
+
+export interface VisionFieldResult {
+  configured: boolean;
+  generatedAt?: string;
+  /** 口径说明（如"视觉是线索不是结论"），渲染时必须转达 */
+  note?: string;
+  knownLabs?: string[];
+  labs: VisionFieldLab[];
+  /** 每房间一行的可读明细（与工具 summary 同源），渲染直接逐行转达 */
+  detailLines: string[];
 }
 
 // ---------- query_free_rooms ----------

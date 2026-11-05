@@ -12,6 +12,14 @@
 import { computed, ref } from 'vue';
 import { clientFetch, clientUrl } from '../client';
 
+/** 物品/场景底库命中（条目名非个人信息，可上报） */
+export interface VisionLibraryHit {
+  kind: string;
+  name: string;
+  score: number | null;
+  mode: string | null;
+}
+
 export interface VisionLab {
   labId: string;
   online: boolean;
@@ -19,10 +27,15 @@ export interface VisionLab {
   lastSeenEpochMs: number;
   ageSeconds: number;
   count: number;
+  /** 边缘随报的房间容量（rooms.json 口径）；null=边缘未提供 */
+  capacity: number | null;
+  /** 已录入人脸命中数（只有数量，姓名永不出边缘机）；null=边缘未提供 */
+  recognized: number | null;
+  unknownFaces: number | null;
+  library: VisionLibraryHit[];
+  /** v1 兼容：旧边缘端点的场景状态（10-30 后边缘不再产出占用语义） */
   sceneState: string | null;
   sceneReason: string | null;
-  ppeState: string | null;
-  ppeMissing: number | null;
   alert: boolean;
   snapshotAvailable: boolean;
 }
@@ -33,9 +46,11 @@ export interface VisionEvent {
   receivedAt: number;
   alert: boolean;
   count: number;
+  recognized: number | null;
+  library: VisionLibraryHit[];
+  /** v1 兼容：旧边缘端点的场景状态 */
   sceneState: string | null;
   sceneReason: string | null;
-  ppeState: string | null;
   cameraOnline: boolean;
 }
 

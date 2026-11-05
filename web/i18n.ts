@@ -452,6 +452,15 @@ Object.assign(en,{
  "{n} 小时前": "{n}h ago",
  "视觉数据读取失败：{m}": "Failed to read vision data: {m}",
  "边缘推理：画面与人脸不出实验室内网；云端仅存剥离身份后的 JSON（人数/场景/事件）。二维码签到永远是主链，视觉只做辅助。": "Edge inference: footage and faces never leave the lab LAN; the cloud stores only identity-free JSON (counts/scenes/events). QR check-in is always the primary channel; vision only assists.",
+ "待核查 {n} 处": "{n} to review",
+ "让 Agent 起草工单": "Ask the Agent to draft a ticket",
+ "起草后由 Agent 生成办理单，最终以你的确认卡为准；视觉是线索不是结论。": "The Agent prepares the ticket; nothing is filed until you confirm it. Vision is a lead, not a verdict.",
+ "已标误报": "Marked false alarm",
+ "已确认": "Confirmed",
+ "误报": "False alarm",
+ "确认": "Confirm",
+ "标注未保存，请重试": "Mark not saved, please retry",
+ "视觉边缘上报 {lab} {reason}：AI 计数 {n} 人{cap}，数据 {age} 秒前。请起草一张工单（issue.create）：标题注明『视觉线索待核查』，正文写明 AI 计数是线索、需人工现场核验，不得写成已确认的违规事实。起草后等我确认。": "Vision edge reported {lab} {reason}: AI counted {n} people{cap}, data {age}s old. Draft a ticket (issue.create): title it 【vision lead needs review】, state that the AI count is a lead requiring on-site verification, and do not assert confirmed violations. Wait for my confirmation after drafting.",
  "请核对 {lab} 的现场人数与签到记录是否一致：视觉边缘 AI 计数 {n} 人{cap}，数据 {age} 秒前。两口径如有差异，请只分析原因并给出核查建议，不要直接办理。": "Please verify whether the on-site headcount in {lab} matches check-in records: edge AI counted {n} people{cap}, data {age}s old. If the two differ, analyse causes and suggest checks only — do not execute anything."
 });
 Object.assign(en,{
@@ -597,6 +606,23 @@ Object.assign(en,{
  // A10 会话模式开关（主区顶部居中左右分栏）
  '会话模式':'Conversation mode',
  '聊天会话：只查询数据，不准备办理单。模式随发送时刻生效，历史消息保持其发生时的语义。':'Chat: read-only queries, no business drafts. The mode applies from the moment of sending; past messages keep the semantics they were created with.',
- '工作会话：可查询、可准备办理单并执行（执行仍需本人确认）。模式随发送时刻生效，历史消息保持其发生时的语义。':'Work: queries, business drafts and execution (still requires your confirmation). The mode applies from the moment of sending; past messages keep the semantics they were created with.'
+ '工作会话：可查询、可准备办理单并执行（执行仍需本人确认）。模式随发送时刻生效，历史消息保持其发生时的语义。':'Work: queries, business drafts and execution (still requires your confirmation). The mode applies from the moment of sending; past messages keep the semantics they were created with.',
+ // 签到接入批次3：CheckinCard 与定时任务工具说明
+ '本人签到状态':'My check-in status', '签到汇总':'Check-in summary',
+ '该日期没有本人的课程安排。':'No classes for you on this date.',
+ '未录入':'Not recorded', '实验室未录入':'Lab not recorded', '班级未录入':'Class not recorded', '时间未录入':'Time not recorded',
+ '已签退':'Checked out', '已签退（自动）':'Checked out (auto)', '已签到':'Checked in', '已签到（补签到）':'Checked in (late)',
+ '未签到 · 可签':'Not checked in · open now', '未签到 · 现在签记补签到':'Not checked in · signing now counts as late',
+ '未签到 · 节次已结束':'Not checked in · period ended', '未签到 · 未到可签时间':'Not checked in · not open yet', '未签到':'Not checked in',
+ '扫错实验室':'Wrong lab scanned', '定位失败':'Location failed',
+ '签到入口：':'Check-in entry: ', '（在主系统打开；须本人在场完成）':'(open in the main system; must be done in person)',
+ 'Agent 不代签：签到须本人在实验室现场完成，扫码主链不变。':'The Agent never signs in for you: check-in must be done in person at the lab; the QR main chain is unchanged.',
+ '应到':'Expected', '节应到未知':' sessions with unknown expected', '账面缺口':'Gap (expected − checked-in)',
+ '签退':'Checked out', '补签到':'Late sign-ins',
+ '所选范围内没有排课。':'No scheduled classes in the selected range.',
+ '有缺口':'Gap', '无账面缺口':'No book gap',
+ '未签到学号：':'Not checked in (student IDs): ',
+ '缺口=应到−实到的账面差，需现场核实后再定性；请勿代替学生签到。未签到名单为学号（账号），不含姓名。':'A gap is the book difference (expected − checked-in); verify on site before drawing conclusions. Never sign in for students. The list contains student IDs (accounts), never names.',
+ '默认已可查询课表、房间状态、本人签到状态与签到汇总（管理员）等只读工具；此处勾选用于追加草稿类动作。':'Read-only tools (timetable, room status, my check-in status, and the admin check-in summary) are available by default; tick here only to add draft actions.'
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

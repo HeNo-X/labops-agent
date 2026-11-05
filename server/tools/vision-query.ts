@@ -14,7 +14,7 @@
  */
 
 import type { ToolSpec, VisionFieldLab, VisionFieldResult } from '../../shared/types.ts';
-import { visionIngestConfigured, visionEvents, visionStatus } from '../vision/monitor.ts';
+import { visionEventFeedback, visionFeedbackStats, visionIngestConfigured, visionEvents, visionStatus } from '../vision/monitor.ts';
 
 export interface VisionToolExecution { ok: true; resultKind: 'vision_field'; summary: string; result: VisionFieldResult; }
 
@@ -69,19 +69,23 @@ export const VISION_STATUS_TOOL: VisionToolDefinition = {
       const eventLines = events.map((event) => {
         const hits = event.library.map(formatLibraryHit).join('、');
         const faces = event.faces ? `，人脸命中 ${event.faces.recognized}` : '';
-        return `${new Date(event.receivedAt).toISOString()} ${event.lab_id}：${event.camera_online ? `计数 ${event.count} 人${faces}` : '摄像头离线'}${hits ? '，' + hits : ''}${event.alert ? '（异常线索）' : ''}`;
+        const feedback = visionEventFeedback(event.lab_id, event.receivedAt);
+        const marked = feedback ? `（人工标注：${feedback.verdict === 'false_alarm' ? '误报' : '已确认'}）` : '';
+        return `${new Date(event.receivedAt).toISOString()} ${event.lab_id}：${event.camera_online ? `计数 ${event.count} 人${faces}` : '摄像头离线'}${hits ? '，' + hits : ''}${event.alert ? '（异常线索）' : ''}${marked}`;
       });
+      const stats = visionFeedbackStats(labId);
       return {
         ok: true,
         resultKind: 'vision_field',
         summary: labId
-          ? `${labId} 最近事件 ${events.length} 条，其中异常线索 ${alertCount} 条、底库命中 ${hitCount} 次`
-          : `视觉事件流水最近 ${events.length} 条，其中异常线索 ${alertCount} 条、底库命中 ${hitCount} 次`,
+          ? `${labId} 最近事件 ${events.length} 条，其中异常线索 ${alertCount} 条、底库命中 ${hitCount} 次；人工标注：误报 ${stats.falseAlarm} 次 / 已确认 ${stats.confirmed} 次`
+          : `视觉事件流水最近 ${events.length} 条，其中异常线索 ${alertCount} 条、底库命中 ${hitCount} 次；人工标注：误报 ${stats.falseAlarm} 次 / 已确认 ${stats.confirmed} 次`,
         result: {
           configured: true,
-          note: '事件流水只含数量与条目名，没有任何人脸/姓名',
+          note: '事件流水只含数量与条目名，没有任何人脸/姓名；"人工标注"是现场人员对历史事件的误报/确认回流，可作为判断当前线索可信度的参考',
           labs: [],
-          detailLines: eventLines
+          detailLines: eventLines,
+          feedbackStats: stats
         }
       };
     }

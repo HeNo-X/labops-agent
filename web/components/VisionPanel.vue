@@ -28,6 +28,7 @@ const vision = useVision();
 const open = ref(false);
 const feedFailed = ref(false);
 const failedSnapshots = ref<Set<string>>(new Set());
+const feedbackError = ref('');
 const guideOpen = ref(false);
 
 useModal(open, '.vision-panel');
@@ -72,6 +73,24 @@ const edgeMeta = computed(() => {
 
 function snapshotBroken(labId: string): void {
   failedSnapshots.value = new Set([...failedSnapshots.value, labId]);
+}
+
+/** 告警一键起草：预填"AI 线索 + 建议动作"，由 Agent 起草工单、本人确认（HITL）。
+ *  PC 通道：派发 labops-vision-draft → App.vue 关抽屉、新建工作会话并把文本填进命令栏。 */
+function draftIssue(lab: { labId: string; count: number; capacity: number | null; ageSeconds: number; alert: boolean }): void {
+  const capacity = lab.capacity !== null ? `/${lab.capacity} 容量` : '';
+  const reason = lab.capacity !== null && lab.count > lab.capacity ? tr('超容量') : tr('摄像头离线');
+  const question = tr(
+    '视觉边缘上报 {lab} {reason}：AI 计数 {n} 人{cap}，数据 {age} 秒前。请直接调用 prepare_business_workflow（kind=issue.create, roomId="{lab}"）起草工单：标题『视觉线索待核查』，正文写明 AI 计数是线索、需人工现场核验，不得写成已确认的违规事实。除本条已给信息外无需再查询，起草后等我确认。',
+    { lab: lab.labId, reason, n: lab.count, cap: capacity, age: lab.ageSeconds }
+  );
+  window.dispatchEvent(new CustomEvent('labops-vision-draft', { detail: question }));
+}
+
+/** 事件误报/确认回流（批C）；失败给出行内提示，下一轮轮询还原服务端口径 */
+async function sendFeedback(row: VisionEvent, verdict: 'false_alarm' | 'confirmed'): Promise<void> {
+  const ok = await vision.sendFeedback(row, verdict);
+  feedbackError.value = ok ? '' : tr('标注未保存，请重试');
 }
 
 function eventTime(row: VisionEvent): string {
@@ -168,7 +187,18 @@ onUnmounted(() => {
                 <p v-if="!vision.labs.value.length" class="vision-empty">
                   {{ tr('已接入，但还没有任何房间上报。检查边缘机是否在发心跳。') }}
                 </p>
-                <ul v-else class="vision-grid">
+                <section v-if="vision.labs.value.length && vision.alertLabs.value.length" class="vision-todo" aria-label="待核查">
+                  <h3>{{ tr('待核查 {n} 处', { n: vision.alertLabs.value.length }) }}</h3>
+                  <ul>
+                    <li v-for="lab in vision.alertLabs.value" :key="`todo-${lab.labId}`">
+                      <b>{{ lab.labId }}</b>
+                      <span>{{ tr('计数 {n} 人', { n: lab.count }) }}</span>
+                      <button type="button" @click="draftIssue(lab)">{{ tr('让 Agent 起草工单') }}</button>
+                    </li>
+                  </ul>
+                  <p class="vision-todo__note">{{ tr('起草后由 Agent 生成办理单，最终以你的确认卡为准；视觉是线索不是结论。') }}</p>
+                </section>
+                <ul v-if="vision.labs.value.length" class="vision-grid">
                   <li v-for="lab in vision.labs.value" :key="lab.labId" class="vision-card" :class="{ 'is-alert': lab.alert }">
                     <header class="vision-card__head">
                       <b>{{ lab.labId }}</b>
@@ -218,6 +248,11 @@ onUnmounted(() => {
                     <span v-for="(hit, hi) in row.library" :key="hi">{{ hitText(hit) }}</span>
                     <span v-if="row.sceneState">{{ tr(sceneText(row.sceneState)) }}</span>
                     <span v-if="!row.cameraOnline" class="vision-events__off">{{ tr('摄像头离线') }}</span>
+                    <span v-if="row.feedback" class="vision-events__feedback" :class="row.feedback.verdict === 'false_alarm' ? 'is-fa' : 'is-ok'">{{ tr(row.feedback.verdict === 'false_alarm' ? '已标误报' : '已确认') }}</span>
+                    <span v-else-if="row.alert" class="vision-events__actions">
+                      <button type="button" @click="sendFeedback(row, 'false_alarm')">{{ tr('误报') }}</button>
+                      <button type="button" @click="sendFeedback(row, 'confirmed')">{{ tr('确认') }}</button>
+                    </span>
                   </li>
                 </ul>
               </aside>
@@ -536,6 +571,49 @@ onUnmounted(() => {
   font-size: 11px;
   color: var(--text-faint);
 }
+.vision-events__feedback {
+  font-size: calc(var(--ui-font-size) * 0.84615);
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.vision-events__feedback.is-fa { color: var(--text-faint); }
+.vision-events__feedback.is-ok { color: var(--positive, #2e9e5b); }
+.vision-events__actions { display: inline-flex; gap: 6px; }
+.vision-events__actions button {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: calc(var(--ui-font-size) * 0.84615);
+  cursor: pointer;
+}
+.vision-events__actions button:hover { color: var(--primary); border-color: var(--primary-border); }
+.vision-todo {
+  border: 1px solid var(--danger, #c0392b);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--surface);
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-3);
+}
+.vision-todo h3 { margin: 0 0 var(--sp-2); font-size: calc(var(--ui-font-size) * 1.0); color: var(--danger, #c0392b); }
+.vision-todo ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.vision-todo li { display: flex; align-items: center; gap: var(--sp-3); font-size: calc(var(--ui-font-size) * 0.92308); }
+.vision-todo li b { font-family: var(--font-mono); }
+.vision-todo button {
+  margin-left: auto;
+  padding: 4px 12px;
+  border-radius: var(--radius, 8px);
+  border: 1px solid var(--danger, #c0392b);
+  background: transparent;
+  color: var(--danger, #c0392b);
+  cursor: pointer;
+}
+.vision-todo button:hover { background: var(--surface-3); }
+.vision-todo__note { margin: var(--sp-2) 0 0; font-size: calc(var(--ui-font-size) * 0.84615); color: var(--text-faint); }
+
 .vision-events__off {
   color: var(--warning, #a16207);
 }

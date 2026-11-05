@@ -23,13 +23,16 @@ import {
   coerceVisionReport,
   getVisionSecret,
   ingestVisionReport,
+  recordVisionFeedback,
   verifyVisionSignature,
+  visionEventFeedback,
   visionEvents,
   visionIngestConfigured,
   visionSnapshot,
   visionStatus,
   MAX_SNAPSHOT_BYTES
 } from '../vision/monitor.ts';
+import { currentActor } from '../security/context.ts';
 import { loggerFor } from '../obs/trace.ts';
 
 const log = loggerFor('vision');
@@ -142,14 +145,50 @@ function handleEvents(query: URLSearchParams, res: ServerResponse): void {
     labId,
     limit: Number.isFinite(limit) ? limit : 50,
     sinceEpochMs: Number.isFinite(sinceRaw) ? sinceRaw : undefined
-  }).map((event) => ({
-    labId: event.lab_id, ts: event.ts, receivedAt: event.receivedAt, alert: event.alert,
-    count: event.count, recognized: event.faces ? event.faces.recognized : null,
-    library: event.library,
-    sceneState: event.sceneState, sceneReason: event.sceneReason,
-    cameraOnline: event.camera_online
-  }));
+  }).map((event) => {
+    const feedback = visionEventFeedback(event.lab_id, event.receivedAt);
+    return {
+      labId: event.lab_id, ts: event.ts, receivedAt: event.receivedAt, alert: event.alert,
+      count: event.count, recognized: event.faces ? event.faces.recognized : null,
+      library: event.library,
+      sceneState: event.sceneState, sceneReason: event.sceneReason,
+      cameraOnline: event.camera_online,
+      feedback: feedback ? { verdict: feedback.verdict, by: feedback.by, at: feedback.at } : null
+    };
+  });
   reply(res, 200, { ok: true, events });
+}
+
+/** POST /api/vision/feedback —— 人工核查回流（误报/确认）；登录身份，标注人取当前账号 */
+function handleFeedback(req: IncomingMessage, res: ServerResponse): void {
+  void readRawBody(req, 64 * 1024).then((body) => {
+    if (!body.ok) {
+      reply(res, body.status, { error: body.code, message: body.message });
+      return;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(body.raw) as Record<string, unknown>;
+    } catch {
+      reply(res, 400, { error: 'bad_json', message: '请求体不是合法 JSON' });
+      return;
+    }
+    const labId = typeof parsed['labId'] === 'string' ? parsed['labId'].slice(0, 64) : '';
+    const receivedAt = Number(parsed['receivedAt']);
+    const verdict = parsed['verdict'];
+    if (!labId || !Number.isFinite(receivedAt) || (verdict !== 'false_alarm' && verdict !== 'confirmed')) {
+      reply(res, 400, { error: 'bad_feedback', message: '需要 { labId, receivedAt, verdict: "false_alarm"|"confirmed" }' });
+      return;
+    }
+    const actor = currentActor();
+    // 标注人：native 模式 label=姓名/账号；demo 模式 label=角色名（SandboxActor.id 是哈希不可读）
+    const result = recordVisionFeedback(labId, receivedAt, verdict, actor?.label ?? 'unknown');
+    if (!result.ok) {
+      reply(res, result.code === 'unknown_event' ? 404 : 400, { error: result.code, message: result.message });
+      return;
+    }
+    reply(res, 200, { ok: true, feedback: result.feedback });
+  });
 }
 
 function handleSnapshot(query: URLSearchParams, res: ServerResponse): void {
@@ -225,6 +264,7 @@ export async function handleVisionApi(req: IncomingMessage, res: ServerResponse,
   if (pathname === '/api/vision/status' && req.method === 'GET') { handleStatus(res); return; }
   if (pathname === '/api/vision/events' && req.method === 'GET') { handleEvents(query, res); return; }
   if (pathname === '/api/vision/snapshot' && req.method === 'GET') { handleSnapshot(query, res); return; }
+  if (pathname === '/api/vision/feedback' && req.method === 'POST') { handleFeedback(req, res); return; }
   if (pathname === '/api/vision/live-probe' && req.method === 'GET') { await handleLiveProbe(res); return; }
   if (pathname === '/api/vision/feed' && req.method === 'GET') { await handleFeed(res); return; }
   reply(res, 404, { error: 'unknown_endpoint', message: `未实现的视觉接口：${req.method} ${pathname}` });

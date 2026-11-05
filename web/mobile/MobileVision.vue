@@ -33,6 +33,7 @@ interface VisionEventRow {
   labId: string; ts: number; receivedAt: number; alert: boolean; count: number;
   recognized: number | null; library: Array<{ kind: string; name: string; score: number | null }>;
   sceneState: string | null; sceneReason: string | null; cameraOnline: boolean;
+  feedback: { verdict: 'false_alarm' | 'confirmed'; by: string; at: string } | null;
 }
 interface VisionStatusResponse {
   ok: boolean; configured: boolean; labs: VisionLabSummary[]; eventCount: number; generatedAt: string; retentionNote: string;
@@ -56,6 +57,7 @@ let probing = false;
 
 const labs = computed(() => status.value?.labs ?? []);
 const alertCount = computed(() => labs.value.filter((lab) => lab.alert).length);
+const alertLabs = computed(() => labs.value.filter((lab) => lab.alert));
 const channelTone = computed<'unconfigured' | 'alert' | 'live' | 'idle'>(() => {
   if (!status.value?.configured) return 'unconfigured';
   if (alertCount.value > 0) return 'alert';
@@ -146,6 +148,29 @@ function askAgent(lab: VisionLabSummary): void {
   emit('navigate', { view: 'assistant' });
 }
 
+/** 告警一键起草：预填"AI 线索 + 建议动作"，由 Agent 起草工单、本人确认（HITL） */
+function draftIssue(lab: VisionLabSummary): void {
+  const reason = alertLabel(lab);
+  const question = tr(
+    '视觉边缘上报 {lab} {reason}：AI 计数 {n} 人{cap}，数据 {age} 秒前。请直接调用 prepare_business_workflow（kind=issue.create, roomId="{lab}"）起草工单：标题『视觉线索待核查』，正文写明 AI 计数是线索、需人工现场核验，不得写成已确认的违规事实。除本条已给信息外无需再查询，起草后等我确认。',
+    { lab: lab.labId, reason, n: lab.count, cap: lab.capacity !== null ? `/${lab.capacity} 容量` : '', age: lab.ageSeconds }
+  );
+  session.saveDraft('__new', question);
+  emit('navigate', { view: 'assistant' });
+}
+
+/** 事件误报/确认回流（批C）；失败静默——下一轮轮询会还原服务端口径 */
+async function sendFeedback(event: VisionEventRow, verdict: 'false_alarm' | 'confirmed'): Promise<void> {
+  try {
+    const res = await clientFetch('/api/vision/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ labId: event.labId, receivedAt: event.receivedAt, verdict })
+    });
+    if (res.ok) event.feedback = { verdict, by: 'me', at: new Date().toISOString() };
+  } catch { /* 静默：轮询会还原 */ }
+}
+
 onMounted(() => {
   void refresh();
   void probe();
@@ -206,6 +231,19 @@ onUnmounted(() => {
         <p v-else class="vision-live-note">{{ tr(liveProbe === null ? '正在探测内网画面…' : '内网画面暂时不可达（正常形态：云端只见结论，画面留在实验室）') }}</p>
       </section>
 
+      <!-- ②.5 待核查专区（批C）：告警房间聚合，一键起草工单（Agent 起草 → 本人确认） -->
+      <section v-if="alertCount" class="vision-todo" aria-label="待核查">
+        <h2>{{ tr('待核查 {n} 处', { n: alertCount }) }}</h2>
+        <ul>
+          <li v-for="lab in alertLabs" :key="`todo-${lab.labId}`">
+            <b>{{ lab.labId }}</b>
+            <span class="vision-todo__reason">{{ alertLabel(lab) }} · {{ tr('计数 {n} 人', { n: lab.count }) }}</span>
+            <button type="button" @click="draftIssue(lab)">{{ tr('让 Agent 起草工单') }}</button>
+          </li>
+        </ul>
+        <p class="vision-guide-note">{{ tr('起草后由 Agent 生成办理单，最终以你的确认卡为准；视觉是线索不是结论。') }}</p>
+      </section>
+
       <!-- ③ 房间监测网格 -->
       <div v-if="labs.length" class="vision-grid">
         <article
@@ -237,6 +275,7 @@ onUnmounted(() => {
               {{ tr(openSnapshot === lab.labId ? '收起快照' : '最新快照') }}
             </button>
             <button type="button" class="is-primary" @click="askAgent(lab)">{{ tr('让 Agent 核对') }}</button>
+            <button v-if="lab.alert" type="button" class="is-draft" @click="draftIssue(lab)">{{ tr('让 Agent 起草工单') }}</button>
           </div>
           <template v-if="openSnapshot === lab.labId">
             <img
@@ -263,6 +302,13 @@ onUnmounted(() => {
               <template v-if="event.recognized !== null"> · {{ tr('人脸命中 {n}', { n: event.recognized }) }}</template>
               <template v-for="(hit, hi) in event.library" :key="hi"> · {{ hitText(hit) }}</template>
               <template v-if="event.sceneState"> · {{ sceneLabel({ sceneState: event.sceneState } as VisionLabSummary) }}</template>
+            </span>
+            <span v-if="event.feedback" class="vision-event-feedback" :class="event.feedback.verdict === 'false_alarm' ? 'is-fa' : 'is-ok'">
+              {{ tr(event.feedback.verdict === 'false_alarm' ? '已标误报' : '已确认') }}
+            </span>
+            <span v-else-if="event.alert" class="vision-event-actions">
+              <button type="button" @click="sendFeedback(event, 'false_alarm')">{{ tr('误报') }}</button>
+              <button type="button" @click="sendFeedback(event, 'confirmed')">{{ tr('确认') }}</button>
             </span>
             <span v-if="event.sceneReason" class="vision-event-reason">{{ event.sceneReason }}</span>
           </li>
@@ -435,5 +481,55 @@ onUnmounted(() => {
   color: var(--text-faint);
   line-height: 1.6;
   padding: 0 4px;
+}
+
+/* ---- 待核查专区（批C）与事件回流 ---- */
+.vision-todo {
+  border: 1px solid var(--danger, #c0392b);
+  border-radius: 14px;
+  background: var(--surface);
+  padding: 12px 14px;
+}
+.vision-todo h2 { margin: 0 0 8px; font-size: 14px; color: var(--danger, #c0392b); }
+.vision-todo ul { list-style: none; margin: 0 0 6px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.vision-todo li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.vision-todo__reason { color: var(--text-muted); flex: 1; min-width: 0; }
+.vision-todo button {
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--danger, #c0392b);
+  background: transparent;
+  color: var(--danger, #c0392b);
+  font-size: 12px;
+  cursor: pointer;
+}
+.vision-actions .is-draft {
+  border-color: var(--danger, #c0392b);
+  background: transparent;
+  color: var(--danger, #c0392b);
+}
+.vision-event-feedback {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+.vision-event-feedback.is-fa { color: var(--text-faint); }
+.vision-event-feedback.is-ok { color: var(--positive, #2e9e5b); }
+.vision-event-actions { display: inline-flex; gap: 6px; margin-left: auto; }
+.vision-event-actions button {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2, transparent);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
 }
 </style>

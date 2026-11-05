@@ -17,6 +17,9 @@ import {
   signVisionPayload,
   verifyVisionSignature,
   visionEvents,
+  visionEventFeedback,
+  visionFeedbackStats,
+  recordVisionFeedback,
   visionIngestConfigured,
   visionSnapshot,
   visionStatus
@@ -223,6 +226,39 @@ describe('告警判定与摄取（v2 口径）', () => {
     assert.equal(events[0].library[0]?.name, '投影仪遥控器');
     assert.equal(events[0].faces?.recognized, 2);
     assert.equal(visionEvents({ labId: 'E999' }).length, 0);
+  });
+
+  it('批C：人工核查回流——误报/确认标注、未知事件拒绝、统计与重启回放', () => {
+    resetVisionStoreForTests();
+    const report = reportOf();
+    const ingested = ingestVisionReport(report);
+    assert.equal(ingested.ok, true);
+    const receivedAt = ingested.ok ? ingested.event.receivedAt : 0;
+
+    // 未知事件拒绝（防对凭空事件标注）
+    const bad = recordVisionFeedback('E310', receivedAt + 999999, 'false_alarm', 'admin');
+    assert.equal(bad.ok, false);
+    if (!bad.ok) assert.equal(bad.code, 'unknown_event');
+
+    // 合法标注：误报 + 确认各一条（另一房间）
+    const r2 = reportOf({ lab_id: 'E312' });
+    const ing2 = ingestVisionReport(r2);
+    assert.equal(ing2.ok, true);
+    const ok1 = recordVisionFeedback('E310', receivedAt, 'false_alarm', 'admin');
+    assert.equal(ok1.ok, true);
+    recordVisionFeedback('E312', ing2.ok ? ing2.event.receivedAt : 0, 'confirmed', 'v1');
+
+    // 事件合并标注
+    const ev = visionEvents({ labId: 'E310' })[0];
+    assert.deepEqual(visionEventFeedback('E310', ev.receivedAt)?.verdict, 'false_alarm');
+
+    // 统计：按房间与全局
+    assert.deepEqual(visionFeedbackStats('E310'), { falseAlarm: 1, confirmed: 0 });
+    assert.deepEqual(visionFeedbackStats(), { falseAlarm: 1, confirmed: 1 });
+
+    // 重复标注同事件 = 覆盖（最新结论为准），统计不翻倍
+    recordVisionFeedback('E310', receivedAt, 'confirmed', 'admin');
+    assert.deepEqual(visionFeedbackStats('E310'), { falseAlarm: 0, confirmed: 1 });
   });
 
   it('未配置 Secret 时 configured=false', () => {

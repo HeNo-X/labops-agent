@@ -52,7 +52,11 @@ export interface VisionEvent {
   sceneState: string | null;
   sceneReason: string | null;
   cameraOnline: boolean;
+  /** 人工核查回流（批C）：现场人员对该事件的误报/确认标注 */
+  feedback: { verdict: 'false_alarm' | 'confirmed'; by: string; at: string } | null;
 }
+
+export type VisionVerdict = 'false_alarm' | 'confirmed';
 
 export interface VisionStatus {
   ok: boolean;
@@ -163,6 +167,23 @@ export function useVision(pollMs = 15_000) {
     timer = window.setInterval(() => void refresh(), pollMs);
   }
 
+  /** 人工核查回流：误报/确认标注（批C）。成功后本地事件立即更新，等下轮轮询对齐服务端 */
+  async function sendFeedback(event: VisionEvent, verdict: VisionVerdict): Promise<boolean> {
+    try {
+      const res = await clientFetch('/api/vision/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ labId: event.labId, receivedAt: event.receivedAt, verdict })
+      });
+      if (!res.ok) return false;
+      const target = events.value.find((e) => e.labId === event.labId && e.receivedAt === event.receivedAt);
+      if (target) target.feedback = { verdict, by: 'me', at: new Date().toISOString() };
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function stop(): void {
     if (timer !== null) {
       window.clearInterval(timer);
@@ -188,6 +209,7 @@ export function useVision(pollMs = 15_000) {
     probeLive,
     snapshotUrl,
     feedUrl,
+    sendFeedback,
     start,
     stop
   };

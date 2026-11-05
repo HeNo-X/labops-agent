@@ -198,6 +198,15 @@ function collapseRailOnMobile(): void {
 }
 onMounted(() => window.addEventListener('resize', collapseRailOnMobile));
 onUnmounted(() => window.removeEventListener('resize', collapseRailOnMobile));
+// 批C：实验室监控抽屉"让 Agent 起草工单"——新建工作会话并把 AI 线索填进命令栏（本人确认后才执行）
+function onVisionDraft(event: Event): void {
+  const question = (event as CustomEvent<string>).detail;
+  if (typeof question !== 'string' || !question.trim()) return;
+  onNewChat('task');
+  nextTick(() => { draft.value = question; });
+}
+onMounted(() => window.addEventListener('labops-vision-draft', onVisionDraft));
+onUnmounted(() => window.removeEventListener('labops-vision-draft', onVisionDraft));
 // T5：切回前台且该轮长时间无新事件 → 主动回查快照（不静默停在假"运行中"）
 onMounted(() => document.addEventListener('visibilitychange', onVisibilityChange));
 onUnmounted(() => {

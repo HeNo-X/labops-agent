@@ -384,10 +384,104 @@ export function visionSnapshot(labId: string): LabSnapshot | null {
   return labs.get(labId)?.snapshot ?? null;
 }
 
-/** 仅测试用：清空内存现场并可控持久化开关 */
+// ---------------------------------------------------------------------------
+// 人工核查反馈（批C：误报回流 = 免费标注数据；事件唯一键 labId:receivedAt）
+// ---------------------------------------------------------------------------
+
+export type VisionVerdict = 'false_alarm' | 'confirmed';
+
+export interface VisionFeedback {
+  labId: string;
+  receivedAt: number;
+  verdict: VisionVerdict;
+  by: string;
+  at: string;
+}
+
+const FEEDBACK_FILE = path.join(PERSIST_DIR, 'feedback.jsonl');
+const feedbacks = new Map<string, VisionFeedback>();
+
+function feedbackKey(labId: string, receivedAt: number): string {
+  return `${labId}:${receivedAt}`;
+}
+
+/** 启动回放 feedback.jsonl 尾部（与事件 JSONL 同样的"尽力而为"策略） */
+function replayFeedbackFromDisk(): void {
+  try {
+    if (!fs.existsSync(FEEDBACK_FILE)) return;
+    const lines = fs.readFileSync(FEEDBACK_FILE, 'utf8').split('\n').filter(Boolean).slice(-500);
+    for (const line of lines) {
+      try {
+        const entry = JSON.parse(line) as VisionFeedback;
+        if (entry && entry.labId && typeof entry.receivedAt === 'number'
+            && (entry.verdict === 'false_alarm' || entry.verdict === 'confirmed')) {
+          feedbacks.set(feedbackKey(entry.labId, entry.receivedAt), entry);
+        }
+      } catch { /* 单行损坏跳过 */ }
+    }
+  } catch { /* 忽略 */ }
+}
+void replayFeedbackFromDisk();
+
+export type FeedbackResult =
+  | { ok: true; feedback: VisionFeedback }
+  | { ok: false; code: 'unknown_event' | 'bad_verdict'; message: string };
+
+/** 记录人工核查结论：事件必须真实存在（防对凭空事件标注） */
+export function recordVisionFeedback(labId: string, receivedAt: number, verdict: VisionVerdict, by: string): FeedbackResult {
+  const pool = labs.get(labId)?.history ?? [];
+  if (!pool.some((event) => event.receivedAt === receivedAt)) {
+    return { ok: false, code: 'unknown_event', message: `事件不存在或已滚出保留窗口：${labId}@${receivedAt}` };
+  }
+  const entry: VisionFeedback = {
+    labId, receivedAt, verdict,
+    by: String(by || '').slice(0, 64) || 'unknown',
+    at: new Date().toISOString()
+  };
+  feedbacks.set(feedbackKey(labId, receivedAt), entry);
+  if (persistenceEnabled) {
+    try {
+      fs.mkdirSync(PERSIST_DIR, { recursive: true });
+      fs.appendFileSync(FEEDBACK_FILE, JSON.stringify(entry) + '\n', 'utf8');
+    } catch { /* 尽力而为 */ }
+  }
+  return { ok: true, feedback: entry };
+}
+
+/** 房间级查询：该房间最近的人工核查结论（无则 null） */
+export function visionFeedbackFor(labId: string): VisionFeedback | null {
+  let latest: VisionFeedback | null = null;
+  for (const entry of feedbacks.values()) {
+    if (entry.labId !== labId) continue;
+    if (!latest || entry.at > latest.at) latest = entry;
+  }
+  return latest;
+}
+
+/** 事件级查询（供 events 输出合并） */
+export function visionEventFeedback(labId: string, receivedAt: number): VisionFeedback | null {
+  return feedbacks.get(feedbackKey(labId, receivedAt)) ?? null;
+}
+
+export interface VisionFeedbackStats { falseAlarm: number; confirmed: number }
+
+/** 房间级误报/确认统计（Agent 用：历史误报多的事件应降低置信） */
+export function visionFeedbackStats(labId?: string): VisionFeedbackStats {
+  let falseAlarm = 0;
+  let confirmed = 0;
+  for (const entry of feedbacks.values()) {
+    if (labId && entry.labId !== labId) continue;
+    if (entry.verdict === 'false_alarm') falseAlarm += 1;
+    else confirmed += 1;
+  }
+  return { falseAlarm, confirmed };
+}
+
+/** 仅测试用 */
 export function resetVisionStoreForTests(options: { persist?: boolean } = {}): void {
   labs.clear();
   globalEvents = [];
   seenNonces.clear();
+  feedbacks.clear();
   persistenceEnabled = options.persist ?? false;
 }

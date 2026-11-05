@@ -138,10 +138,9 @@ function toggleSnapshot(lab: VisionLabSummary): void {
 
 /** 把现场差异交给 Agent：预填草稿并跳到助手首屏（工作台草稿键 '__new'） */
 function askAgent(lab: VisionLabSummary): void {
-  const scene = lab.sceneState === 'over_capacity' ? '超容量' : lab.sceneState === 'occupied' ? '有人' : lab.sceneState === 'empty' ? '无人' : (lab.sceneState || '未知');
   const question = tr(
-    '请核对 {lab} 的现场人数与签到记录是否一致：视觉边缘 AI 计数 {n} 人（场景：{scene}，数据 {age} 秒前）。两口径如有差异，请只分析原因并给出核查建议，不要直接办理。',
-    { lab: lab.labId, n: lab.count, scene, age: lab.ageSeconds }
+    '请核对 {lab} 的现场人数与签到记录是否一致：视觉边缘 AI 计数 {n} 人{cap}，数据 {age} 秒前。两口径如有差异，请只分析原因并给出核查建议，不要直接办理。',
+    { lab: lab.labId, n: lab.count, cap: lab.capacity !== null ? `/${lab.capacity} 容量` : '', age: lab.ageSeconds }
   );
   session.saveDraft('__new', question);
   emit('navigate', { view: 'assistant' });

@@ -452,7 +452,7 @@ Object.assign(en,{
  "{n} 小时前": "{n}h ago",
  "视觉数据读取失败：{m}": "Failed to read vision data: {m}",
  "边缘推理：画面与人脸不出实验室内网；云端仅存剥离身份后的 JSON（人数/场景/事件）。二维码签到永远是主链，视觉只做辅助。": "Edge inference: footage and faces never leave the lab LAN; the cloud stores only identity-free JSON (counts/scenes/events). QR check-in is always the primary channel; vision only assists.",
- "请核对 {lab} 的现场人数与签到记录是否一致：视觉边缘 AI 计数 {n} 人（场景：{scene}，数据 {age} 秒前）。两口径如有差异，请只分析原因并给出核查建议，不要直接办理。": "Please verify whether the on-site headcount in {lab} matches check-in records: edge AI counted {n} people (scene: {scene}, data {age}s old). If the two differ, analyse causes and suggest checks only — do not execute anything."
+ "请核对 {lab} 的现场人数与签到记录是否一致：视觉边缘 AI 计数 {n} 人{cap}，数据 {age} 秒前。两口径如有差异，请只分析原因并给出核查建议，不要直接办理。": "Please verify whether the on-site headcount in {lab} matches check-in records: edge AI counted {n} people{cap}, data {age}s old. If the two differ, analyse causes and suggest checks only — do not execute anything."
 });
 Object.assign(en,{
  '开始处理':'Start',

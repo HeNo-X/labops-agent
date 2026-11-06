@@ -12,7 +12,7 @@ import {t as tr} from "../i18n";
  *    运行中输入的那句进入待发送（单条、按会话隔离），本轮结束后由父组件决定
  *    自动发出还是填回草稿。示例 chips 在运行中仍禁用。
  */
-import { computed } from 'vue';
+import { computed, nextTick, ref } from 'vue';
 import { useRunStore } from '../stores/run';
 import { useVoiceInput } from '../composables/useVoiceInput';
 import { useHoldToTalk } from '../composables/useHoldToTalk';
@@ -114,10 +114,29 @@ const voiceHint = computed(() => {
 
 // 长按说话：按下开始录音，松手结束并回填。交互逻辑在 useHoldToTalk（PC/移动端共用一份）。
 const voiceFix = useVoiceCorrection(voice, text);
+/**
+ * PC 端也走微信式：点麦克风先切「语音模式」（输入框变整行长条、条上直接写「按住说话」），
+ * 而不是让用户对着一个麦克风图标猜要不要长按。
+ * 录音仍复用 useHoldToTalk —— 与移动端同一份交互实现。
+ */
+const voiceMode = ref(false);
+const inputEl = ref<HTMLTextAreaElement | null>(null);
 const hold = useHoldToTalk({
   voice,
-  onText: voiceFix.applyText
+  onText: (recognized: string) => {
+    voiceFix.applyText(recognized);
+    voiceMode.value = false;
+    void nextTick(() => inputEl.value?.focus());
+  }
 });
+function enterVoice(): void {
+  if (busy.value || voice.working.value) return;
+  voiceMode.value = true;
+}
+function exitVoice(): void {
+  voiceMode.value = false;
+  void nextTick(() => inputEl.value?.focus());
+}
 
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -165,18 +184,44 @@ function onKeydown(e: KeyboardEvent): void {
         用 working 高亮表达状态，并在聆听条里给「松手结束」的提示。
       -->
       <button
-        v-if="voice.supported.value"
+        v-if="voice.supported.value && !voiceMode"
         type="button"
         class="bar__mic"
-        :class="{ 'is-active': voice.working.value, 'is-holding': hold.holding.value }"
+        :class="{ 'is-active': voice.working.value }"
         :disabled="busy"
-        :aria-label="tr(voice.status.value === 'recording' ? '松手结束并识别' : '按住说话')"
-        :title="tr(voice.status.value === 'recording' ? '松手结束并识别' : '按住说话')"
-        v-on="hold.handlers"
+        :aria-label="tr('语音输入')"
+        :title="tr('语音输入')"
+        @click="enterVoice"
       >
         <UiIcon name="mic" />
       </button>
+      <button
+        v-else-if="voice.supported.value && voiceMode"
+        type="button"
+        class="bar__mic"
+        :disabled="busy"
+        :aria-label="tr('切换到键盘输入')"
+        :title="tr('切换到键盘输入')"
+        @click="exitVoice"
+      >
+        <UiIcon name="keyboard" />
+      </button>
+      <button
+        v-if="voiceMode"
+        type="button"
+        class="bar__speak"
+        :class="{ 'is-active': voice.status.value === 'recording', 'is-cancel': hold.sliding.value }"
+        :disabled="busy"
+        :aria-label="tr('按住说话')"
+        v-on="hold.handlers"
+      >
+        <UiIcon name="mic" />
+        <span class="bar__speak-text">{{
+          tr(hold.sliding.value ? '松开取消' : voice.status.value === 'recording' ? '松开结束' : '按住说话')
+        }}</span>
+      </button>
       <textarea
+        v-else
         id="cmd"
         ref="inputEl"
         v-model="text"
@@ -186,7 +231,7 @@ function onKeydown(e: KeyboardEvent): void {
         :disabled="voice.working.value"
         @keydown="onKeydown"
       />
-      <button v-if="!busy" type="button" class="bar__btn" :disabled="!canSubmit" @click="submit">
+      <button v-if="!busy && !voiceMode" type="button" class="bar__btn" :disabled="!canSubmit" @click="submit">
         {{tr(props.submitLabel ?? '发送')}}
       </button>
       <template v-else>
@@ -252,7 +297,45 @@ function onKeydown(e: KeyboardEvent): void {
   margin: 0 auto;
   padding: var(--sp-4) var(--sp-5);
 }
-.bar--hero .bar__input {
+.bar--hero .bar__speak {
+  flex: 1;
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.bar__speak:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.bar__speak:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.bar__speak.is-active {
+  border-color: var(--primary);
+  background: var(--primary-weak, #eef4ff);
+  color: var(--primary);
+}
+.bar__speak.is-cancel {
+  border-color: var(--danger, #d93026);
+  background: var(--danger-weak, #fdecec);
+  color: var(--danger, #d93026);
+}
+.bar__input {
   font-size: calc(var(--ui-font-size) * 1.15385);
   min-height: 56px;
 }

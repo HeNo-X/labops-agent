@@ -9,6 +9,8 @@
  *    ④ 用户已经手改过草稿时，还原按钮必须是禁用态（不能把用户的修改覆盖掉）
  *    ⑤ U1 用户登记：词对存在本机、随请求带上、来源在提示条里说得清、
  *       叫停只停词典自动规则、删掉登记能真正回到改造前的请求形态
+ *    ⑥ U2 常用词：只进事前偏置（不改写文本），并且面板说法跟着服务端开关变 ——
+ *       关着说"未发给模型"，开着给出字数/词数，叫停说"这次没发"，删光就不再带字段
  *
  *  ⚠ /api/agent/transcribe 由 page.route **桩替代**：本探针只证明契约与交互接通，
  *    纠错本身的质量由 `npm run eval:asr` 与 tests/asr-syllable.test.ts 负责，
@@ -66,13 +68,43 @@ const USER_TO = '投影仪';
 const USER_RAW = '投映仪已修好';
 const USER_FIXED = '投影仪已修好';
 
+/**
+ * 桩服务端的偏置开关，模拟现网 `.env` 的 ASR_CONTEXT_ENABLED：
+ * 默认关 —— 这正是 U2 面板最容易骗人的地方（词保存了≠发给模型了），
+ * 所以两种状态都要跑一遍，看界面说法是否跟着服务端事实变。
+ */
+let stubContextEnabled = false;
+
+/** 按请求体算出服务端会回报的 bias（照实反映"发没发"，不给默认值糊弄） */
+function stubBias(body: Record<string, unknown>): Record<string, unknown> {
+  const skipped = body['skipTermCorrect'] === true;
+  const keywords = Array.isArray(body['extraTerms']) ? (body['extraTerms'] as unknown[]).length : 0;
+  const sent = stubContextEnabled && !skipped;
+  return {
+    context: sent,
+    options: true,
+    hotwords: false, // 桩按现网协议 chat_audio 说话：这条路没有热词通道
+    hotwordCount: 0,
+    format: false,
+    language: 'zh',
+    itn: false,
+    degraded: false,
+    contextChars: sent ? 26 + keywords * 4 : 0,
+    termsInContext: sent ? 8 + keywords : 0,
+    omittedFromBudget: 0,
+    hotwordsAvailable: 0,
+    userKeywordsRegistered: keywords,
+    suppressedByUser: skipped
+  };
+}
+
 // 桩：带 termPairs 优先走"用户登记"分支；否则带 skipTermCorrect 原样返回，再否则返回"词典已纠正 + 改动清单"
 await page.route('**/api/agent/transcribe', async (route: Route) => {
   const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
   transcribeBodies.push(body);
   const skipped = body['skipTermCorrect'] === true;
-  const pairs = Array.isArray(body['termPairs']) ? (body['termPairs'] as Array<{ from?: string; to?: string }>) : [];
-  if (pairs.length) {
+  const bias = stubBias(body);
+  if (Array.isArray(body['termPairs']) && (body['termPairs'] as unknown[]).length) {
     // 服务端第零遍的形状：只回用户登记的那一条改动，且 via='user'；叫停时也照样生效
     await route.fulfill({
       status: 200,
@@ -83,6 +115,7 @@ await page.route('**/api/agent/transcribe', async (route: Route) => {
         originalText: USER_RAW,
         corrections: [{ from: USER_FROM, to: USER_TO, kind: 'term', at: 0, via: 'user' }],
         ...(skipped ? { termCorrectSkipped: true } : {}),
+        bias,
         model: 'stub-asr',
         protocol: 'chat_audio',
         elapsedMs: 120
@@ -101,6 +134,7 @@ await page.route('**/api/agent/transcribe', async (route: Route) => {
         { from: '一叶枪', to: '移液枪', kind: 'term', at: 6 },
         { from: 'D五一七', to: 'D517', kind: 'room', at: 14 }
       ] }),
+      bias,
       model: 'stub-asr',
       protocol: 'chat_audio',
       elapsedMs: 120
@@ -233,7 +267,7 @@ await toggle.click();
 await page.waitForTimeout(250);
 await page.fill('#vtp-from', USER_FROM);
 await page.fill('#vtp-to', USER_TO);
-await page.locator('.vtp__save').click();
+await page.getByRole('button', { name: '保存', exact: true }).click();
 await page.waitForTimeout(250);
 const storedRaw = await page.evaluate(() => localStorage.getItem('labops.asr.term-pairs'));
 const stored = (() => { try { return JSON.parse(String(storedRaw)) as unknown; } catch { return null; } })();
@@ -257,9 +291,9 @@ await page.screenshot({ path: path.join(SHOT, 'user-pair.png') });
 // 单字为什么不让登记：一次手滑就能把整句的某个字全换掉，界面必须当场拒绝并说明理由
 await page.fill('#vtp-from', '枪');
 await page.fill('#vtp-to', '枪头');
-await page.locator('.vtp__save').click();
+await page.getByRole('button', { name: '保存', exact: true }).click();
 await page.waitForTimeout(200);
-const shortNotice = (await page.locator('.vtp__notice').innerText().catch(() => '')).trim();
+const shortNotice = (await page.locator('.vtp__body > .vtp__notice').innerText().catch(() => '')).trim();
 check('单字登记被当场拦下并说明原因（不写进"输入无效"这种废话）', /至少 2 个字/.test(shortNotice), shortNotice);
 check('拦下之后没有多出脏数据', (await page.locator('.vtp__list li').count()) === 1, String(await page.locator('.vtp__list li').count()));
 
@@ -287,6 +321,74 @@ check('删除登记后请求不再带 termPairs（可逆，且当场生效）',
 check('列表清空后 localStorage 里也没留脏数据',
   (await page.evaluate(() => localStorage.getItem('labops.asr.term-pairs'))) === '[]',
   String(await page.evaluate(() => localStorage.getItem('labops.asr.term-pairs'))));
+
+// ---------------------------------------------------------------- U2：常用词进事前偏置 + "到底发没发"要看得见
+console.log('\n[U2 · 常用词与偏置真实状态]');
+// U1 段末留在"叫停"态，先恢复，否则后面每一步都会被 suppressedByUser 干扰
+const resume2 = page.locator('.vcb__btn--ghost');
+if ((await resume2.count()) > 0) {
+  await resume2.click();
+  await page.waitForTimeout(300);
+}
+const KW = '稳压器';
+await page.fill('#vtp-word', KW);
+await page.press('#vtp-word', 'Enter');
+await page.waitForTimeout(250);
+const kwStored = await page.evaluate(() => localStorage.getItem('labops.asr.keywords'));
+check('常用词写进本机浏览器（与词对分开存，互不影响）', String(kwStored).includes(KW), String(kwStored));
+check('列表里出现这枚词条', (await page.locator('.vtp__chips li').count()) === 1, String(await page.locator('.vtp__chips').innerText().catch(() => '')));
+
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
+const kwBody = transcribeBodies.at(-1) ?? {};
+check('下一次请求把常用词带上（extraTerms）',
+  JSON.stringify(kwBody['extraTerms']) === JSON.stringify([KW]), JSON.stringify(kwBody['extraTerms']));
+const statusOff = (await page.locator('.vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+check('偏置关着时不许说成"已生效"：状态行明确写未发给模型',
+  /未发给模型/.test(statusOff) && !/已把常用词/.test(statusOff), statusOff);
+
+// 单字为什么当场拦：它只能进偏置通道，而单字提示的收益说不清
+await page.fill('#vtp-word', '枪');
+await page.press('#vtp-word', 'Enter');
+await page.waitForTimeout(250);
+const kwNotice = (await page.locator('.vtp__section .vtp__notice').innerText().catch(() => '')).trim();
+check('单字常用词被拦下并指出去哪条路才确定生效', /识别成/.test(kwNotice), kwNotice);
+check('拦下后列表没被塞进脏数据', (await page.locator('.vtp__chips li').count()) === 1, String(await page.locator('.vtp__chips li').count()));
+
+// 把服务端"开关打开"（模拟 .env 改 ASR_CONTEXT_ENABLED=1），界面说法必须跟着变
+stubContextEnabled = true;
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
+const statusOn = (await page.locator('.vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+check('开关打开后状态行改口：已随请求发出，并给出字数/词数',
+  /已把常用词连同内置词表发给模型/.test(statusOn) && /当前协议没有热词通道/.test(statusOn), statusOn);
+const barOn = (await page.locator('.vcb').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+check('常用词只进偏置、不改写文本：改动清单仍是词典那两处，没多出"按常用词替换"',
+  /一叶枪/.test(barOn) && /D五一七/.test(barOn) && !/稳压器/.test(barOn), barOn);
+await page.screenshot({ path: path.join(SHOT, 'keywords-on.png') });
+
+// 叫停：偏置属于"系统在影响这句话怎么被听出来"，叫停就得一起停，并且要说清停的是它
+await page.locator('.vcb__btn--ghost').click();
+await page.waitForTimeout(300);
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
+const supBody = transcribeBodies.at(-1) ?? {};
+const statusSup = (await page.locator('.vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+check('叫停后请求带上 skipTermCorrect，状态行说"这次没有发给模型"（不谎报）',
+  supBody['skipTermCorrect'] === true && /没有发给模型/.test(statusSup), statusSup);
+await page.locator('.vcb__btn--ghost').click(); // 恢复，给后面的删除步骤一个干净起点
+await page.waitForTimeout(300);
+
+// 收回：删掉常用词后不该再往请求里塞字段
+await page.locator('.vtp__chip-del').first().click();
+await page.waitForTimeout(250);
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
+check('删除后请求不再带 extraTerms（可逆，且当场生效）',
+  transcribeBodies.at(-1)?.['extraTerms'] === undefined, JSON.stringify(transcribeBodies.at(-1)?.['extraTerms']));
+const statusEmpty = (await page.locator('.vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+check('列表空了，状态行也不再声称发过', /还没有登记常用词/.test(statusEmpty), statusEmpty);
+stubContextEnabled = false;
 
 const realErrors = errors.filter((e) => !/503 \(Service Unavailable\)|favicon/.test(e));
 check('无 console 错误', realErrors.length === 0, realErrors.slice(0, 3).join(' | ') || '0 条');

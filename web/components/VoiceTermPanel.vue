@@ -17,16 +17,60 @@
 import { computed, ref } from 'vue';
 import { t as tr } from '../i18n';
 import { useUserTerms } from '../composables/useUserTerms';
+import type { VoiceBias } from '../composables/useVoiceInput';
 
-const { pairs, count, add, remove, clear } = useUserTerms();
+const props = defineProps<{
+  /** 上一次请求回报的偏置真实状态；没有成功请求过就是 null（面板不许拿"配置开了"代替它） */
+  bias?: VoiceBias | null;
+  /** 上一次请求实际使用的上游协议，用于判断热词这条路存不存在 */
+  protocol?: string;
+}>();
+
+const { pairs, count, add, remove, clear, keywords, keywordCount, addKeyword, removeKeyword, clearKeywords } = useUserTerms();
 
 const open = ref(false);
 const from = ref('');
 const to = ref('');
 const notice = ref('');
 const confirmClear = ref(false);
+const word = ref('');
+const wordNotice = ref('');
+const confirmClearWords = ref(false);
 
 const full = computed(() => count.value >= 100);
+
+/**
+ * 常用词的真实去向。四种说法对应四种事实，绝不用"已保存"糊弄成"已生效"：
+ *   没成功识别过 / 开关关着没发 / 发出去了（含降级与预算挤掉）/ 用户自己叫停了。
+ */
+const keywordStatus = computed(() => {
+  const n = keywordCount.value;
+  if (!n) return tr('还没有登记常用词。');
+  const bias = props.bias;
+  if (!bias) return tr('已登记 {n} 个常用词，但还没有一次成功的识别可以依据。', { n });
+  if (bias.suppressedByUser === true) return tr('本页已叫停自动调整，{n} 个常用词这次没有发给模型。', { n });
+  const sent = bias.context === true;
+  if (!sent) return tr('已登记 {n} 个常用词，但本次未发给模型：服务端事前偏置当前是关的（收益未量化）。', { n });
+  const parts = [
+    tr('本次已把常用词连同内置词表发给模型：上下文 {chars} 字、{terms} 个词', {
+      chars: String(Number(bias.contextChars ?? 0)),
+      terms: String(Number(bias.termsInContext ?? 0))
+    })
+  ];
+  const omitted = Number(bias.omittedFromBudget ?? 0);
+  if (omitted > 0) parts.push(tr('预算挤掉 {n} 个', { n: String(omitted) }));
+  if (bias.degraded === true) parts.push(tr('上游不收增强参数，已降级重发'));
+  if (bias.hotwords === true) {
+    parts.push(tr('即时热词已按文档字段发出 {n} 条，但官方请求示例未给出该字段，上游是否采纳未证实', {
+      n: String(Number(bias.hotwordCount ?? 0))
+    }));
+  } else if (props.protocol === 'dashscope_native') {
+    parts.push(tr('即时热词本次未发'));
+  } else {
+    parts.push(tr('当前协议没有热词通道'));
+  }
+  return parts.join('；') + '。';
+});
 
 function toggle(): void {
   open.value = !open.value;
@@ -66,17 +110,48 @@ function clearAll(): void {
   confirmClear.value = false;
   notice.value = '';
 }
+
+function submitWord(): void {
+  const result = addKeyword(word.value);
+  if (result.ok) {
+    word.value = '';
+    wordNotice.value = '';
+    return;
+  }
+  wordNotice.value =
+    result.reason === 'empty' ? tr('先写一个词')
+      : result.reason === 'tooShort' ? tr('单个字不必登记：想确定生效，请用上面的「识别成 → 应该是」')
+        : result.reason === 'tooLong' ? tr('一个词最多 24 个字')
+          : result.reason === 'duplicate' ? tr('这个词已经在列表里')
+            : tr('已到 100 条上限，先删掉不用的');
+}
+
+function removeWordAt(at: number): void {
+  removeKeyword(at);
+  wordNotice.value = '';
+}
+
+function clearWords(): void {
+  if (!confirmClearWords.value) {
+    confirmClearWords.value = true;
+    return;
+  }
+  clearKeywords();
+  confirmClearWords.value = false;
+  wordNotice.value = '';
+}
 </script>
 
 <template>
   <div class="vtp">
     <button type="button" class="vtp__toggle" :aria-expanded="open" @click="toggle">
-      <span class="vtp__toggle-label">{{ tr('登记常见误写') }}</span>
+      <span class="vtp__toggle-label">{{ tr('我的语音词汇') }}</span>
       <span v-if="count" class="vtp__count">{{ count }}</span>
       <span class="vtp__caret" aria-hidden="true">{{ open ? '▾' : '▸' }}</span>
     </button>
 
     <div v-if="open" class="vtp__body">
+      <p class="vtp__lead">{{ tr('「识别成 → 应该是」会直接改写结果；常用词只是提示模型，可能不生效。') }}</p>
       <form class="vtp__form" @submit.prevent="submit">
         <label class="sr-only" for="vtp-from">{{ tr('识别成的样子') }}</label>
         <input id="vtp-from" v-model="from" maxlength="24" :placeholder="tr('识别成（例：一叶枪）')" autocomplete="off">
@@ -106,6 +181,26 @@ function clearAll(): void {
       <button v-if="count" type="button" class="vtp__del vtp__del--all" @click="clearAll">
         {{ confirmClear ? tr('确认清除全部？') : tr('清除全部') }}
       </button>
+
+      <div class="vtp__section">
+        <p class="vtp__section-title">{{ tr('常用词（只填正确写法）') }}</p>
+        <form class="vtp__form" @submit.prevent="submitWord">
+          <label class="sr-only" for="vtp-word">{{ tr('常用词') }}</label>
+          <input id="vtp-word" v-model="word" maxlength="24" :placeholder="tr('例：稳压器、门禁电源')" autocomplete="off">
+          <button type="submit" class="vtp__save">{{ tr('添加') }}</button>
+        </form>
+        <p v-if="wordNotice" class="vtp__notice" role="alert">{{ wordNotice }}</p>
+        <ul v-if="keywordCount" class="vtp__chips">
+          <li v-for="(item, i) in keywords" :key="`${item}-${i}`">
+            <span class="vtp__chip-text">{{ item }}</span>
+            <button type="button" class="vtp__chip-del" :aria-label="tr('删除这个常用词') + `：${item}`" @click="removeWordAt(i)">×</button>
+          </li>
+        </ul>
+        <p class="vtp__status" role="status">{{ keywordStatus }}</p>
+        <button v-if="keywordCount" type="button" class="vtp__del vtp__del--all" @click="clearWords">
+          {{ confirmClearWords ? tr('确认清除全部常用词？') : tr('清除全部常用词') }}
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -150,6 +245,62 @@ function clearAll(): void {
   border-left: 2px solid var(--primary-border);
   border-radius: var(--radius-sm);
   background: var(--surface);
+}
+/* 两种词汇的生效方式不同，这句话是唯一能一眼看出差别的地方，别藏进帮助里 */
+.vtp__lead {
+  margin: 0 0 var(--sp-2);
+  color: var(--text-muted);
+  font-size: calc(var(--ui-font-size) * 0.92308);
+}
+.vtp__section {
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--border);
+}
+.vtp__section-title {
+  margin: 0 0 var(--sp-1);
+  color: var(--text);
+  font-size: calc(var(--ui-font-size) * 0.92308);
+  font-weight: 600;
+}
+.vtp__chips {
+  list-style: none;
+  margin: var(--sp-1) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.vtp__chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  padding: 1px 2px 1px var(--sp-2);
+}
+.vtp__chip-text {
+  font-size: calc(var(--ui-font-size) * 0.92308);
+  overflow-wrap: anywhere;
+}
+.vtp__chip-del {
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  font: inherit;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+.vtp__chip-del:hover {
+  color: var(--text);
+}
+.vtp__status {
+  margin: var(--sp-2) 0 0;
+  color: var(--text-muted);
+  font-size: calc(var(--ui-font-size) * 0.92308);
+  overflow-wrap: anywhere;
 }
 .vtp__form {
   display: flex;

@@ -15,7 +15,26 @@
 
 import { computed, onUnmounted, ref } from 'vue';
 import { clientFetch } from '../client';
-import { currentUserTermPairs } from './useUserTerms';
+import { currentUserTermPairs, currentKeywords } from './useUserTerms';
+
+/**
+ * 服务端回报的偏置真实状态（`bias` 字段）。界面只拿它说话，不拿"配置里开了"说话：
+ * 配置开了但上游不收、或用户叫停了，applied 会照实是 false —— 差别必须看得见。
+ */
+export interface VoiceBias {
+  context?: boolean;
+  options?: boolean;
+  hotwords?: boolean;
+  hotwordCount?: number;
+  format?: boolean;
+  degraded?: boolean;
+  contextChars?: number;
+  termsInContext?: number;
+  omittedFromBudget?: number;
+  hotwordsAvailable?: number;
+  userKeywordsRegistered?: number;
+  suppressedByUser?: boolean;
+}
 
 export type VoiceStatus = 'idle' | 'requesting' | 'recording' | 'transcribing';
 
@@ -69,6 +88,9 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
    */
   const lastOriginalText = ref<string>('');
   const lastCorrections = ref<VoiceCorrection[]>([]);
+  /** 上一次请求的偏置真实状态与上游协议，供「常用词」面板如实显示"发没发出去" */
+  const lastBias = ref<VoiceBias | null>(null);
+  const lastProtocol = ref<string>('');
   /** 用户点了"本页不再自动调整术语"后置真：后续请求停掉**词典自动**改动（用户自己登记的写法仍生效） */
   const suppressCorrection = ref<boolean>(false);
 
@@ -124,10 +146,15 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
           // 他自己登记的词对不在停用范围内（服务端会照实分别标注）。
           ...(suppressCorrection.value ? { skipTermCorrect: true } : {}),
           // 登记过的写法随请求带上去：服务端只在本条转写里用，不落盘、不影响别人。
-          // 一条都没有时整个字段不出现，保持与旧请求体逐字一致。
+          // 词对（termPairs）走纠正层精确替换；常用词（extraTerms）只进事前偏置。
+          // 两者为空时整个字段不出现，保持与改造前的请求体逐字一致。
           ...(() => {
             const termPairs = currentUserTermPairs();
-            return termPairs.length ? { termPairs } : {};
+            const extraTerms = currentKeywords();
+            return {
+              ...(termPairs.length ? { termPairs } : {}),
+              ...(extraTerms.length ? { extraTerms } : {})
+            };
           })()
         })
       });
@@ -142,6 +169,8 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
         text?: string;
         originalText?: string;
         corrections?: Array<{ from: string; to: string; kind?: string; via?: string }>;
+        bias?: unknown;
+        protocol?: string;
       };
       const text = (data.text ?? '').trim();
       // 服务端只在真的改过时才回传 originalText/corrections；这里原样接住给界面展示。
@@ -152,6 +181,9 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
           .map((c) => ({ from: c.from, to: c.to, via: c.via ?? 'unknown' }))
         : [];
       lastOriginalText.value = lastCorrections.value.length ? (data.originalText ?? '') : '';
+      // 偏置的真实状态：常用词面板靠它说"这次到底发没发出去"，所以没有就是 null，不填默认值。
+      lastBias.value = data.bias && typeof data.bias === 'object' ? (data.bias as VoiceBias) : null;
+      lastProtocol.value = typeof data.protocol === 'string' ? data.protocol : '';
       if (!text) {
         errorCode.value = 'empty';
         return null;
@@ -173,6 +205,9 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
     // 每次重新录音都清掉上一轮的改动记录，否则提示行会说这轮没做过的事
     lastOriginalText.value = '';
     lastCorrections.value = [];
+    // 偏置状态同理：新录音没结果之前，面板不该继续显示上一轮"发没发出去"
+    lastBias.value = null;
+    lastProtocol.value = '';
     if (!supported.value) {
       errorCode.value = typeof window !== 'undefined' && window.isSecureContext === false ? 'insecure' : 'unsupported';
       return;
@@ -284,6 +319,7 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
 
   return {
     status, seconds, errorCode, supported, recording, working, start, stop, cancel,
-    lastOriginalText, lastCorrections, suppressCorrection, clearCorrections, suppressCorrections, unsuppressCorrections
+    lastOriginalText, lastCorrections, lastBias, lastProtocol,
+    suppressCorrection, clearCorrections, suppressCorrections, unsuppressCorrections
   };
 }

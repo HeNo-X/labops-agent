@@ -247,6 +247,61 @@ function hotwordFits(word: string): boolean {
   return [...w].length <= 15;
 }
 
+const MIN_KEYWORD_CHARS = 2;
+const MAX_KEYWORD_CHARS = 24;
+const MAX_KEYWORDS = 100;
+
+/**
+ * 用户"常用词"（只填正确写法那种）的清洗规则。为什么单字不许：
+ * 上下文与热词都是**整串提示**，一个单字进去等于给模型一个歧义面极大的候选，
+ * 收益说不清、干扰看得见；界面也按同一套规则当场拦下，不让用户先写后再被忽略。
+ * 非字符串、空白、控制字符、重复项一律丢掉，且不报错也不猜。
+ */
+export function sanitizeKeywords(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw as unknown[]) {
+    if (out.length >= MAX_KEYWORDS) break;
+    if (typeof item !== 'string') continue;
+    const word = item.trim();
+    const chars = [...word].length;
+    if (chars < MIN_KEYWORD_CHARS || chars > MAX_KEYWORD_CHARS) continue;
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001f\u007f]/.test(word)) continue;
+    if (seen.has(word)) continue;
+    seen.add(word);
+    out.push(word);
+  }
+  return out;
+}
+
+/**
+ * 把用户常用词并进即时热词表。两件事按证据来：
+ *   - 权重取官方即时热词区间（1～5）的上限 5，不编更大的数（1000 那条属未证实，见方案 §11）；
+ *   - 用户词排在内置表前面 —— 内置 148 条是"我们猜他要说什么"，用户写的是"他明说的"，
+ *     条数被上限截断时应该先保后者。
+ */
+export function withKeywordHotwords(
+  base: Readonly<Record<string, number>>,
+  keywords: readonly string[],
+  max: number
+): Record<string, number> {
+  const cap = Math.max(0, Math.floor(max));
+  const out: Record<string, number> = {};
+  for (const word of keywords) {
+    if (Object.keys(out).length >= cap) break;
+    if (!hotwordFits(word)) continue;
+    out[word] = 5;
+  }
+  for (const [word, weight] of Object.entries(base)) {
+    if (Object.keys(out).length >= cap) break;
+    if (out[word] !== undefined) continue;
+    out[word] = weight;
+  }
+  return out;
+}
+
 /** 表指纹：进缓存键与评测报告，改了词表（含 protect / blockAfter）一定看得见，不会"改了但没生效" */
 export function glossaryFingerprint(terms: readonly GlossaryTerm[], protect: readonly string[] = []): string {
   const body = terms

@@ -321,7 +321,11 @@ function onKeydown(e: KeyboardEvent): void {
     />
 
     <!-- 语音可用时才给登记入口：键盘输入的人不需要"这个词被识别成了什么" -->
-    <VoiceTermPanel v-if="voice.supported.value" />
+    <VoiceTermPanel
+      v-if="voice.supported.value"
+      :bias="voice.lastBias.value"
+      :protocol="voice.lastProtocol.value"
+    />
 
     <div v-if="busy" class="bar__hint">
       <StatusTag

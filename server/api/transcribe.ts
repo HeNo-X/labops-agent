@@ -29,6 +29,8 @@ import {
   glossaryToLexicon,
   glossaryFingerprint,
   hotwordVocabulary,
+  withKeywordHotwords,
+  sanitizeKeywords,
   charSyllableTable,
   ambiguousSyllables,
   buildContextText
@@ -55,10 +57,12 @@ interface CorrectBundle {
   contextTerms: number;
   /** 即时热词（仅 dashscope_native 会用；其它协议发了也没人收，所以不构造） */
   hotwords: Record<string, number>;
+  /** 本次参与构造偏置的用户常用词（已清洗）。留着是为了能把"登记了几条"如实回传 */
+  keywords: readonly string[];
 }
 let bundleCache: CorrectBundle | null = null;
 
-function currentBundle(): CorrectBundle {
+function currentBundle(keywords: readonly string[] = []): CorrectBundle {
   let glossary;
   try {
     glossary = loadGlossaryData();
@@ -76,12 +80,15 @@ function currentBundle(): CorrectBundle {
   } catch {
     /* 数据集拿不到：只靠人工术语表 */
   }
-  const key = `${datasetKey}+${fingerprint}+${config.contextMaxChars}+${config.protocol}+${config.hotwordsMax}`;
+  // 用户常用词也进缓存键：同一套词不重复构造，换一套词立刻重来（不许"改了但没生效"）
+  const key = `${datasetKey}+${fingerprint}+${config.contextMaxChars}+${config.protocol}+${config.hotwordsMax}+${keywords.join('\u0001')}`;
   if (bundleCache?.key === key) return bundleCache;
   const tierB = glossaryToLexicon(glossary.terms);
+  // 常用词和 Tier A 一样只走 extraTerms：它们是"展示串"，不参与音节/编辑距离判定。
+  // 排在一起交给 buildContextText 按预算取舍，超预算的数量在 omittedFromBudget 里看得见。
   const context = buildContextText(glossary.terms, {
     maxChars: config.contextMaxChars,
-    extraTerms: tierA.map((entry) => entry.canonical)
+    extraTerms: [...tierA.map((entry) => entry.canonical), ...keywords]
   });
   const bundle: CorrectBundle = {
     key,
@@ -92,8 +99,11 @@ function currentBundle(): CorrectBundle {
     contextText: context.text,
     contextOmitted: context.omitted,
     contextTerms: context.termCount,
+    keywords,
     // 只有原生协议收 vocabulary；其它协议构造了也是死数据，不如不给
-    hotwords: config.protocol === 'dashscope_native' ? hotwordVocabulary(glossary.terms, config.hotwordsMax) : {}
+    hotwords: config.protocol === 'dashscope_native'
+      ? withKeywordHotwords(hotwordVocabulary(glossary.terms, config.hotwordsMax), keywords, config.hotwordsMax)
+      : {}
   };
   bundleCache = bundle;
   return bundle;
@@ -144,12 +154,14 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  const bundle = currentBundle();
   const skipped = payload['skipTermCorrect'] === true;
-  // 说话的人自己登记的「识别成 → 应该是」：来路不明，先过 sanitizeTermPairs 再用于本次纠正。
+  // 说话的人自己登记的写法：「识别成 → 应该是」词对（第零遍精确替换）与常用词（只影响事前偏置）。
+  // 词对不受"叫停"影响（那是用户明确写的规则），常用词受影响（它和词典偏置是同一类"系统在影响
+  // 这句话怎么被听出来"的东西，叫停就得一起停，否则界面会出现解释不清的中间态）。
   const userPairs = sanitizeTermPairs(payload['termPairs']);
-  // 用户说过「本页不再自动调整术语」→ 事前偏置与**词典**自动纠错一起停：
-  // 两者都是系统在按词表影响这句话。用户亲手登记的词对不在这一停的范围里（见下面的 skipLexicon）。
+  const keywords = skipped ? [] : sanitizeKeywords(payload['extraTerms']);
+  const bundle = currentBundle(keywords);
+  // 用户点过「本页不再自动调整术语」→ 事前偏置（上下文与热词）与词典自动纠错一起停。
   const contextText = skipped ? '' : bundle.contextText;
   const hotwords = skipped ? {} : bundle.hotwords;
 
@@ -196,6 +208,9 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
       termsInContext: result.applied.context ? bundle.contextTerms : 0,
       omittedFromBudget: result.applied.context ? bundle.contextOmitted : 0,
       hotwordsAvailable: Object.keys(bundle.hotwords).length,
+      // 用户常用词的登记数。它们只走"事前"这两条有出处的通道（上下文实体词表 / 原生 vocabulary），
+      // 到底发没发出去看同一份 applied 里的 context 与 hotwords —— 不许用登记数冒充已生效。
+      userKeywordsRegistered: bundle.keywords.length,
       suppressedByUser: skipped
     },
     // 上游用量原样转述，缺就缺（上下文会增加 input token，代价要能被核对）

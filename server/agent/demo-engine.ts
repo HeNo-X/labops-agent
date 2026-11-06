@@ -15,7 +15,7 @@ import type { KnowledgeResult, BusinessPlanResult } from '../../shared/types.ts'
  *  阶段 2A：支持三个工具的路由（query_schedule / query_lab_status / query_free_rooms）。
  */
 
-import type { CheckinStatusResult, FreeRoomsResult, LabStatusResult, OperationsReportResult, QueryScheduleArgs, ScheduleQueryResult, ToolResultKind, VisionFieldResult } from '../../shared/types.ts';
+import type { CheckinStatusResult, CheckinSummaryResult, FreeRoomsResult, LabStatusResult, OperationsReportResult, QueryScheduleArgs, ScheduleQueryResult, ToolResultKind, VisionFieldResult } from '../../shared/types.ts';
 import type { Proposal } from '../../shared/operations-contract.ts';
 import type { Dataset } from '../data/store.ts';
 import { weekdayOf } from '../time/term.ts';
@@ -23,6 +23,8 @@ import type { Intent } from './intent.ts';
 import { executeTool } from '../tools/registry.ts';
 import type { ToolContext, ToolExecution } from '../tools/registry.ts';
 import { isBusinessConnected } from '../business/bridge.ts';
+import { PERSONAL_CHECKIN_RE } from '../tools/query-checkin-status.ts';
+import { CHECKIN_SUMMARY_RE } from '../tools/query-checkin-summary.ts';
 
 export interface DemoPlan {
   /** 本次要调的工具名 */
@@ -47,10 +49,11 @@ const OUT_OF_SCOPE_PATTERNS: Array<[RegExp, string]> = [
   [/去年|历史|平均使用率|趋势|统计[^。]{0,4}报表/, '本系统只覆盖当前学期的课表数据，不含历史统计，我无法给出这类数字。']
 ];
 
-// ---- 在室人数 vs 签到明细：两者数据可得性完全不同，不能混成一条拒绝文案（2026-10-06 修正）----
+// ---- 在室人数 vs 签到明细 vs 本人签到状态：三者数据可得性完全不同，不能混成一条拒绝文案 ----
 //  在室人数：主系统 /occupancy 提供"上海当日同房间、同主体逐条配对的未结束有效签到记录"的房间级计数（与主系统页面同源），
 //           业务通道连通时**可以给真实数字**；此前被这条兜底规则一律拦成"无法提供"，是错的。
-//  签到明细：逐人签到/签退/补签记录没有对 LabOps 开放的接口，仍然如实说不可得。
+//  本人签到状态：2026-11-06 批次1 起开放（/api/integration/checkin-status，只回本人记录）——连通后可查，未连通时如实说取不到。
+//  他人签到明细：逐人签到/签退/补签明细没有对 LabOps 开放的接口，仍然如实说不可得。
 const OCCUPANCY_RE = /在室|几个人|多少人|谁在|签到(人数|情况|统计)|签退(人数|情况|统计)/;
 const CHECKIN_DETAIL_RE = /签到|签退|补签/;
 
@@ -99,22 +102,48 @@ export function planDemo(question: string, intent: Intent, ds: Dataset): DemoPla
     };
   }
 
-  // 在室人数 / 签到明细：先于通用越界规则判断（两者数据可得性不同，见上方常量注释）
+  // 在室人数 / 签到明细 / 本人签到状态：先于通用越界规则判断（三者数据可得性不同，见上方常量注释）
   const wantsOccupancy = OCCUPANCY_RE.test(q);
   if (wantsOccupancy || CHECKIN_DETAIL_RE.test(q)) {
     const disclosure = ['本回答由服务端规则引擎给出，未调用大模型'];
     if (!wantsOccupancy) {
+      // 「我签到了吗」类本人状态问法：批次1 已开放本人状态接口，未连通时如实说取不到，不再伪装成"无接口"
+      if (PERSONAL_CHECKIN_RE.test(q)) {
+        return {
+          tool: '',
+          callTool: false,
+          args: {},
+          directReply:
+            '现在没有连接原系统账号，取不到本人签到状态，也不会估计。' +
+            '连接原系统账号后可以查询本人当日课程位置与签到/签退状态（签到须本人在实验室现场完成，Agent 不代签）；' +
+            '他人的逐人签到明细仍然没有对 LabOps 开放的接口。',
+          needsDisclosure: disclosure
+        };
+      }
       return {
         tool: '',
         callTool: false,
         args: {},
         directReply:
           '逐人签到/签退/补签明细没有对 LabOps 开放的接口，我查不到（签到办理与异常申诉也尚未接入）。' +
-          '房间在室人数可以查，例如「E310 现在有多少人？」——口径是上海当日同房间、同主体逐条配对的未结束有效签到记录，与主系统页面同源。',
+          '本人当日签到状态在连接原系统账号后可以查；房间在室人数也可以查，例如「E310 现在有多少人？」' +
+          '——口径是上海当日同房间、同主体逐条配对的未结束有效签到记录，与主系统页面同源。',
         needsDisclosure: disclosure
       };
     }
     if (!isBusinessConnected()) {
+      if (CHECKIN_SUMMARY_RE.test(q)) {
+        return {
+          tool: '',
+          callTool: false,
+          args: {},
+          directReply:
+            '现在没有连接原系统账号，取不到签到汇总，也不会估计。' +
+            '连接后管理员可按日期、实验室与节次查询应到/实到/缺口与未签到学号名单（仅管理员可查，缺口需现场核实，请勿代替学生签到）；' +
+            '房间在室人数同样需要连接后才能给出真实数字。',
+          needsDisclosure: [...disclosure, '未查询任何数据（业务通道未连接）']
+        };
+      }
       return { tool: '', callTool: false, args: {}, directReply: occupancyFallback('no_channel', ds), needsDisclosure: [...disclosure, '未查询任何数据（业务通道未连接）'] };
     }
     if (!intent.labName) {
@@ -508,6 +537,7 @@ export function renderDemoAnswer(
     if (result.kind === 'business_plan') return renderBusinessFacts(result.payload as BusinessPlanResult);
     if (result.kind === 'lab_status') return renderLabStatusAnswer(result.payload as LabStatusResult, extras);
     if (result.kind === 'checkin_status') return renderCheckinStatusAnswer(result.payload as CheckinStatusResult);
+    if (result.kind === 'checkin_summary') return renderCheckinSummaryAnswer(result.payload as CheckinSummaryResult);
     if (result.kind === 'vision_field') return renderVisionFieldAnswer(result.payload as VisionFieldResult);
     if (result.kind === 'free_rooms') return renderFreeRoomsAnswer(result.payload as FreeRoomsResult);
     if (result.kind === 'operation_proposal') return renderProposalAnswer(result.payload as Proposal);
@@ -597,13 +627,50 @@ function renderScheduleAnswer(
 }
 
 /** 视觉现场事实回答：逐行转达边缘上报的剥离身份事实；红线说明必须随行转达 */
-function renderVisionFieldAnswer(r: VisionFieldResult): string {
+export function renderVisionFieldAnswer(r: VisionFieldResult): string {
   if (!r.configured) return `**${r.note ?? '视觉边缘服务未接入'}**`;
   const lines: string[] = [];
-  if (r.detailLines.length) lines.push(...r.detailLines);
-  else if (r.knownLabs) lines.push(`已接入房间：${r.knownLabs.join('、') || '无'}；${'暂无该房间数据'}`);
+  // 防御：视觉结果可能来自不同源头（工具直出 / 会话恢复 / 历史回放），
+  // detailLines 不是必然存在。缺了就地从 labs 重建，不能让整轮回答崩在 .length 上。
+  const detail = Array.isArray(r.detailLines) ? r.detailLines : [];
+  if (detail.length) lines.push(...detail);
+  else if (Array.isArray(r.labs) && r.labs.length) {
+    for (const lab of r.labs) {
+      const capacity = lab.capacity !== null && lab.capacity !== undefined ? `/${lab.capacity} 容量` : '';
+      const faces = typeof lab.recognized === 'number' ? `，已录入人脸命中 ${lab.recognized} 人` : '';
+      const state = lab.online ? '在线' : '摄像头离线';
+      lines.push(`${lab.labId || '未知房间'}：${state}，AI 计数 ${lab.count ?? '未知'}${capacity} 人${faces}`);
+    }
+  } else if (Array.isArray(r.knownLabs)) lines.push(`已接入房间：${r.knownLabs.join('、') || '无'}；${'暂无该房间数据'}`);
   else lines.push('暂无上报数据');
   if (r.note) lines.push(`（${r.note}）`);
+  return lines.join('\n');
+}
+
+/** 签到汇总回答（管理员）：总量先行，缺口逐课列出（含未签到学号），红线口径随附 */
+function renderCheckinSummaryAnswer(r: CheckinSummaryResult): string {
+  if (!r.sessions.length) return `**${r.date} 所选范围内没有排课，无签到汇总。**`;
+  const lines: string[] = [];
+  const t = r.totals;
+  const expectedText = t.unknownExpected ? `${t.expected}+（${t.unknownExpected} 节应到未知）` : String(t.expected);
+  lines.push(`**${r.date} 签到汇总：共 ${t.sessions} 节课，应到 ${expectedText}，已签到 ${t.checkedIn}，缺口 ${t.absent}**（签退 ${t.checkedOut}、补签到 ${t.late}、扫错实验室 ${t.mismatch}、定位失败 ${t.locationFailed}）。`);
+  for (const s of r.sessions) {
+    const time = s.start && s.end ? `${s.start}–${s.end}` : '';
+    const base = `- ${time ? time + ' ' : ''}${s.periodLabel || s.periodKey}｜《${s.courseName || '未录入'}》｜${s.labName || '实验室未录入'}｜${s.classNames.join('、') || '班级未录入'}`;
+    if (s.expected === null) {
+      lines.push(`${base}｜应到未知（${s.note || '班级人数未知'}），已签到 ${s.checkedIn}`);
+    } else if ((s.absentCount ?? 0) > 0) {
+      const names = s.absentUsernames && s.absentUsernames.length ? `，未签到学号：${s.absentUsernames.join('、')}` : '';
+      lines.push(`${base}｜应到 ${s.expected}，已签到 ${s.checkedIn}，账面缺口 ${s.absentCount}${names}${s.note ? `（${s.note}）` : ''}`);
+    } else {
+      const names = s.absentUsernames && s.absentUsernames.length ? `，但名册中有未签到学号：${s.absentUsernames.join('、')}` : '';
+      lines.push(`${base}｜应到 ${s.expected}，已签到 ${s.checkedIn}，无账面缺口${names}${s.note ? `（${s.note}）` : ''}`);
+    }
+  }
+  if (r.totals.late || r.totals.mismatch || r.totals.locationFailed) {
+    lines.push(`异常提示：补签到 ${r.totals.late}、扫错实验室 ${r.totals.mismatch}、定位失败 ${r.totals.locationFailed}——均为留痕标记，处理需管理员在主系统核对原始记录。`);
+  }
+  lines.push('（缺口=应到−实到的账面差，需现场核实后再定性；请勿代替学生签到。未签到名单为学号（账号），不含姓名。）');
   return lines.join('\n');
 }
 
@@ -611,14 +678,13 @@ function renderVisionFieldAnswer(r: VisionFieldResult): string {
 function renderCheckinStatusAnswer(r: CheckinStatusResult): string {  if (r.note) return `**${r.note}**`;
   if (!r.lessons.length) return `**${r.date} 没有本人的课程安排，无签到状态可查。**`;
   const lines: string[] = [];
-  const head = r.currentPeriod ? `${r.date}（当前节次：${r.currentPeriod.label} ${r.currentPeriod.start}–${r.currentPeriod.end}）` : r.date;
   const openUnsigned = r.lessons.find(l => l.status === 'unsigned' && l.phase === 'open');
   if (openUnsigned) {
     const late = openUnsigned.lateWindow ? '（已超过开课 20 分钟，现在签会记「补签到」）' : '';
     lines.push(`**${openUnsigned.periodLabel || openUnsigned.periodKey}《${openUnsigned.courseName || '课程'}》在 ${openUnsigned.labName || '实验室'}，尚未签到${late}。**`);
   } else {
     const done = r.lessons.filter(l => l.status !== 'unsigned');
-    lines.push(`**${done.length ? done.length + ' 节已有签到记录' : '今日课程均未到签到时间'}（${head}）。**`);
+    lines.push(`**${r.date}${done.length ? `：${done.length} 节已有签到记录` : '：暂无本人签到记录'}。**`);
   }
   for (const l of r.lessons) {
     const time = l.start && l.end ? `${l.start}–${l.end}` : '时间未录入';

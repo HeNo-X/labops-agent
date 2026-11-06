@@ -40,6 +40,10 @@ const props = withDefaults(
     pendingReplaced?: boolean;
     /** 一次性提示（如"已填回输入框，请确认后发送"） */
     notice?: string | null;
+    /** 当前会话待执行队列（最多 3 条，按序自动执行） */
+    queued?: string[];
+    /** 风险任务进行中（已生成待确认办理单）→ 禁止"立即发送"打断 */
+    riskyRunning?: boolean;
   }>(),
   {
     variant: 'hero',
@@ -49,7 +53,9 @@ const props = withDefaults(
     submitLabel: undefined,
     pendingText: null,
     pendingReplaced: false,
-    notice: null
+    notice: null,
+    queued: () => [],
+    riskyRunning: false
   }
 );
 const store = useRunStore();
@@ -68,7 +74,7 @@ const busy = computed(() => store.inputLocked || Boolean(props.submitting));
  */
 const awaitingConfirm = computed(() => store.phase === 'awaiting_confirm');
 
-const emit = defineEmits<{ submit: [string]; queue: [string]; cancel: []; 'cancel-pending': [] }>();
+const emit = defineEmits<{ submit: [string]; queue: [string]; cancel: []; 'cancel-pending': []; 'immediate-send': [string]; 'drop-queued': [string] }>();
 
 function submit(): void {
   if (!text.value.trim()) return;
@@ -235,8 +241,15 @@ function onKeydown(e: KeyboardEvent): void {
         {{tr(props.submitLabel ?? '发送')}}
       </button>
       <template v-else>
-        <button v-if="!voiceMode" type="button" class="bar__btn bar__btn--queue" :disabled="!text.trim()" @click="submit">
-          {{tr('加入待发送')}}
+        <!-- 继续发送：只在"运行中且用户已经输入内容"时出现，点了才入队 -->
+        <button
+          v-if="!voiceMode && text.trim()"
+          type="button"
+          class="bar__btn bar__btn--queue"
+          :title="tr('加入待执行队列，本轮结束后按序自动发送')"
+          @click="submit"
+        >
+          {{tr('继续发送')}}
         </button>
         <!-- 运行中：停止占据发送按钮的位置（同一列、同一尺寸），结束后自动换回发送 -->
         <button type="button" class="bar__btn bar__btn--stop" @click="emit('cancel')">{{tr("停止")}}</button>
@@ -263,14 +276,31 @@ function onKeydown(e: KeyboardEvent): void {
       </div>
     </Teleport>
 
-    <!-- 待发送：细线提示行 + 可取消。只表达"暂存意图"，不代表已经发出 -->
-    <div v-if="props.pendingText" class="bar__pending" role="status">
-      <span class="bar__pending-line"></span>
-      <span class="bar__pending-text">
-        {{tr('将在本轮结束后发送：')}}<b>{{ props.pendingText.slice(0, 40) }}{{ props.pendingText.length > 40 ? '…' : '' }}</b>
-        <em v-if="props.pendingReplaced">{{tr('（已替换上一条待发送）')}}</em>
-      </span>
-      <button type="button" class="bar__pending-cancel" @click="emit('cancel-pending')">{{tr("取消")}}</button>
+    <!-- 待执行队列：最多 3 条，本轮结束后按序自动执行；可单条立即发送或删除 -->
+    <div v-if="props.queued.length" class="bar__queue" role="status">
+      <div class="bar__queue-head">
+        <span class="bar__queue-title">{{tr('待执行')}} · {{ props.queued.length }}/3</span>
+        <button type="button" class="bar__queue-clear" @click="emit('cancel-pending')">{{tr('全部清空')}}</button>
+      </div>
+      <ol class="bar__queue-list">
+        <li v-for="(item, i) in props.queued" :key="item + '-' + i" class="bar__queue-item">
+          <span class="bar__queue-index">{{ i + 1 }}</span>
+          <span class="bar__queue-text">{{ item.length > 48 ? item.slice(0, 48) + '…' : item }}</span>
+          <button
+            type="button"
+            class="bar__queue-send"
+            :disabled="props.riskyRunning"
+            :title="props.riskyRunning ? tr('当前有等待确认的办理单，不能打断') : tr('打断当前任务并立即执行这一条')"
+            @click="emit('immediate-send', item)"
+          >
+            {{tr('立即发送')}}
+          </button>
+          <button type="button" class="bar__queue-drop" :aria-label="tr('删除这条')" @click="emit('drop-queued', item)">×</button>
+        </li>
+      </ol>
+      <p v-if="props.riskyRunning" class="bar__queue-warn">
+        {{tr('当前有等待确认的办理单：为安全起见不允许打断，请先确认或取消它。')}}
+      </p>
     </div>
 
     <p v-if="props.notice" class="bar__notice" role="status">{{ tr(props.notice) }}</p>
@@ -722,5 +752,97 @@ function onKeydown(e: KeyboardEvent): void {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   opacity: 0.7;
+}
+
+/* 待执行队列：输入区上方，最多 3 条。视觉上压低存在感，但不能像日志一样灰到看不清 */
+.bar__queue {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.bar__queue-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.bar__queue-title {
+  font-weight: 600;
+}
+.bar__queue-clear {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.bar__queue-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.bar__queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.bar__queue-index {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-3, rgba(0, 0, 0, 0.06));
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.bar__queue-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar__queue-send {
+  flex: 0 0 auto;
+  border: 1px solid var(--primary);
+  background: transparent;
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.bar__queue-send:disabled {
+  border-color: var(--border);
+  color: var(--text-faint, var(--text-muted));
+  cursor: not-allowed;
+}
+.bar__queue-drop {
+  flex: 0 0 auto;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.bar__queue-warn {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--warn, #b45309);
 }
 </style>

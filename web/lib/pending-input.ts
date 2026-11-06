@@ -80,3 +80,32 @@ export function mergeDraft(prevDraft: string, text: string): string {
   if (!tail) return prevDraft;
   return head ? `${head}\n${tail}` : tail;
 }
+
+/**
+ * 多条队列（2026-11-06）：上限 3 条，超出**拒绝并入队**并给出提示，
+ * 而不是静默丢弃或覆盖前一条 —— 用户的输入不能被偷偷吞掉。
+ */
+export const PENDING_QUEUE_MAX = 3;
+
+export interface QueueEnqueueResult {
+  queue: PendingInput[];
+  accepted: boolean;
+  /** 队列已满被拒（UI 必须提示） */
+  rejected: boolean;
+}
+
+export function enqueueQueue(queue: PendingInput[], next: PendingInput, max = PENDING_QUEUE_MAX): QueueEnqueueResult {
+  const text = next.text.trim();
+  if (!text) return { queue, accepted: false, rejected: false };
+  const duplicated = queue.some((i) => i.conversationId === next.conversationId && i.text === text);
+  if (duplicated) return { queue, accepted: false, rejected: false };
+  if (queue.length >= max) return { queue, accepted: false, rejected: true };
+  return { queue: [...queue, { ...next, text }], accepted: true, rejected: false };
+}
+
+/** 取走队首（仅当属于该会话）：自动按序执行时的唯一出口 */
+export function shiftQueueFor(queue: PendingInput[], conversationId: string | null): { head: PendingInput | null; rest: PendingInput[] } {
+  const head = queue[0];
+  if (!head || !conversationId || head.conversationId !== conversationId) return { head: null, rest: queue };
+  return { head, rest: queue.slice(1) };
+}

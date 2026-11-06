@@ -122,11 +122,35 @@ function flashPendingNotice(msg: string): void {
 const pendingTextForCurrent = computed(() =>
   pendingInput.pending && pendingInput.pending.conversationId === session.currentId ? pendingInput.pending.text : null
 );
+/** 当前会话的待发送队列（最多 3 条，按序自动执行） */
+const queuedForCurrent = computed(() =>
+  pendingInput.queue.filter((i) => i.conversationId === session.currentId).map((i) => i.text)
+);
+/** 风险任务进行中：已生成待确认办理单时不允许"立即发送"打断 */
+const riskyRunning = computed(() => store.phase === 'awaiting_confirm');
 
 function onQueueInput(q: string): void {
   const convId = session.currentId;
   if (!convId) return;
   pendingInput.enqueue(convId, session.currentMode(), q);
+  // 队列满时明确告知，绝不静默丢弃用户输入
+  if (pendingInput.rejected) flashPendingNotice('待执行队列已满（最多 3 条）：请先发送或删除一条');
+}
+/** 队列里某条的「立即发送」：先打断当前轮，再按该条内容执行（同会话，上下文连续） */
+function onImmediateSend(text: string): void {
+  if (riskyRunning.value) {
+    flashPendingNotice('当前有等待确认的办理单，不能打断：请先在对话里确认或取消');
+    return;
+  }
+  const idx = pendingInput.queue.findIndex((i) => i.conversationId === session.currentId && i.text === text);
+  if (idx >= 0) pendingInput.dropAt(idx);
+  onCancel();
+  void onSubmit(text);
+}
+/** 队列里某条的「删除」 */
+function onDropQueued(text: string): void {
+  const idx = pendingInput.queue.findIndex((i) => i.conversationId === session.currentId && i.text === text);
+  if (idx >= 0) pendingInput.dropAt(idx);
 }
 function onCancelPending(): void {
   pendingInput.clear();
@@ -146,11 +170,14 @@ function consumePendingOnTerminal(convId: string | null): void {
     if (taken) session.saveDraft(folded.conversationId, mergeDraft(session.draftFor(folded.conversationId), taken.text));
     return;
   }
+  // 队列化之后语义变了：队里排的是**用户明确要求执行**的指令，
+  // 终态就该按序发出，不能因为输入框里还有草稿就改填回草稿（那会让队伍卡住）。
+  // 草稿保持原样不动，用户接着写自己的下一句。
   const outcome = resolvePendingOnTerminal({
     pending: pendingInput.pending,
     conversationId: convId,
     running: store.inputLocked,
-    draft: draft.value
+    draft: ''
   });
   if (outcome.action === 'none') return;
   const taken = pendingInput.takeFor(convId);
@@ -254,25 +281,8 @@ const modeTip = (m: ConvMode): string => tr(
     ? '聊天会话：只查询数据，不准备办理单。模式随发送时刻生效，历史消息保持其发生时的语义。'
     : '工作会话：可查询、可准备办理单并执行（执行仍需本人确认）。模式随发送时刻生效，历史消息保持其发生时的语义。'
 );
-const modeSwitching = ref(false);
 const modeNotice = ref<string | null>(null);
 watch(()=>session.currentId,()=>{modeNotice.value=null;});
-async function setMode(m: ConvMode): Promise<void> {
-  const id = session.currentId;
-  if (!id || modeSwitching.value || store.inputLocked || m === convMode.value) return;
-  modeSwitching.value = true;
-  modeNotice.value = null;
-  try {
-    await session.changeConversationMode(id, m);
-    modeNotice.value = m === 'chat'
-      ? tr('已切换为聊天会话：之后只查询数据，不准备办理单')
-      : tr('已切换为工作会话：之后可准备办理单，执行仍需本人确认');
-  } catch (e) {
-    modeNotice.value = tr('模式切换失败：') + (e as Error).message;
-  } finally {
-    modeSwitching.value = false;
-  }
-}
 
 /** 活跃轮的助手占位消息（直接写入会话消息数组，流式更新同一对象） */
 
@@ -478,9 +488,8 @@ async function onSubmit(q: string): Promise<void> {
   const clientRequestId = session.uid('req');
   let convId: string | null = session.currentId;
   try {
-    // PC-4：首句语义路由 —— 办理动词升级为任务会话，否则聊天查询（与移动端一致）
-    const opsHint = /(办理|提交|报修|停用|发布|通知|值班|排班|工单|申请)/.test(q);
-    const mode: ConvMode = opsHint ? 'task' : 'chat';
+    // 模式以新建会话顶部胶囊显式选择的 draftMode 为准（覆盖原 PC-4 首句自动路由）
+    const mode: ConvMode = draftMode.value;
     convId = await session.ensureConversation(q, convId, clientRequestId, mode);
   } catch (e) {
     session.listError = `创建会话失败：${(e as Error).message}`;
@@ -768,7 +777,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 <template>
 
   <p v-if="authLoading" class="auth-status" role="status">{{tr("正在验证主系统登录状态…")}}</p>
-  <template v-else-if="!authed"><p v-if="authError" class="auth-status" role="alert">{{authError}}</p><LoginView :mode="authMode" @done="onLogin" /></template>
+  <template v-else-if="!authed"><LoginView :mode="authMode" @done="onLogin" /></template>
   <div v-else-if="!workspaceReady" class="workspace-loading" role="status">{{tr("正在恢复本人工作区…")}}</div>
   <div v-else class="app" :class="{ 'app--railclosed': !roomsOpen }">
     <!-- 左侧导航 -->
@@ -804,9 +813,13 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
       <div v-if="!session.currentId || session.currentMessages.length === 0" class="hero">
         <button type="button" class="chat__navtoggle hero__navtoggle" @click="navOpen = !navOpen">{{tr("会话")}}</button>
 
-        <!-- PC-4：去掉前置模式二选一 —— 与移动端同语义：开口即问。
-             首句含"办理/提交/停用/通知/报修"等办理动词 → 任务会话；其余 → 聊天查询。
-             任务能力并未藏起来：侧栏"新会话"仍可显式选模式，办理动词也会自动升级。 -->
+        <!-- 新建会话：顶部胶囊显式选择会话模式（工作/聊天），水平居中、距顶部留白；
+             选定并进入会话后，此处不再出现，仅在会话内显示只读模式标签。 -->
+        <div class="mode-switch mode-switch--hero" role="group" :aria-label="tr('会话模式')">
+          <button type="button" class="mode-switch__opt" :class="{'is-active': draftMode==='task'}" :aria-pressed="draftMode==='task'" :title="modeTip('task')" @click="draftMode='task'">{{ tr('工作') }}</button>
+          <button type="button" class="mode-switch__opt" :class="{'is-active': draftMode==='chat'}" :aria-pressed="draftMode==='chat'" :title="modeTip('chat')" @click="draftMode='chat'">{{ tr('聊天') }}</button>
+        </div>
+
         <h1 class="hero__h">{{tr("交代一件实验室任务")}}</h1>
 
         <CommandBar
@@ -817,11 +830,15 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
           :placeholder="tr('例如：E310 今天有哪些课？ / 帮我提交 D526 报修…')"
           :pending-text="pendingTextForCurrent"
           :pending-replaced="pendingInput.replaced"
+          :queued="queuedForCurrent"
+          :risky-running="riskyRunning"
           :notice="pendingNotice"
           @submit="onSubmit"
           @queue="onQueueInput"
           @cancel="onCancel"
           @cancel-pending="onCancelPending"
+          @immediate-send="onImmediateSend"
+          @drop-queued="onDropQueued"
         />
         <p class="hero__scope">
           {{tr("提问与查询直接开始；要生成办理单时会自动进入任务会话。")}}
@@ -834,12 +851,10 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
           <button type="button" class="chat__navtoggle" @click="navOpen = !navOpen">{{tr("会话")}}</button>
           <h1 class="chat__title">{{ currentTitle }}</h1>
           <span class="chat__count">{{ session.currentMessages.length }} {{tr("条消息")}}</span>
-          <!-- A10：会话模式开关——主区顶部水平中央、左右分栏醒目切换；
-               模式随发送时刻生效，历史消息语义不变 -->
-          <div class="mode-switch" role="group" :aria-label="tr('会话模式')">
-            <button type="button" class="mode-switch__opt" :class="{'is-active': convMode==='task'}" :disabled="modeSwitching" :aria-pressed="convMode==='task'" :title="modeTip('task')" @click="setMode('task')">{{ tr('工作会话') }}</button>
-            <button type="button" class="mode-switch__opt" :class="{'is-active': convMode==='chat'}" :disabled="modeSwitching" :aria-pressed="convMode==='chat'" :title="modeTip('chat')" @click="setMode('chat')">{{ tr('聊天会话') }}</button>
-          </div>
+          <!-- 已存在会话：只读模式标签，显示当前会话模式，不再可切换 -->
+          <span class="mode-readonly" :class="`mode-readonly--${convMode}`" :title="modeTip(convMode)">
+            {{ convMode==='task' ? tr('工作') : tr('聊天') }}
+          </span>
         </header>
         <p v-if="modeNotice" class="chat__err" role="status">{{ modeNotice }}</p>
         <p v-if="session.currentMessagesError" class="chat__err" role="alert">{{ session.currentMessagesError }}</p>
@@ -870,11 +885,15 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
             :submit-label="convMode === 'chat' ? '发送' : undefined"
             :pending-text="pendingTextForCurrent"
             :pending-replaced="pendingInput.replaced"
+            :queued="queuedForCurrent"
+            :risky-running="riskyRunning"
             :notice="pendingNotice"
             @submit="onSubmit"
             @queue="onQueueInput"
             @cancel="onCancel"
             @cancel-pending="onCancelPending"
+            @immediate-send="onImmediateSend"
+            @drop-queued="onDropQueued"
           />
         </div>
       </template>
@@ -1091,6 +1110,32 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 @media(max-width:860px){
   .mode-switch{position:static;transform:none;margin-left:auto;order:3}
   .mode-switch__opt{padding:4px 12px}
+}
+/* 新建会话 hero 顶部胶囊：静态、水平居中、距顶部留白（非绝对定位） */
+.mode-switch--hero{
+  position: static;
+  transform: none;
+  margin: 4px auto 18px;
+  width: max-content;
+}
+@media(max-width:860px){
+  .mode-switch--hero{margin:4px auto 16px;order:0}
+}
+/* 已存在会话：只读模式标签（胶囊形态，不可点） */
+.mode-readonly{
+  display: inline-flex; align-items: center;
+  padding: 5px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  font: 600 calc(var(--ui-font-size) * 1.0) var(--font-sans);
+  white-space: nowrap;
+  z-index: 2;
+}
+.mode-readonly--task{color: var(--primary);}
+.mode-readonly--chat{color: var(--text-muted);}
+@media(max-width:860px){
+  .mode-readonly{margin-left:auto;padding:4px 12px}
 }
 .chat__err {
   margin: 0;

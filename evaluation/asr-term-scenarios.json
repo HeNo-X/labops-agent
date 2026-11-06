@@ -1,0 +1,1337 @@
+{
+  "version": 2,
+  "note": "文本层术语评测集 v2（计算机/电子类机房域）。asrText 是人工构造的同音/近音误写，模拟上游输出；referenceText 是标准写法。kind=control 的原文即标准答案，用于测误改率。",
+  "caveat": "本集只测纠正层（离线、确定性、可复跑）。上游偏置（实体词表上下文 / asr_options）的效果无法用文本层证明，需 --mode=live + 真实录音。错写为人工构造，不代表真实声学模型的错误分布与比例。",
+  "scenarios": [
+    {
+      "id": "room-001",
+      "kind": "term",
+      "targetTerms": [
+        "E310"
+      ],
+      "forbiddenTerms": [
+        "E三一零"
+      ],
+      "asrText": "帮我查下E三一零明天有没有课",
+      "referenceText": "帮我查下E310明天有没有课",
+      "note": "中文数字"
+    },
+    {
+      "id": "room-002",
+      "kind": "term",
+      "targetTerms": [
+        "D517"
+      ],
+      "forbiddenTerms": [
+        "D五一七"
+      ],
+      "asrText": "D五一七现在空闲吗",
+      "referenceText": "D517现在空闲吗",
+      "note": "中文数字"
+    },
+    {
+      "id": "room-003",
+      "kind": "term",
+      "targetTerms": [
+        "E312"
+      ],
+      "forbiddenTerms": [
+        "E三一二"
+      ],
+      "asrText": "E三一二要报修",
+      "referenceText": "E312要报修",
+      "note": "中文数字"
+    },
+    {
+      "id": "room-004",
+      "kind": "term",
+      "targetTerms": [
+        "D515"
+      ],
+      "forbiddenTerms": [
+        "d五一五"
+      ],
+      "asrText": "看下d五一五今天的状态",
+      "referenceText": "看下D515今天的状态",
+      "note": "小写+中文数字"
+    },
+    {
+      "id": "room-005",
+      "kind": "term",
+      "targetTerms": [
+        "E310"
+      ],
+      "forbiddenTerms": [
+        "e31o"
+      ],
+      "asrText": "e31o 这节有课吗",
+      "referenceText": "E310 这节有课吗",
+      "note": "已知不覆盖：正则只吃到 e31，与 e310 不等长，现有等长规则按设计放弃"
+    },
+    {
+      "id": "room-006",
+      "kind": "term",
+      "targetTerms": [
+        "D501"
+      ],
+      "forbiddenTerms": [
+        "D五零幺"
+      ],
+      "asrText": "D五零幺有没有人值班",
+      "referenceText": "D501有没有人值班",
+      "note": "口语「幺」"
+    },
+    {
+      "id": "eq-001",
+      "kind": "term",
+      "targetTerms": [
+        "服务器"
+      ],
+      "forbiddenTerms": [
+        "复物器"
+      ],
+      "asrText": "那台复物器又挂了",
+      "referenceText": "那台服务器又挂了",
+      "note": ""
+    },
+    {
+      "id": "eq-002",
+      "kind": "term",
+      "targetTerms": [
+        "服务器"
+      ],
+      "forbiddenTerms": [
+        "扶物器"
+      ],
+      "asrText": "扶物器重启了吗",
+      "referenceText": "服务器重启了吗",
+      "note": ""
+    },
+    {
+      "id": "eq-003",
+      "kind": "term",
+      "targetTerms": [
+        "主机"
+      ],
+      "forbiddenTerms": [
+        "住机"
+      ],
+      "asrText": "住机开不了机",
+      "referenceText": "主机开不了机",
+      "note": "二字"
+    },
+    {
+      "id": "eq-004",
+      "kind": "term",
+      "targetTerms": [
+        "键盘"
+      ],
+      "forbiddenTerms": [
+        "见盘"
+      ],
+      "asrText": "见盘没反应",
+      "referenceText": "键盘没反应",
+      "note": "二字"
+    },
+    {
+      "id": "eq-005",
+      "kind": "term",
+      "targetTerms": [
+        "鼠标"
+      ],
+      "forbiddenTerms": [
+        "书标"
+      ],
+      "asrText": "书标坏了要换",
+      "referenceText": "鼠标坏了要换",
+      "note": "二字"
+    },
+    {
+      "id": "eq-006",
+      "kind": "term",
+      "targetTerms": [
+        "显示器"
+      ],
+      "forbiddenTerms": [
+        "显式器"
+      ],
+      "asrText": "显式器闪屏",
+      "referenceText": "显示器闪屏",
+      "note": ""
+    },
+    {
+      "id": "eq-007",
+      "kind": "term",
+      "targetTerms": [
+        "投影仪"
+      ],
+      "forbiddenTerms": [
+        "投印仪"
+      ],
+      "asrText": "投印仪没画面",
+      "referenceText": "投影仪没画面",
+      "note": ""
+    },
+    {
+      "id": "eq-008",
+      "kind": "term",
+      "targetTerms": [
+        "投影仪"
+      ],
+      "forbiddenTerms": [
+        "头影仪"
+      ],
+      "asrText": "头影仪遥控找不到",
+      "referenceText": "投影仪遥控找不到",
+      "note": ""
+    },
+    {
+      "id": "eq-009",
+      "kind": "term",
+      "targetTerms": [
+        "电脑"
+      ],
+      "forbiddenTerms": [
+        "点脑"
+      ],
+      "asrText": "点脑死机了三台",
+      "referenceText": "电脑死机了三台",
+      "note": "二字"
+    },
+    {
+      "id": "eq-010",
+      "kind": "term",
+      "targetTerms": [
+        "笔记本"
+      ],
+      "forbiddenTerms": [
+        "比记本"
+      ],
+      "asrText": "比记本借出去几台",
+      "referenceText": "笔记本借出去几台",
+      "note": ""
+    },
+    {
+      "id": "eq-011",
+      "kind": "term",
+      "targetTerms": [
+        "台式机"
+      ],
+      "forbiddenTerms": [
+        "抬式机"
+      ],
+      "asrText": "抬式机还有几台能用",
+      "referenceText": "台式机还有几台能用",
+      "note": ""
+    },
+    {
+      "id": "eq-012",
+      "kind": "term",
+      "targetTerms": [
+        "打印机"
+      ],
+      "forbiddenTerms": [
+        "达印机"
+      ],
+      "asrText": "达印机没纸了",
+      "referenceText": "打印机没纸了",
+      "note": ""
+    },
+    {
+      "id": "eq-013",
+      "kind": "term",
+      "targetTerms": [
+        "摄像头"
+      ],
+      "forbiddenTerms": [
+        "射像头"
+      ],
+      "asrText": "射像头对着门口",
+      "referenceText": "摄像头对着门口",
+      "note": ""
+    },
+    {
+      "id": "eq-014",
+      "kind": "term",
+      "targetTerms": [
+        "交换机"
+      ],
+      "forbiddenTerms": [
+        "叫换机"
+      ],
+      "asrText": "叫换机端口不够",
+      "referenceText": "交换机端口不够",
+      "note": ""
+    },
+    {
+      "id": "eq-015",
+      "kind": "term",
+      "targetTerms": [
+        "路由器"
+      ],
+      "forbiddenTerms": [
+        "露由器"
+      ],
+      "asrText": "露由器老掉线",
+      "referenceText": "路由器老掉线",
+      "note": ""
+    },
+    {
+      "id": "eq-016",
+      "kind": "term",
+      "targetTerms": [
+        "空调"
+      ],
+      "forbiddenTerms": [
+        "空条"
+      ],
+      "asrText": "空条不制冷",
+      "referenceText": "空调不制冷",
+      "note": "二字"
+    },
+    {
+      "id": "eq-017",
+      "kind": "term",
+      "targetTerms": [
+        "电源",
+        "插排",
+        "报修"
+      ],
+      "forbiddenTerms": [
+        "店源",
+        "查牌",
+        "保修"
+      ],
+      "asrText": "店源和查牌都要保修",
+      "referenceText": "电源和插排都要报修",
+      "note": "一句三词"
+    },
+    {
+      "id": "eq-018",
+      "kind": "term",
+      "targetTerms": [
+        "插座"
+      ],
+      "forbiddenTerms": [
+        "查作"
+      ],
+      "asrText": "查作松了",
+      "referenceText": "插座松了",
+      "note": "二字"
+    },
+    {
+      "id": "eq-019",
+      "kind": "term",
+      "targetTerms": [
+        "配电箱"
+      ],
+      "forbiddenTerms": [
+        "配点箱"
+      ],
+      "asrText": "配点箱的门没关",
+      "referenceText": "配电箱的门没关",
+      "note": ""
+    },
+    {
+      "id": "eq-020",
+      "kind": "term",
+      "targetTerms": [
+        "门禁"
+      ],
+      "forbiddenTerms": [
+        "门金"
+      ],
+      "asrText": "门金刷不开",
+      "referenceText": "门禁刷不开",
+      "note": "二字"
+    },
+    {
+      "id": "eq-021",
+      "kind": "term",
+      "targetTerms": [
+        "万用表"
+      ],
+      "forbiddenTerms": [
+        "万用标"
+      ],
+      "asrText": "万用标没电了",
+      "referenceText": "万用表没电了",
+      "note": ""
+    },
+    {
+      "id": "eq-022",
+      "kind": "term",
+      "targetTerms": [
+        "示波器"
+      ],
+      "forbiddenTerms": [
+        "势波器"
+      ],
+      "asrText": "势波器借用登记一下",
+      "referenceText": "示波器借用登记一下",
+      "note": ""
+    },
+    {
+      "id": "eq-023",
+      "kind": "term",
+      "targetTerms": [
+        "电烙铁"
+      ],
+      "forbiddenTerms": [
+        "地烙铁"
+      ],
+      "asrText": "地烙铁温度太高",
+      "referenceText": "电烙铁温度太高",
+      "note": ""
+    },
+    {
+      "id": "eq-024",
+      "kind": "term",
+      "targetTerms": [
+        "单片机"
+      ],
+      "forbiddenTerms": [
+        "单片鸡"
+      ],
+      "asrText": "单片鸡发不下程序",
+      "referenceText": "单片机发不下程序",
+      "note": ""
+    },
+    {
+      "id": "eq-025",
+      "kind": "term",
+      "targetTerms": [
+        "开发板"
+      ],
+      "forbiddenTerms": [
+        "开法板"
+      ],
+      "asrText": "开法板少两块",
+      "referenceText": "开发板少两块",
+      "note": ""
+    },
+    {
+      "id": "eq-026",
+      "kind": "term",
+      "targetTerms": [
+        "灭火器"
+      ],
+      "forbiddenTerms": [
+        "灭伙器"
+      ],
+      "asrText": "灭伙器快到期了",
+      "referenceText": "灭火器快到期了",
+      "note": ""
+    },
+    {
+      "id": "eq-027",
+      "kind": "term",
+      "targetTerms": [
+        "照明"
+      ],
+      "forbiddenTerms": [
+        "赵明"
+      ],
+      "asrText": "赵明有两盏不亮",
+      "referenceText": "照明有两盏不亮",
+      "note": "二字"
+    },
+    {
+      "id": "eq-028",
+      "kind": "term",
+      "targetTerms": [
+        "桌椅"
+      ],
+      "forbiddenTerms": [
+        "卓一"
+      ],
+      "asrText": "桌一歪了三套",
+      "referenceText": "桌椅歪了三套",
+      "note": "二字"
+    },
+    {
+      "id": "eq-029",
+      "kind": "term",
+      "targetTerms": [
+        "实验台"
+      ],
+      "forbiddenTerms": [
+        "实验抬"
+      ],
+      "asrText": "实验抬台面破损",
+      "referenceText": "实验台台面破损",
+      "note": ""
+    },
+    {
+      "id": "eq-030",
+      "kind": "term",
+      "targetTerms": [
+        "天平"
+      ],
+      "forbiddenTerms": [
+        "天瓶"
+      ],
+      "asrText": "天瓶不准了",
+      "referenceText": "天平不准了",
+      "note": "二字最短档"
+    },
+    {
+      "id": "ck-001",
+      "kind": "term",
+      "targetTerms": [
+        "电源与设备"
+      ],
+      "forbiddenTerms": [
+        "电源与蛇备"
+      ],
+      "asrText": "电源与蛇备都查了吗",
+      "referenceText": "电源与设备都查了吗",
+      "note": "固定短语"
+    },
+    {
+      "id": "ck-002",
+      "kind": "term",
+      "targetTerms": [
+        "门窗与清场"
+      ],
+      "forbiddenTerms": [
+        "门窗与清常"
+      ],
+      "asrText": "门窗与清常做完了吗",
+      "referenceText": "门窗与清场做完了吗",
+      "note": "固定短语"
+    },
+    {
+      "id": "ck-003",
+      "kind": "term",
+      "targetTerms": [
+        "钥匙交接"
+      ],
+      "forbiddenTerms": [
+        "药时交接"
+      ],
+      "asrText": "药时交接谁来",
+      "referenceText": "钥匙交接谁来",
+      "note": "固定短语"
+    },
+    {
+      "id": "ck-004",
+      "kind": "term",
+      "targetTerms": [
+        "未完成事项"
+      ],
+      "forbiddenTerms": [
+        "未完成事想"
+      ],
+      "asrText": "未完成事想有几个",
+      "referenceText": "未完成事项有几个",
+      "note": "固定短语"
+    },
+    {
+      "id": "ck-005",
+      "kind": "term",
+      "targetTerms": [
+        "清场"
+      ],
+      "forbiddenTerms": [
+        "亲场"
+      ],
+      "asrText": "亲场没做就走了",
+      "referenceText": "清场没做就走了",
+      "note": "二字，亲场是近音"
+    },
+    {
+      "id": "pl-001",
+      "kind": "term",
+      "targetTerms": [
+        "文渊E区",
+        "D517"
+      ],
+      "forbiddenTerms": [
+        "文远E区",
+        "D五一七"
+      ],
+      "asrText": "文远E区的D五一七有课吗",
+      "referenceText": "文渊E区的D517有课吗",
+      "note": "楼栋+房间"
+    },
+    {
+      "id": "pl-002",
+      "kind": "term",
+      "targetTerms": [
+        "文渊D区"
+      ],
+      "forbiddenTerms": [
+        "文园D区"
+      ],
+      "asrText": "文园D区今天开放吗",
+      "referenceText": "文渊D区今天开放吗",
+      "note": "楼栋"
+    },
+    {
+      "id": "pl-003",
+      "kind": "term",
+      "targetTerms": [
+        "文渊"
+      ],
+      "forbiddenTerms": [
+        "文苑"
+      ],
+      "asrText": "文苑那边几点开门",
+      "referenceText": "文渊那边几点开门",
+      "note": "二字"
+    },
+    {
+      "id": "op-001",
+      "kind": "term",
+      "targetTerms": [
+        "签到"
+      ],
+      "forbiddenTerms": [
+        "千到"
+      ],
+      "asrText": "今天的千到率多少",
+      "referenceText": "今天的签到率多少",
+      "note": "二字"
+    },
+    {
+      "id": "op-002",
+      "kind": "term",
+      "targetTerms": [
+        "签退"
+      ],
+      "forbiddenTerms": [
+        "千退"
+      ],
+      "asrText": "他忘记千退了",
+      "referenceText": "他忘记签退了",
+      "note": "二字"
+    },
+    {
+      "id": "op-003",
+      "kind": "term",
+      "targetTerms": [
+        "交接"
+      ],
+      "forbiddenTerms": [
+        "教接"
+      ],
+      "asrText": "明早教接是谁",
+      "referenceText": "明早交接是谁",
+      "note": "二字"
+    },
+    {
+      "id": "op-004",
+      "kind": "term",
+      "targetTerms": [
+        "巡检"
+      ],
+      "forbiddenTerms": [
+        "寻检"
+      ],
+      "asrText": "今天寻检做了没",
+      "referenceText": "今天巡检做了没",
+      "note": "二字"
+    },
+    {
+      "id": "op-005",
+      "kind": "term",
+      "targetTerms": [
+        "报修"
+      ],
+      "forbiddenTerms": [
+        "保修"
+      ],
+      "asrText": "这台我要保修",
+      "referenceText": "这台我要报修",
+      "note": "保修本身是真实词，风险最高的一档"
+    },
+    {
+      "id": "op-006",
+      "kind": "term",
+      "targetTerms": [
+        "停用"
+      ],
+      "forbiddenTerms": [
+        "廷用"
+      ],
+      "asrText": "下周三D五一五廷用",
+      "referenceText": "下周三D515停用",
+      "note": "二字+房间号"
+    },
+    {
+      "id": "op-007",
+      "kind": "term",
+      "targetTerms": [
+        "调课"
+      ],
+      "forbiddenTerms": [
+        "挑课"
+      ],
+      "asrText": "帮E三一二挑课到周四",
+      "referenceText": "帮E312调课到周四",
+      "note": "多音字 调=tiao"
+    },
+    {
+      "id": "op-008",
+      "kind": "term",
+      "targetTerms": [
+        "钥匙"
+      ],
+      "forbiddenTerms": [
+        "药时"
+      ],
+      "asrText": "药时还在柜子里吗",
+      "referenceText": "钥匙还在柜子里吗",
+      "note": "二字"
+    },
+    {
+      "id": "op-009",
+      "kind": "term",
+      "targetTerms": [
+        "借钥匙"
+      ],
+      "forbiddenTerms": [
+        "接钥匙"
+      ],
+      "asrText": "接钥匙登记一下",
+      "referenceText": "借钥匙登记一下",
+      "note": ""
+    },
+    {
+      "id": "op-010",
+      "kind": "term",
+      "targetTerms": [
+        "还钥匙"
+      ],
+      "forbiddenTerms": [
+        "环钥匙"
+      ],
+      "asrText": "环钥匙的人是谁",
+      "referenceText": "还钥匙的人是谁",
+      "note": ""
+    },
+    {
+      "id": "op-011",
+      "kind": "term",
+      "targetTerms": [
+        "工单",
+        "验收"
+      ],
+      "forbiddenTerms": [
+        "公丹",
+        "严收"
+      ],
+      "asrText": "这个公丹严收了吗",
+      "referenceText": "这个工单验收了吗",
+      "note": "一句两词"
+    },
+    {
+      "id": "op-012",
+      "kind": "term",
+      "targetTerms": [
+        "工单"
+      ],
+      "forbiddenTerms": [
+        "公丹"
+      ],
+      "asrText": "公丹状态改一下",
+      "referenceText": "工单状态改一下",
+      "note": "二字"
+    },
+    {
+      "id": "op-013",
+      "kind": "term",
+      "targetTerms": [
+        "通知"
+      ],
+      "forbiddenTerms": [
+        "同知"
+      ],
+      "asrText": "发个同知",
+      "referenceText": "发个通知",
+      "note": "二字"
+    },
+    {
+      "id": "op-014",
+      "kind": "term",
+      "targetTerms": [
+        "待确认"
+      ],
+      "forbiddenTerms": [
+        "带确认"
+      ],
+      "asrText": "带确认的方案有几个",
+      "referenceText": "待确认的方案有几个",
+      "note": ""
+    },
+    {
+      "id": "op-015",
+      "kind": "term",
+      "targetTerms": [
+        "完成"
+      ],
+      "forbiddenTerms": [
+        "万成"
+      ],
+      "asrText": "任务万成了吗",
+      "referenceText": "任务完成了吗",
+      "note": "二字"
+    },
+    {
+      "id": "op-016",
+      "kind": "term",
+      "targetTerms": [
+        "退回",
+        "转派"
+      ],
+      "forbiddenTerms": [
+        "退汇",
+        "专拍"
+      ],
+      "asrText": "这个单子是退汇还是专拍",
+      "referenceText": "这个单子是退回还是转派",
+      "note": "一句两词"
+    },
+    {
+      "id": "op-017",
+      "kind": "term",
+      "targetTerms": [
+        "开放登记"
+      ],
+      "forbiddenTerms": [
+        "开房登记"
+      ],
+      "asrText": "开房登记怎么弄",
+      "referenceText": "开放登记怎么弄",
+      "note": ""
+    },
+    {
+      "id": "op-018",
+      "kind": "term",
+      "targetTerms": [
+        "实验室"
+      ],
+      "forbiddenTerms": [
+        "实言室"
+      ],
+      "asrText": "实言室几点关门",
+      "referenceText": "实验室几点关门",
+      "note": ""
+    },
+    {
+      "id": "op-019",
+      "kind": "term",
+      "targetTerms": [
+        "课表"
+      ],
+      "forbiddenTerms": [
+        "科标"
+      ],
+      "asrText": "明天科表给我看看",
+      "referenceText": "明天课表给我看看",
+      "note": "二字"
+    },
+    {
+      "id": "op-020",
+      "kind": "term",
+      "targetTerms": [
+        "班级"
+      ],
+      "forbiddenTerms": [
+        "半技"
+      ],
+      "asrText": "半技2501有几个人",
+      "referenceText": "班级2501有几个人",
+      "note": ""
+    },
+    {
+      "id": "op-021",
+      "kind": "term",
+      "targetTerms": [
+        "志愿者"
+      ],
+      "forbiddenTerms": [
+        "志原者"
+      ],
+      "asrText": "志原者今天来几个",
+      "referenceText": "志愿者今天来几个",
+      "note": ""
+    },
+    {
+      "id": "op-022",
+      "kind": "term",
+      "targetTerms": [
+        "容量"
+      ],
+      "forbiddenTerms": [
+        "熔量"
+      ],
+      "asrText": "这个房熔量多少",
+      "referenceText": "这个房容量多少",
+      "note": "二字"
+    },
+    {
+      "id": "op-023",
+      "kind": "term",
+      "targetTerms": [
+        "借用"
+      ],
+      "forbiddenTerms": [
+        "节用"
+      ],
+      "asrText": "节用登记在哪",
+      "referenceText": "借用登记在哪",
+      "note": "二字"
+    },
+    {
+      "id": "op-024",
+      "kind": "term",
+      "targetTerms": [
+        "检查清单"
+      ],
+      "forbiddenTerms": [
+        "检查青丹"
+      ],
+      "asrText": "检查青丹补全了吗",
+      "referenceText": "检查清单补全了吗",
+      "note": ""
+    },
+    {
+      "id": "op-025",
+      "kind": "term",
+      "targetTerms": [
+        "值班"
+      ],
+      "forbiddenTerms": [
+        "知班"
+      ],
+      "asrText": "今天谁知班",
+      "referenceText": "今天谁值班",
+      "note": "二字"
+    },
+    {
+      "id": "op-026",
+      "kind": "term",
+      "targetTerms": [
+        "学号"
+      ],
+      "forbiddenTerms": [
+        "雪好"
+      ],
+      "asrText": "他雪号多少来着",
+      "referenceText": "他学号多少来着",
+      "note": "二字"
+    },
+    {
+      "id": "op-027",
+      "kind": "term",
+      "targetTerms": [
+        "接收"
+      ],
+      "forbiddenTerms": [
+        "节收"
+      ],
+      "asrText": "这个单子谁来节收",
+      "referenceText": "这个单子谁来接收",
+      "note": "二字"
+    },
+    {
+      "id": "op-028",
+      "kind": "term",
+      "targetTerms": [
+        "撤回"
+      ],
+      "forbiddenTerms": [
+        "车回"
+      ],
+      "asrText": "刚才那条我要车回",
+      "referenceText": "刚才那条我要撤回",
+      "note": "二字"
+    },
+    {
+      "id": "op-029",
+      "kind": "term",
+      "targetTerms": [
+        "异常"
+      ],
+      "forbiddenTerms": [
+        "一常"
+      ],
+      "asrText": "设备有一常要上报",
+      "referenceText": "设备有异常要上报",
+      "note": "二字"
+    },
+    {
+      "id": "op-030",
+      "kind": "term",
+      "targetTerms": [
+        "登记"
+      ],
+      "forbiddenTerms": [
+        "登机"
+      ],
+      "asrText": "把设备登机一下",
+      "referenceText": "把设备登记一下",
+      "note": "二字，登机是真实词"
+    },
+    {
+      "id": "pd-001",
+      "kind": "term",
+      "targetTerms": [
+        "上午第一大节"
+      ],
+      "forbiddenTerms": [
+        "上舞第一大节"
+      ],
+      "asrText": "上舞第一大节有空教室吗",
+      "referenceText": "上午第一大节有空教室吗",
+      "note": "固字6"
+    },
+    {
+      "id": "pd-002",
+      "kind": "term",
+      "targetTerms": [
+        "上午第二大节",
+        "D517"
+      ],
+      "forbiddenTerms": [
+        "上舞第二大节",
+        "D五一七"
+      ],
+      "asrText": "上舞第二大节D五一七有课吗",
+      "referenceText": "上午第二大节D517有课吗",
+      "note": "固字+房间"
+    },
+    {
+      "id": "pd-003",
+      "kind": "term",
+      "targetTerms": [
+        "下午第一大节"
+      ],
+      "forbiddenTerms": [
+        "下舞第一大节"
+      ],
+      "asrText": "下舞第一大节哪个空闲",
+      "referenceText": "下午第一大节哪个空闲",
+      "note": ""
+    },
+    {
+      "id": "pd-004",
+      "kind": "term",
+      "targetTerms": [
+        "下午第二大节"
+      ],
+      "forbiddenTerms": [
+        "下舞第二大节"
+      ],
+      "asrText": "下舞第二大节开放吗",
+      "referenceText": "下午第二大节开放吗",
+      "note": ""
+    },
+    {
+      "id": "pd-005",
+      "kind": "term",
+      "targetTerms": [
+        "晚上AB节",
+        "值班"
+      ],
+      "forbiddenTerms": [
+        "晚尚AB节",
+        "知班"
+      ],
+      "asrText": "晚尚AB节谁知班",
+      "referenceText": "晚上AB节谁值班",
+      "note": "含拉丁字母"
+    },
+    {
+      "id": "pd-006",
+      "kind": "term",
+      "targetTerms": [
+        "晚上CD节"
+      ],
+      "forbiddenTerms": [
+        "网尚CD节"
+      ],
+      "asrText": "网尚CD节开不开",
+      "referenceText": "晚上CD节开不开",
+      "note": "含拉丁字母"
+    },
+    {
+      "id": "pd-007",
+      "kind": "term",
+      "targetTerms": [
+        "节次"
+      ],
+      "forbiddenTerms": [
+        "接刺"
+      ],
+      "asrText": "这个接刺怎么算",
+      "referenceText": "这个节次怎么算",
+      "note": "二字"
+    },
+    {
+      "id": "dc-001",
+      "kind": "term",
+      "targetTerms": [
+        "报修单"
+      ],
+      "forbiddenTerms": [
+        "报修丹"
+      ],
+      "asrText": "给我建一张报修丹",
+      "referenceText": "给我建一张报修单",
+      "note": ""
+    },
+    {
+      "id": "dc-002",
+      "kind": "term",
+      "targetTerms": [
+        "交接单"
+      ],
+      "forbiddenTerms": [
+        "交接丹"
+      ],
+      "asrText": "今天的交接丹在哪",
+      "referenceText": "今天的交接单在哪",
+      "note": ""
+    },
+    {
+      "id": "dc-003",
+      "kind": "term",
+      "targetTerms": [
+        "日报"
+      ],
+      "forbiddenTerms": [
+        "一日包"
+      ],
+      "asrText": "一日包生成了吗",
+      "referenceText": "日报生成了吗",
+      "note": "二字"
+    },
+    {
+      "id": "dc-004",
+      "kind": "term",
+      "targetTerms": [
+        "签到表"
+      ],
+      "forbiddenTerms": [
+        "千到表"
+      ],
+      "asrText": "千到表打印一份",
+      "referenceText": "签到表打印一份",
+      "note": ""
+    },
+    {
+      "id": "dc-005",
+      "kind": "term",
+      "targetTerms": [
+        "检查表"
+      ],
+      "forbiddenTerms": [
+        "检查标"
+      ],
+      "asrText": "检查标谁填",
+      "referenceText": "检查表谁填",
+      "note": ""
+    },
+    {
+      "id": "ctl-001",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "服务器要重启一下",
+      "referenceText": "服务器要重启一下",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-002",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "鼠标和键盘都换了新的",
+      "referenceText": "鼠标和键盘都换了新的",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-003",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "投影仪连接正常",
+      "referenceText": "投影仪连接正常",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-004",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "今天签到率是百分之九十八",
+      "referenceText": "今天签到率是百分之九十八",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-005",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "电源与设备检查完成",
+      "referenceText": "电源与设备检查完成",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-006",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "门窗与清场已经做完",
+      "referenceText": "门窗与清场已经做完",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-007",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "钥匙交接给下一个志愿者",
+      "referenceText": "钥匙交接给下一个志愿者",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-008",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "上午第二大节D517有课",
+      "referenceText": "上午第二大节D517有课",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-009",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "晚上AB节谁值班",
+      "referenceText": "晚上AB节谁值班",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-010",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "文渊E区的实验室都开放",
+      "referenceText": "文渊E区的实验室都开放",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-011",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "报修单已经验收了",
+      "referenceText": "报修单已经验收了",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-012",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "配电箱的门关好了",
+      "referenceText": "配电箱的门关好了",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-013",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "空调温度调到二十六度",
+      "referenceText": "空调温度调到二十六度",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-014",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "实验台台面没有破损",
+      "referenceText": "实验台台面没有破损",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-015",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "未完成事项有两条",
+      "referenceText": "未完成事项有两条",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-016",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "这个实验比较复杂",
+      "referenceText": "这个实验比较复杂",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-017",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "实验报告还没交",
+      "referenceText": "实验报告还没交",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-018",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "通知老师一声",
+      "referenceText": "通知老师一声",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-019",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "检查设备是否全部完成",
+      "referenceText": "检查设备是否全部完成",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-020",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "我要查一下明天的课程安排",
+      "referenceText": "我要查一下明天的课程安排",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-021",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "万用表和示波器都在实验台上",
+      "referenceText": "万用表和示波器都在实验台上",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    },
+    {
+      "id": "ctl-022",
+      "kind": "control",
+      "targetTerms": [],
+      "forbiddenTerms": [],
+      "asrText": "门禁刷不开就报修",
+      "referenceText": "门禁刷不开就报修",
+      "note": "原文即标准答案；经纠正层后必须逐字不变"
+    }
+  ]
+}

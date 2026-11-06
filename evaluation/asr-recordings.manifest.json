@@ -1,0 +1,476 @@
+{
+  "version": 1,
+  "note": "B2 真实语音评测清单模板。把每条 referenceText 当作要照读的台词，各录一段放进 evaluation/asr-recordings/，文件名按 file 字段。跑：node scripts/evaluate-asr.mjs --mode=live --execute（会真发请求、计入每小时配额）。未加 --execute 只做清单校验，不发请求。",
+  "recordingTips": [
+    "手机或电脑都行，但每条要记 envNote（宿舍/走廊/机房风扇声差异会显著影响结果）",
+    "一句一条，中间不留半句话；语速按平时说话，不要刻意念清楚——刻意念清楚测出来的是播音级成绩",
+    "同一个人录满 30 条后再换第二个人录同一批，才能把\"口音\"和\"词表\"的影响分开",
+    "录坏了不要删了重来占配额：直接在 file 里换个后缀名重录，报告以清单为准"
+  ],
+  "recordings": [
+    {
+      "id": "room-001",
+      "file": "room-001.webm",
+      "referenceText": "帮我查下E310明天有没有课",
+      "targetTerms": [
+        "E310"
+      ],
+      "note": "中文数字"
+    },
+    {
+      "id": "room-002",
+      "file": "room-002.webm",
+      "referenceText": "D517现在空闲吗",
+      "targetTerms": [
+        "D517"
+      ],
+      "note": "中文数字"
+    },
+    {
+      "id": "room-003",
+      "file": "room-003.webm",
+      "referenceText": "E312要报修",
+      "targetTerms": [
+        "E312"
+      ],
+      "note": "中文数字"
+    },
+    {
+      "id": "room-004",
+      "file": "room-004.webm",
+      "referenceText": "看下D515今天的状态",
+      "targetTerms": [
+        "D515"
+      ],
+      "note": "小写+中文数字"
+    },
+    {
+      "id": "room-005",
+      "file": "room-005.webm",
+      "referenceText": "E310 这节有课吗",
+      "targetTerms": [
+        "E310"
+      ],
+      "note": "已知不覆盖：正则只吃到 e31，与 e310 不等长，现有等长规则按设计放弃"
+    },
+    {
+      "id": "room-006",
+      "file": "room-006.webm",
+      "referenceText": "D501有没有人值班",
+      "targetTerms": [
+        "D501"
+      ],
+      "note": "口语「幺」"
+    },
+    {
+      "id": "eq-001",
+      "file": "eq-001.webm",
+      "referenceText": "那台服务器又挂了",
+      "targetTerms": [
+        "服务器"
+      ],
+      "note": ""
+    },
+    {
+      "id": "eq-002",
+      "file": "eq-002.webm",
+      "referenceText": "服务器重启了吗",
+      "targetTerms": [
+        "服务器"
+      ],
+      "note": ""
+    },
+    {
+      "id": "eq-003",
+      "file": "eq-003.webm",
+      "referenceText": "主机开不了机",
+      "targetTerms": [
+        "主机"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "eq-004",
+      "file": "eq-004.webm",
+      "referenceText": "键盘没反应",
+      "targetTerms": [
+        "键盘"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "eq-005",
+      "file": "eq-005.webm",
+      "referenceText": "鼠标坏了要换",
+      "targetTerms": [
+        "鼠标"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "eq-006",
+      "file": "eq-006.webm",
+      "referenceText": "显示器闪屏",
+      "targetTerms": [
+        "显示器"
+      ],
+      "note": ""
+    },
+    {
+      "id": "eq-007",
+      "file": "eq-007.webm",
+      "referenceText": "投影仪没画面",
+      "targetTerms": [
+        "投影仪"
+      ],
+      "note": ""
+    },
+    {
+      "id": "eq-008",
+      "file": "eq-008.webm",
+      "referenceText": "投影仪遥控找不到",
+      "targetTerms": [
+        "投影仪"
+      ],
+      "note": ""
+    },
+    {
+      "id": "eq-009",
+      "file": "eq-009.webm",
+      "referenceText": "电脑死机了三台",
+      "targetTerms": [
+        "电脑"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "eq-010",
+      "file": "eq-010.webm",
+      "referenceText": "笔记本借出去几台",
+      "targetTerms": [
+        "笔记本"
+      ],
+      "note": ""
+    },
+    {
+      "id": "eq-011",
+      "file": "eq-011.webm",
+      "referenceText": "台式机还有几台能用",
+      "targetTerms": [
+        "台式机"
+      ],
+      "note": ""
+    },
+    {
+      "id": "eq-012",
+      "file": "eq-012.webm",
+      "referenceText": "打印机没纸了",
+      "targetTerms": [
+        "打印机"
+      ],
+      "note": ""
+    },
+    {
+      "id": "ck-001",
+      "file": "ck-001.webm",
+      "referenceText": "电源与设备都查了吗",
+      "targetTerms": [
+        "电源与设备"
+      ],
+      "note": "固定短语"
+    },
+    {
+      "id": "ck-002",
+      "file": "ck-002.webm",
+      "referenceText": "门窗与清场做完了吗",
+      "targetTerms": [
+        "门窗与清场"
+      ],
+      "note": "固定短语"
+    },
+    {
+      "id": "ck-003",
+      "file": "ck-003.webm",
+      "referenceText": "钥匙交接谁来",
+      "targetTerms": [
+        "钥匙交接"
+      ],
+      "note": "固定短语"
+    },
+    {
+      "id": "ck-004",
+      "file": "ck-004.webm",
+      "referenceText": "未完成事项有几个",
+      "targetTerms": [
+        "未完成事项"
+      ],
+      "note": "固定短语"
+    },
+    {
+      "id": "ck-005",
+      "file": "ck-005.webm",
+      "referenceText": "清场没做就走了",
+      "targetTerms": [
+        "清场"
+      ],
+      "note": "二字，亲场是近音"
+    },
+    {
+      "id": "pl-001",
+      "file": "pl-001.webm",
+      "referenceText": "文渊E区的D517有课吗",
+      "targetTerms": [
+        "文渊E区",
+        "D517"
+      ],
+      "note": "楼栋+房间"
+    },
+    {
+      "id": "pl-002",
+      "file": "pl-002.webm",
+      "referenceText": "文渊D区今天开放吗",
+      "targetTerms": [
+        "文渊D区"
+      ],
+      "note": "楼栋"
+    },
+    {
+      "id": "pl-003",
+      "file": "pl-003.webm",
+      "referenceText": "文渊那边几点开门",
+      "targetTerms": [
+        "文渊"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "op-001",
+      "file": "op-001.webm",
+      "referenceText": "今天的签到率多少",
+      "targetTerms": [
+        "签到"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "op-002",
+      "file": "op-002.webm",
+      "referenceText": "他忘记签退了",
+      "targetTerms": [
+        "签退"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "op-003",
+      "file": "op-003.webm",
+      "referenceText": "明早交接是谁",
+      "targetTerms": [
+        "交接"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "op-004",
+      "file": "op-004.webm",
+      "referenceText": "今天巡检做了没",
+      "targetTerms": [
+        "巡检"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "op-005",
+      "file": "op-005.webm",
+      "referenceText": "这台我要报修",
+      "targetTerms": [
+        "报修"
+      ],
+      "note": "保修本身是真实词，风险最高的一档"
+    },
+    {
+      "id": "op-006",
+      "file": "op-006.webm",
+      "referenceText": "下周三D515停用",
+      "targetTerms": [
+        "停用"
+      ],
+      "note": "二字+房间号"
+    },
+    {
+      "id": "op-007",
+      "file": "op-007.webm",
+      "referenceText": "帮E312调课到周四",
+      "targetTerms": [
+        "调课"
+      ],
+      "note": "多音字 调=tiao"
+    },
+    {
+      "id": "op-008",
+      "file": "op-008.webm",
+      "referenceText": "钥匙还在柜子里吗",
+      "targetTerms": [
+        "钥匙"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "op-009",
+      "file": "op-009.webm",
+      "referenceText": "借钥匙登记一下",
+      "targetTerms": [
+        "借钥匙"
+      ],
+      "note": ""
+    },
+    {
+      "id": "op-010",
+      "file": "op-010.webm",
+      "referenceText": "还钥匙的人是谁",
+      "targetTerms": [
+        "还钥匙"
+      ],
+      "note": ""
+    },
+    {
+      "id": "op-011",
+      "file": "op-011.webm",
+      "referenceText": "这个工单验收了吗",
+      "targetTerms": [
+        "工单",
+        "验收"
+      ],
+      "note": "一句两词"
+    },
+    {
+      "id": "op-012",
+      "file": "op-012.webm",
+      "referenceText": "工单状态改一下",
+      "targetTerms": [
+        "工单"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "pd-001",
+      "file": "pd-001.webm",
+      "referenceText": "上午第一大节有空教室吗",
+      "targetTerms": [
+        "上午第一大节"
+      ],
+      "note": "固字6"
+    },
+    {
+      "id": "pd-002",
+      "file": "pd-002.webm",
+      "referenceText": "上午第二大节D517有课吗",
+      "targetTerms": [
+        "上午第二大节",
+        "D517"
+      ],
+      "note": "固字+房间"
+    },
+    {
+      "id": "pd-003",
+      "file": "pd-003.webm",
+      "referenceText": "下午第一大节哪个空闲",
+      "targetTerms": [
+        "下午第一大节"
+      ],
+      "note": ""
+    },
+    {
+      "id": "pd-004",
+      "file": "pd-004.webm",
+      "referenceText": "下午第二大节开放吗",
+      "targetTerms": [
+        "下午第二大节"
+      ],
+      "note": ""
+    },
+    {
+      "id": "pd-005",
+      "file": "pd-005.webm",
+      "referenceText": "晚上AB节谁值班",
+      "targetTerms": [
+        "晚上AB节",
+        "值班"
+      ],
+      "note": "含拉丁字母"
+    },
+    {
+      "id": "dc-001",
+      "file": "dc-001.webm",
+      "referenceText": "给我建一张报修单",
+      "targetTerms": [
+        "报修单"
+      ],
+      "note": ""
+    },
+    {
+      "id": "dc-002",
+      "file": "dc-002.webm",
+      "referenceText": "今天的交接单在哪",
+      "targetTerms": [
+        "交接单"
+      ],
+      "note": ""
+    },
+    {
+      "id": "dc-003",
+      "file": "dc-003.webm",
+      "referenceText": "日报生成了吗",
+      "targetTerms": [
+        "日报"
+      ],
+      "note": "二字"
+    },
+    {
+      "id": "x-001",
+      "file": "x-001.webm",
+      "referenceText": "C语言程序设计这门课在E310上吗",
+      "targetTerms": [
+        "C语言程序设计",
+        "E310"
+      ],
+      "note": "中英混说"
+    },
+    {
+      "id": "x-002",
+      "file": "x-002.webm",
+      "referenceText": "Java多线程那节课教室换没换",
+      "targetTerms": [
+        "Java"
+      ],
+      "note": "中英混说"
+    },
+    {
+      "id": "x-003",
+      "file": "x-003.webm",
+      "referenceText": "PCR仪要不要登记使用",
+      "targetTerms": [
+        "PCR仪"
+      ],
+      "note": "中英混说 + 术语表外词"
+    },
+    {
+      "id": "x-004",
+      "file": "x-004.webm",
+      "referenceText": "下午第二大节D517能借用吗",
+      "targetTerms": [
+        "D517"
+      ],
+      "note": "口语数字（\"五六幺七\"是声学上最容易含糊的一位）"
+    },
+    {
+      "id": "x-005",
+      "file": "x-005.webm",
+      "referenceText": "帮我查一下三号楼五层的钥匙谁拿着",
+      "targetTerms": [
+        "钥匙"
+      ],
+      "note": "口语数字 + 楼层"
+    }
+  ]
+}

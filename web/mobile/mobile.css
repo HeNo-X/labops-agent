@@ -672,3 +672,59 @@
   font-weight: 600;
   color: var(--text);
 }
+
+/* L1 跨端横幅：另一台设备正在生成时，手机端给出状态与叫停入口 */
+.mobile-external-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--m-hairline, var(--border));
+  border-radius: 10px;
+  background: var(--m-tonal, var(--surface-2));
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.mobile-external-run span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mobile-external-run button {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* L1 跨端横幅：另一台设备正在生成时，手机端给出状态与叫停入口 */
+.mobile-external-run {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--m-hairline, var(--border));
+  border-radius: 10px;
+  background: var(--m-tonal, var(--surface-2));
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.mobile-external-run span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.mobile-external-run button {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}

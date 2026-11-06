@@ -47,6 +47,8 @@ export function useHoldToTalk(options: HoldToTalkOptions) {
    */
   const SLIDE_CANCEL_PX = 60;
   const sliding = ref(false);
+  /** 本次长按是鼠标还是手指：遮罩文案要说对（PC 上写「手指」很怪） */
+  const pointerKind = ref<'mouse' | 'touch'>('touch');
   let startY = 0;
 
   async function begin(): Promise<void> {
@@ -95,6 +97,7 @@ export function useHoldToTalk(options: HoldToTalkOptions) {
   function onPointerdown(event: PointerEvent): void {
     if (event.button !== 0 && event.pointerType === 'mouse') return;
     startY = event.clientY;
+    pointerKind.value = event.pointerType === 'mouse' ? 'mouse' : 'touch';
     sliding.value = false;
     // 长按在移动端会触发选中/呼出菜单，必须拦掉
     event.preventDefault();
@@ -171,6 +174,7 @@ export function useHoldToTalk(options: HoldToTalkOptions) {
      * 永远不会触发的事件 —— 按钮点了没反应（实测踩过）。
      */
     sliding,
+    pointerKind,
     handlers: {
       pointerdown: onPointerdown,
       pointermove: onPointermove,

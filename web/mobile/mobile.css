@@ -544,3 +544,103 @@
   flex: 1;
   min-width: 0;
 }
+
+/* 2026-11-07 移动端首页布局收整 */
+/* 模式切换：移到内容区顶部、缩成小胶囊（原来占满输入区一整行，视觉太重） */
+.mobile-start > .mobile-start-mode-row {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  align-items: center;
+}
+.mobile-start > .mobile-start-mode-row .mobile-start-mode {
+  padding: 3px 12px;
+  min-height: 28px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+/* 快捷输入：输入框上方的小胶囊，点击只填入不发送 */
+.mobile-start-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 2px 8px;
+}
+.mobile-start-quick button {
+  border: 1px solid var(--m-hairline, var(--border));
+  background: var(--m-tonal, var(--surface-2));
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mobile-start-quick button:active {
+  background: var(--primary-weak, #eef4ff);
+  color: var(--primary);
+}
+/* 输入行：与两侧按钮同高，避免输入框比按钮高一截看着突兀
+   注：字号必须 >=16px，否则 iOS 聚焦时会自动放大整页（这就是之前"点击变大"的根因） */
+.mobile-start-input-row textarea {
+  min-height: 44px;
+  max-height: 96px;
+  padding: 11px 12px;
+  line-height: 1.35;
+  font-size: 16px;
+}
+.mobile-start-input-row .mobile-mic,
+.mobile-start-input-row .mobile-primary {
+  min-height: 44px;
+}
+
+/* 2026-11-07 移动端首页布局收整 */
+/* 模式切换：移到内容区顶部、缩成小胶囊（原来占满输入区一整行，视觉太重） */
+.mobile-start > .mobile-start-mode-row {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  align-items: center;
+}
+.mobile-start > .mobile-start-mode-row .mobile-start-mode {
+  padding: 3px 12px;
+  min-height: 28px;
+  font-size: 12px;
+  border-radius: 999px;
+}
+/* 快捷输入：输入框上方的小胶囊，点击只填入不发送 */
+.mobile-start-quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 2px 8px;
+}
+.mobile-start-quick button {
+  border: 1px solid var(--m-hairline, var(--border));
+  background: var(--m-tonal, var(--surface-2));
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.mobile-start-quick button:active {
+  background: var(--primary-weak, #eef4ff);
+  color: var(--primary);
+}
+/* 输入行：与两侧按钮同高，避免输入框比按钮高一截看着突兀
+   注：字号必须 >=16px，否则 iOS 聚焦时会自动放大整页（这就是之前"点击变大"的根因） */
+.mobile-start-input-row textarea {
+  min-height: 44px;
+  max-height: 96px;
+  padding: 11px 12px;
+  line-height: 1.35;
+  font-size: 16px;
+}
+.mobile-start-input-row .mobile-mic,
+.mobile-start-input-row .mobile-primary {
+  min-height: 44px;
+}

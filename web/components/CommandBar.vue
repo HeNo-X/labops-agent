@@ -94,7 +94,9 @@ function submit(): void {
 /** 示例问题：点击即发起（一句话交办，少一次无意义点击） */
 function useExample(q: string): void {
   if (busy.value) return;
-  emit('submit', q);
+  // 示例只帮你想问题：填进输入框待确认，不替他直接发出去
+  text.value = q;
+  void nextTick(() => inputEl.value?.focus());
 }
 
 // ---- 语音输入：与移动端 MobileConversation 同一 composable、同一套错误码文案 ----
@@ -252,7 +254,8 @@ function onKeydown(e: KeyboardEvent): void {
           {{tr('继续发送')}}
         </button>
         <!-- 运行中：停止占据发送按钮的位置（同一列、同一尺寸），结束后自动换回发送 -->
-        <button type="button" class="bar__btn bar__btn--stop" @click="emit('cancel')">{{tr("停止")}}</button>
+        <!-- 语音模式不显示停止：长按结束就回输入框，这里没有可停的东西 -->
+        <button v-if="!voiceMode" type="button" class="bar__btn bar__btn--stop" @click="emit('cancel')">{{tr("停止")}}</button>
       </template>
     </div>
 
@@ -269,7 +272,7 @@ function onKeydown(e: KeyboardEvent): void {
           <span class="voice-mask__wave" aria-hidden="true"></span>
           <b class="voice-mask__title">{{ tr(hold.sliding.value ? '松开取消' : '正在聆听') }}</b>
           <span class="voice-mask__hint">{{
-            tr(hold.sliding.value ? '手指已上移，松手即放弃这段录音' : '上滑可取消 · 松手结束并转成文字')
+            tr(hold.sliding.value ? (hold.pointerKind.value === 'mouse' ? '鼠标已上移，松开即放弃这段录音' : '手指已上移，松手即放弃这段录音') : '上滑可取消 · 松开结束并转成文字')
           }}</span>
           <span class="voice-mask__time">{{ Math.floor(voice.seconds.value) }}s / 60s</span>
         </div>
@@ -689,10 +692,10 @@ function onKeydown(e: KeyboardEvent): void {
 
 /* 停止：运行中占据发送按钮的位置，做成实底主按钮，避免与"发送"混淆 */
 .bar__btn--stop {
-  /* 固定深红：暗色主题的 --danger 是淡粉，配白字对比不足 */
-  background: #c02b2b;
-  border-color: #c02b2b;
-  color: #fff;
+  /* 不带红色：停止是常规操作，不是危险动作 */
+  background: var(--surface-2);
+  border-color: var(--border-strong, var(--border));
+  color: var(--text);
   font-weight: 600;
 }
 .bar__btn--stop:hover:not(:disabled) {

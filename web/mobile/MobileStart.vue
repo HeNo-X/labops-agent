@@ -23,7 +23,8 @@ watch(()=>preferences.value.defaultMode,value=>{if(!props.section)mode.value=val
 async function send(){if(!draft.value.trim()||busy.value)return;session.startDraft();await props.controller.submit(draft.value,mode.value);}
 function key(event:KeyboardEvent){if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();void send();}}
 /** U05：建议点击即发起（不再是回填草稿），失败可在会话内重试 */
-async function ask(text:string){if(busy.value)return;session.startDraft();await props.controller.submit(text,mode.value);}
+/** 快捷胶囊：只把内容填进输入框待用户确认，绝不替他直接发出去 */
+function fill(text:string):void{if(busy.value)return;draft.value=text;void nextTick(()=>textareaRef.value?.focus());}
 /** 身份驱动的开场与建议（U05）：志愿者偏值班/报修，管理员偏办理与查询 */
 const identity=computed(()=>business.profile?.identity??'');
 const greeting=computed(()=>business.profile?.username?business.profile.username+tr('，要处理什么实验室事务？'):tr('需要处理什么实验室事务？'));
@@ -33,13 +34,13 @@ const suggestions=computed(()=>identity.value==='volunteer'
  ?[{label:'开始值班',text:'开始今天的值班'},{label:'查实验室',text:'查找今天的空闲实验室'},{label:'准备报修',text:'我想报修实验室设备，请先列出需要提供的信息'}]
  :[{label:'查询课表',text:'查询今天的实验室课表'},{label:'查找空闲实验室',text:'查找今天的空闲实验室'},{label:'准备报修',text:'我想报修实验室设备，请先列出需要提供的信息'}]);
 </script>
-<template><section class="mobile-start">
+<template><section class="mobile-start"><div class="mobile-start-mode-row" role="group" :aria-label="tr('会话模式')"><button type="button" class="mobile-start-mode" :aria-pressed="mode==='chat'" @click="mode='chat'">{{tr('聊天')}}</button><button type="button" class="mobile-start-mode" :aria-pressed="mode==='task'" @click="mode='task'">{{tr('工作')}}</button></div>
 <div class="mobile-start-scroll">
 <div class="mobile-start-intro"><span class="mobile-start-eyebrow">{{tr('实验室工作助手')}}</span><h1>{{tr(greeting)}}</h1></div>
-<div class="mobile-start-suggestions"><button v-for="item in suggestions" :key="item.label" :disabled="busy" @click="ask(item.text)"><UiIcon name="chevron" :size="14"/>{{tr(item.label)}}</button></div>
+
 </div>
-<form class="mobile-start-composer" @submit.prevent="send">
-<div class="mobile-start-mode-row" role="group" :aria-label="tr('会话模式')"><button type="button" class="mobile-start-mode" :aria-pressed="mode==='chat'" @click="mode='chat'">{{tr('聊天')}}</button><button type="button" class="mobile-start-mode" :aria-pressed="mode==='task'" @click="mode='task'">{{tr('工作')}}</button></div>
+<form class="mobile-start-composer" @submit.prevent="send"><div class="mobile-start-quick" role="group" :aria-label="tr('快捷输入')"><button v-for="item in suggestions" :key="item.label" type="button" :disabled="busy" @click="fill(item.text)">{{tr(item.label)}}</button></div>
+
 <p class="mobile-start-mode-hint">{{tr(mode==='task'?'可查询并准备办理单':'只查询，不办理业务')}}</p>
 <div v-if="voice.working.value" class="mobile-voice-bar" role="status" aria-live="polite"><span class="mobile-voice-dot" aria-hidden="true"></span><b>{{tr(voice.status.value==='transcribing'?'识别中…':voice.status.value==='requesting'?'等待麦克风…':'正在聆听')}}</b><span class="mobile-voice-time">{{Math.floor(voice.seconds.value)}}s / 60s</span><button type="button" @click="hold.cancel">{{tr('取消')}}</button></div>
 <div class="mobile-start-input-row"><label class="sr-only" for="mobile-question">{{tr('查询实验室，或准备办理工作…')}}</label><button v-if="voice.supported.value&&!voiceMode" type="button" class="mobile-mic" :disabled="busy" :aria-label="tr('语音输入')" @click="enterVoice"><UiIcon name="mic"/></button><button v-else-if="voice.supported.value&&voiceMode" type="button" class="mobile-mic" :disabled="busy" :aria-label="tr('切换到键盘')" @click="exitVoice"><UiIcon name="keyboard"/></button><button v-if="voiceMode" type="button" class="mobile-speak" :class="{'is-recording':voice.status.value==='recording','is-sliding':hold.sliding.value}" :disabled="busy" v-on="hold.handlers"><span>{{tr(hold.sliding.value?'松开取消':voice.status.value==='recording'?'松开结束':'按住 说话')}}</span></button><textarea v-else ref="textareaRef" id="mobile-question" v-model="draft" rows="2" maxlength="3000" :disabled="busy||voice.working.value" :placeholder="voice.working.value?tr('正在聆听，松手结束…'):tr('查询实验室，或准备办理工作…')" @keydown="key"/><button v-if="!voiceMode" class="mobile-primary" :disabled="busy||!draft.trim()" type="submit"><UiIcon name="send"/>{{tr(busy?'生成中…':'发送')}}</button></div>

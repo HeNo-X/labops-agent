@@ -48,7 +48,8 @@
     "test:v8-browser": "node tests/v8-browser.mjs",
     "test:operations-page": "node tests/operations-page.test.mjs",
     "pack:audit": "python ../tools/audit-package.py",
-    "pack:submit": "python ../tools/package-labops-agent.py"
+    "pack:submit": "python ../tools/package-labops-agent.py",
+    "check:asr-lexicon": "node scripts/check-asr-lexicon.mjs"
   },
   "dependencies": {
     "@vue/devtools-api": "8.2.1",

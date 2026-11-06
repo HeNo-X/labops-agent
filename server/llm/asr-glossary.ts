@@ -24,7 +24,7 @@ import path from 'node:path';
 import { PROJECT_ROOT } from '../config.ts';
 import { normalizeForKey, type LexiconEntry } from './asr-lexicon.ts';
 
-export type AsrDomain = 'equipment' | 'check' | 'place' | 'operation' | 'period' | 'document';
+export type AsrDomain = 'equipment' | 'check' | 'place' | 'operation' | 'period' | 'document' | 'user';
 
 export interface GlossaryTerm {
   /** 标准写法，纠错时作为替换目标 */
@@ -63,7 +63,7 @@ export interface GlossaryFile {
 }
 
 const GLOSSARY_PATH = path.join(PROJECT_ROOT, 'shared', 'asr-glossary.json');
-const VALID_DOMAINS: readonly string[] = ['equipment', 'check', 'place', 'operation', 'period', 'document'];
+const VALID_DOMAINS: readonly string[] = ['equipment', 'check', 'place', 'operation', 'period', 'document', 'user'];
 
 /** 装载术语表 + 保护词表。形状不符即抛 —— 静默返回空表会让"术语表没生效"变成隐形故障。 */
 export function loadGlossaryData(file = GLOSSARY_PATH): GlossaryData {
@@ -206,6 +206,25 @@ export function charSyllableTable(terms: readonly GlossaryTerm[]): Map<string, s
 }
 
 /**
+ * 用**内置表里已经人工确认过的读音**给一个新词补音节。
+ * 只在每个字都在字表里时才返回；任一字查不到（多音字已被整字丢弃、拉丁段、生僻字）
+ * 就返回 null —— 缺拼音就标缺拼音，绝不猜一个读音填进去：
+ * 猜错的音节会让"完全同音"这条最硬的判据变成"我们以为同音"，那是把对的词改错。
+ */
+export function deriveSyllables(word: string, terms: readonly GlossaryTerm[]): string[] | null {
+  const table = charSyllableTable(terms);
+  const chars = Array.from((word ?? '').trim());
+  if (chars.length < 2) return null;
+  const out: string[] = [];
+  for (const ch of chars) {
+    const syll = table.get(ch);
+    if (!syll || !/^[a-z]{2,6}$/.test(syll)) return null;
+    out.push(syll);
+  }
+  return out;
+}
+
+/**
  * 把术语表转成 asr-lexicon 的词典条目。
  * 依赖方向是单向的：本模块知道 LexiconEntry 的形状，asr-lexicon 不认识术语表。
  */
@@ -240,7 +259,7 @@ export function hotwordVocabulary(terms: readonly GlossaryTerm[], max: number): 
   return out;
 }
 
-function hotwordFits(word: string): boolean {
+export function hotwordFits(word: string): boolean {
   const w = word.trim();
   if (!w) return false;
   if (/^[\x00-\x7F]+$/.test(w)) return w.split(/\s+/).filter(Boolean).length <= 7;
@@ -337,7 +356,7 @@ export function buildContextText(terms: readonly GlossaryTerm[], opts: ContextTe
   const maxChars = Math.max(0, Math.floor(opts.maxChars));
   const preferred = opts.preferredDomains ?? [];
   const rank = (domain: AsrDomain): number => (preferred.includes(domain) ? 0 : 1);
-  const labelOf: Record<AsrDomain, string> = { period: '节次', check: '交接检查项', place: '楼栋', equipment: '器材', operation: '操作', document: '单据' };
+  const labelOf: Record<AsrDomain, string> = { period: '节次', check: '交接检查项', place: '楼栋', equipment: '器材', operation: '操作', document: '单据', user: '自定义' };
   // 固定短语（节次/检查项/楼栋）整块先保：它们最长、最容易被预算挤掉，而口语里几乎必现
   const fixedPhrase = (domain: AsrDomain): number => (domain === 'period' || domain === 'check' || domain === 'place' ? 0 : 1);
 

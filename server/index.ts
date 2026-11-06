@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { describeConfig, getConfig, PROJECT_ROOT } from './config.ts';
 import { handleAgentChat, readJsonBody } from './api/agent-chat.ts';
 import { handleTranscribe } from './api/transcribe.ts';
+import { handleAsrLexiconCheck } from './api/asr-lexicon-report.ts';
 import { handleVisionApi } from './api/vision-api.ts';
 import { handleServiceAgent } from './api/service-agent.ts';
 import { handleConversations } from './api/conversations.ts';
@@ -230,6 +231,16 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       return;
     }
     await handleTranscribe(req, res);
+    return;
+  }
+
+  // 语音词汇体检：只读地回答"我登记的词到底落在哪条链路上"，不写文件、不写库、不打上游
+  if (p === '/api/agent/asr-lexicon-check') {
+    if (req.method !== 'POST') {
+      json(res, 405, { error: 'method_not_allowed', message: '请用 POST' });
+      return;
+    }
+    await handleAsrLexiconCheck(req, res);
     return;
   }
 

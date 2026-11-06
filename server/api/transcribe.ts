@@ -20,6 +20,7 @@ import { loadDataset } from '../data/store.ts';
 import {
   correctTranscript,
   lexiconFromDataset,
+  sanitizeTermPairs,
   type Correction,
   type LexiconEntry
 } from '../llm/asr-lexicon.ts';
@@ -145,8 +146,10 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
 
   const bundle = currentBundle();
   const skipped = payload['skipTermCorrect'] === true;
-  // 用户说过「本轮不要调整术语」→ 事前偏置与事后纠正一起停：
-  // 两者都是"按词表影响这句话"，只关一半会留下解释不清的中间态。
+  // 说话的人自己登记的「识别成 → 应该是」：来路不明，先过 sanitizeTermPairs 再用于本次纠正。
+  const userPairs = sanitizeTermPairs(payload['termPairs']);
+  // 用户说过「本页不再自动调整术语」→ 事前偏置与**词典**自动纠错一起停：
+  // 两者都是系统在按词表影响这句话。用户亲手登记的词对不在这一停的范围里（见下面的 skipLexicon）。
   const contextText = skipped ? '' : bundle.contextText;
   const hotwords = skipped ? {} : bundle.hotwords;
 
@@ -159,17 +162,20 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  // 事后纠错：Tier A 封闭集合走字符距离，Tier B 实验室术语走完全同音（四道闸门，见 asr-lexicon）。
+  // 事后纠错：Tier A 封闭集合走字符距离，Tier B 实验室术语走完全同音（四道闸门，见 asr-lexicon），
+  // 第零遍是说话的人自己登记的写法（精确替换，优先级最高）。
   // 事前偏置：实体词表作为首位 system 上下文发给模型（官方支持，不是热词参数）。
-  // 用户点过「本轮不要调整术语」时按请求级别跳过事后纠错 —— 决定权在说话的人手里，不在词典手里。
+  // 决定权在说话的人手里：他可以叫停系统的自动调整，但不该被禁止使用他自己写下的规则。
   const raw = result.text;
   let text = raw;
   let corrections: Correction[] = [];
-  if (raw && !skipped && process.env['ASR_TERM_CORRECT'] !== '0') {
+  if (raw && process.env['ASR_TERM_CORRECT'] !== '0' && (!skipped || userPairs.length)) {
     const fixed = correctTranscript(raw, bundle.entries, {
       syllables: bundle.syllables,
       protect: bundle.protect,
-      ambiguous: bundle.ambiguous
+      ambiguous: bundle.ambiguous,
+      userPairs,
+      skipLexicon: skipped
     });
     text = fixed.text;
     corrections = fixed.corrections;

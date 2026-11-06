@@ -7,6 +7,8 @@
  *    ③ 「本页不再自动调整术语」是否真的让后续请求带上 skipTermCorrect，
  *       并且这个状态看得见、点一下就能撤回（只给开关不给回头路不算交付）
  *    ④ 用户已经手改过草稿时，还原按钮必须是禁用态（不能把用户的修改覆盖掉）
+ *    ⑤ U1 用户登记：词对存在本机、随请求带上、来源在提示条里说得清、
+ *       叫停只停词典自动规则、删掉登记能真正回到改造前的请求形态
  *
  *  ⚠ /api/agent/transcribe 由 page.route **桩替代**：本探针只证明契约与交互接通，
  *    纠错本身的质量由 `npm run eval:asr` 与 tests/asr-syllable.test.ts 负责，
@@ -59,11 +61,35 @@ const page: Page = await ctx.newPage();
 const errors: string[] = [];
 const transcribeBodies: Array<Record<string, unknown>> = [];
 
-// 桩：带 skipTermCorrect 就原样返回，否则返回"已纠正 + 改动清单"
+const USER_FROM = '投映仪';
+const USER_TO = '投影仪';
+const USER_RAW = '投映仪已修好';
+const USER_FIXED = '投影仪已修好';
+
+// 桩：带 termPairs 优先走"用户登记"分支；否则带 skipTermCorrect 原样返回，再否则返回"词典已纠正 + 改动清单"
 await page.route('**/api/agent/transcribe', async (route: Route) => {
   const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
   transcribeBodies.push(body);
   const skipped = body['skipTermCorrect'] === true;
+  const pairs = Array.isArray(body['termPairs']) ? (body['termPairs'] as Array<{ from?: string; to?: string }>) : [];
+  if (pairs.length) {
+    // 服务端第零遍的形状：只回用户登记的那一条改动，且 via='user'；叫停时也照样生效
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        text: USER_FIXED,
+        originalText: USER_RAW,
+        corrections: [{ from: USER_FROM, to: USER_TO, kind: 'term', at: 0, via: 'user' }],
+        ...(skipped ? { termCorrectSkipped: true } : {}),
+        model: 'stub-asr',
+        protocol: 'chat_audio',
+        elapsedMs: 120
+      })
+    });
+    return;
+  }
   const text = skipped ? MISWRITTEN : CORRECTED;
   await route.fulfill({
     status: 200,
@@ -85,16 +111,31 @@ await page.route('**/api/agent/transcribe', async (route: Route) => {
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 
+/**
+ * PC 长按说话。命令栏在 6e6bce3 之后改成微信式两段交互（点麦克风→整行「按住说话」长条，
+ * 识别完自动退回输入框），所以这里两种形态都认：认不出长条就退回旧的 `.bar__mic.is-holding`。
+ * 探针跟着现网形态走，而不是让产品为了迁就探针保持不变 —— 但认哪种都要真的把录音按住，
+ * 拿不到"正在录"的证据就直接失败，不许静默跳过。
+ */
 async function holdToTalk(ms: number): Promise<void> {
-  const mic = page.locator('.bar__mic').first();
-  const box = await mic.boundingBox();
-  if (!box) throw new Error('麦克风按钮不可定位');
+  const speak = page.locator('.bar__speak');
+  if ((await speak.count()) === 0) {
+    const micBtn = page.locator('.bar__mic').first();
+    const mbox = await micBtn.boundingBox();
+    if (!mbox) throw new Error('麦克风按钮不可定位');
+    await page.mouse.click(mbox.x + mbox.width / 2, mbox.y + mbox.height / 2);
+    await speak.first().waitFor({ state: 'visible', timeout: 6000 });
+  }
+  const box = await speak.first().boundingBox();
+  if (!box) throw new Error('「按住说话」长条不可定位');
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await page.waitForSelector('.bar__mic.is-holding', { timeout: 6000 });
+  await page.waitForSelector('.bar__speak.is-active', { timeout: 6000 });
   await page.waitForTimeout(ms);
   await page.mouse.up();
-  await page.waitForTimeout(2500);
+  // 识别完成后 voiceMode 会退回输入框，等到 #cmd 可用再断言草稿
+  await page.waitForSelector('#cmd', { state: 'visible', timeout: 12000 });
+  await page.waitForTimeout(600);
 }
 
 await page.goto(BASE, { waitUntil: 'networkidle' });
@@ -179,6 +220,74 @@ check('恢复后下一次请求不再带 skipTermCorrect，草稿重新是纠正
   `最后一条请求 skip=${transcribeBodies.at(-1)?.['skipTermCorrect'] === true}；草稿="${draft5}"`);
 await page.screenshot({ path: path.join(SHOT, 'suppressed.png') });
 
+// ---------------------------------------------------------------- U1：用户自己登记的「识别成 → 应该是」
+console.log('\n[U1 · 登记常见误写]');
+const beforeU1 = transcribeBodies.length;
+const toggle = page.locator('.vtp__toggle');
+check('语音可用时出现登记入口（收起态只占一行）', (await toggle.count()) > 0, `count=${await toggle.count()}`);
+check('没登记时请求体一个 termPairs 字段都不带（与改造前逐字一致）',
+  transcribeBodies.slice(0, beforeU1).every((b) => b['termPairs'] === undefined),
+  JSON.stringify(transcribeBodies.slice(0, beforeU1).map((b) => Object.keys(b))));
+
+await toggle.click();
+await page.waitForTimeout(250);
+await page.fill('#vtp-from', USER_FROM);
+await page.fill('#vtp-to', USER_TO);
+await page.locator('.vtp__save').click();
+await page.waitForTimeout(250);
+const storedRaw = await page.evaluate(() => localStorage.getItem('labops.asr.term-pairs'));
+const stored = (() => { try { return JSON.parse(String(storedRaw)) as unknown; } catch { return null; } })();
+check('登记存在本机浏览器（服务端不落盘、不影响别人）',
+  Array.isArray(stored) && (stored[0] as { to?: string })?.to === USER_TO, String(storedRaw));
+check('列表里能看到并管理刚登记的那条', (await page.locator('.vtp__list li').count()) === 1, String(await page.locator('.vtp__list').innerText().catch(() => '')));
+
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
+const u1Body = transcribeBodies.at(-1) ?? {};
+check('下一次语音请求真的把词对带上去',
+  JSON.stringify(u1Body['termPairs']) === JSON.stringify([{ from: USER_FROM, to: USER_TO }]),
+  JSON.stringify(u1Body['termPairs']));
+const draft6 = await page.locator('#cmd').inputValue();
+check('登记生效：草稿用的就是你写的那个词', draft6.includes(USER_FIXED), `草稿="${draft6}"`);
+const bar6 = (await page.locator('.vcb').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+check('提示条把来源说清：改动来自你登记的写法，不是系统自己猜的',
+  /按你登记的写法替换了 1 处/.test(bar6) && !/按实验室术语表调整/.test(bar6), bar6);
+await page.screenshot({ path: path.join(SHOT, 'user-pair.png') });
+
+// 单字为什么不让登记：一次手滑就能把整句的某个字全换掉，界面必须当场拒绝并说明理由
+await page.fill('#vtp-from', '枪');
+await page.fill('#vtp-to', '枪头');
+await page.locator('.vtp__save').click();
+await page.waitForTimeout(200);
+const shortNotice = (await page.locator('.vtp__notice').innerText().catch(() => '')).trim();
+check('单字登记被当场拦下并说明原因（不写进"输入无效"这种废话）', /至少 2 个字/.test(shortNotice), shortNotice);
+check('拦下之后没有多出脏数据', (await page.locator('.vtp__list li').count()) === 1, String(await page.locator('.vtp__list li').count()));
+
+// 叫停只该停"自动"：用户自己写下的规则不该被一个临时开关顺带否决
+await page.locator('.vcb__btn--ghost').click();
+await page.waitForTimeout(300);
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
+const suppressedBody = transcribeBodies.at(-1) ?? {};
+check('叫停后请求同时带 skipTermCorrect 与 termPairs（两件事各说各的）',
+  suppressedBody['skipTermCorrect'] === true && Array.isArray(suppressedBody['termPairs']),
+  JSON.stringify({ skip: suppressedBody['skipTermCorrect'], pairs: suppressedBody['termPairs'] }));
+const bar7 = (await page.locator('.vcb').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+check('界面说法与行为一致：已停止自动调整，但仍按你登记的写法替换',
+  /本页已停止自动调整，只按你登记的写法替换了 1 处/.test(bar7), bar7);
+
+// 收回：删掉登记后必须回到"不带词对"的形态，否则用户没法真正反悔（面板此时仍是展开的）
+await page.locator('.vtp__list .vtp__del').first().click();
+await page.waitForTimeout(250);
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
+check('删除登记后请求不再带 termPairs（可逆，且当场生效）',
+  transcribeBodies.at(-1)?.['termPairs'] === undefined,
+  JSON.stringify(transcribeBodies.at(-1)?.['termPairs']));
+check('列表清空后 localStorage 里也没留脏数据',
+  (await page.evaluate(() => localStorage.getItem('labops.asr.term-pairs'))) === '[]',
+  String(await page.evaluate(() => localStorage.getItem('labops.asr.term-pairs'))));
+
 const realErrors = errors.filter((e) => !/503 \(Service Unavailable\)|favicon/.test(e));
 check('无 console 错误', realErrors.length === 0, realErrors.slice(0, 3).join(' | ') || '0 条');
 
@@ -241,17 +350,31 @@ if (mmicCount === 0) {
 }
 check('移动端语音入口可达（长按麦克风按钮存在）', mmicCount > 0, `count=${mmicCount}${mmicCount ? '' : '；正文片段=' + (await mpage.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ').slice(0, 140)}`);
 if (mmicCount > 0) {
-  // 不同入口的输入框 id 不同（MobileConversation 是 #mobile-question，起始页另有），按可用性挑
-  const hasQuestion = (await mpage.locator('#mobile-question').count()) > 0;
-  const mdraftBox = hasQuestion ? mpage.locator('#mobile-question').first() : mpage.locator('textarea').last();
-  const readDraft = async (): Promise<string> => (await mdraftBox.inputValue().catch(() => '')) || '';
-  const mbox = await mmic.boundingBox();
-  if (mbox) {
-    await mpage.mouse.move(mbox.x + mbox.width / 2, mbox.y + mbox.height / 2);
+  // 不同入口的输入框 id 不同（MobileConversation 是 #mobile-question，起始页另有），而且语音模式
+  // 会先把输入框换成整行长按条，所以每次都重新查，不缓存句柄
+  const readDraft = async (): Promise<string> => {
+    const box = (await mpage.locator('#mobile-question').count()) ? mpage.locator('#mobile-question').first() : mpage.locator('textarea').last();
+    return (await box.inputValue().catch(() => '')) || '';
+  };
+  const mHold = async (): Promise<void> => {
+    const speak = mpage.locator('.mobile-speak');
+    if ((await speak.count()) === 0) {
+      // 新版移动端也是"点麦克风→切语音模式"，旧的长按麦克风图标形态仍可用，两种都认
+      const mbox = await mmic.boundingBox();
+      if (!mbox) throw new Error('移动端麦克风不可定位');
+      await mpage.mouse.click(mbox.x + mbox.width / 2, mbox.y + mbox.height / 2);
+      await speak.first().waitFor({ state: 'visible', timeout: 6000 });
+    }
+    const sbox = await speak.first().boundingBox();
+    if (!sbox) throw new Error('移动端长按条不可定位');
+    await mpage.mouse.move(sbox.x + sbox.width / 2, sbox.y + sbox.height / 2);
     await mpage.mouse.down();
     await mpage.waitForTimeout(900);
     await mpage.mouse.up();
     await mpage.waitForTimeout(2500);
+  };
+  await mHold();
+  {
     const mdraft = await readDraft();
     check('移动端识别结果进入输入框', mdraft.includes('移液枪'), `草稿="${mdraft}"`);
     const mbar = (await mpage.locator('.vcb').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();

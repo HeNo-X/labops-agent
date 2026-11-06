@@ -34,6 +34,13 @@ const hidden = computed(() => Math.max(0, props.corrections.length - MAX_SHOWN))
 const canRestore = computed(() => typeof props.originalText === 'string' && props.originalText !== '');
 // 没有改动也没有抑制状态时整条不渲染，免得在输入框下面常驻一行没人需要的提示
 const visible = computed(() => props.corrections.length > 0 || Boolean(props.suppressed));
+/**
+ * 其中几条来自"说话的人自己登记的写法"。必须单独说明：
+ * 叫停自动调整后仍出现改动，如果不点明来源，用户看到的就是"我叫停了却还是被改了"——
+ * 那是把我们做对的事显示成了 bug。
+ */
+const userCount = computed(() => props.corrections.filter((c) => c.via === 'user').length);
+const allUser = computed(() => userCount.value > 0 && userCount.value === props.corrections.length);
 
 function restore(): void {
   if (!canRestore.value) return;
@@ -45,13 +52,18 @@ function restore(): void {
   <p v-if="visible" class="vcb" role="status" aria-live="polite">
     <span class="vcb__mark" aria-hidden="true">{{ suppressed ? '⊘' : '⌁' }}</span>
     <span v-if="corrections.length" class="vcb__text">
-      {{ tr('语音识别按实验室术语表调整了 {n} 处', { n: corrections.length }) }}
+      {{ suppressed && userCount
+        ? tr('本页已停止自动调整，只按你登记的写法替换了 {n} 处', { n: corrections.length })
+        : allUser
+          ? tr('按你登记的写法替换了 {n} 处', { n: corrections.length })
+          : tr('语音识别按实验室术语表调整了 {n} 处', { n: corrections.length }) }}
       <span v-for="(c, i) in shown" :key="`${c.from}-${i}`" class="vcb__pair">
         <span class="vcb__from">{{ c.from }}</span>
         <span class="vcb__arrow" aria-hidden="true">→</span>
         <span class="vcb__to">{{ c.to }}</span>
       </span>
       <span v-if="hidden">{{ tr('另有 {n} 处未列出', { n: hidden }) }}</span>
+      <span v-if="userCount && !allUser" class="vcb__note">{{ tr('其中 {n} 处来自你登记的写法', { n: userCount }) }}</span>
     </span>
     <span v-else class="vcb__text">{{ tr('本页已停止自动调整术语，识别结果按上游原文直接使用') }}</span>
     <span class="vcb__actions">
@@ -101,6 +113,10 @@ function restore(): void {
 }
 .vcb__to {
   color: var(--text);
+}
+/* "来自你登记的写法"是解释性补充，弱一档但不隐形 */
+.vcb__note {
+  color: var(--text-faint);
 }
 .vcb__actions {
   display: inline-flex;

@@ -15,6 +15,7 @@
 
 import { computed, onUnmounted, ref } from 'vue';
 import { clientFetch } from '../client';
+import { currentUserTermPairs } from './useUserTerms';
 
 export type VoiceStatus = 'idle' | 'requesting' | 'recording' | 'transcribing';
 
@@ -68,7 +69,7 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
    */
   const lastOriginalText = ref<string>('');
   const lastCorrections = ref<VoiceCorrection[]>([]);
-  /** 用户点了"本轮不要调整术语"后置真；下一次录音照原样返回，不再走纠错 */
+  /** 用户点了"本页不再自动调整术语"后置真：后续请求停掉**词典自动**改动（用户自己登记的写法仍生效） */
   const suppressCorrection = ref<boolean>(false);
 
   const recording = computed(() => status.value === 'recording');
@@ -119,8 +120,15 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
           audio,
           mime: payload.mime,
           seconds: Math.round(payload.seconds),
-          // 用户明确说过"本轮不要动术语"，就按请求级别跳过纠错；服务端仍照实返回未改动
-          ...(suppressCorrection.value ? { skipTermCorrect: true } : {})
+          // 用户明确说过"本页不再自动调整术语"，就按请求级别跳过**词典自动**纠错；
+          // 他自己登记的词对不在停用范围内（服务端会照实分别标注）。
+          ...(suppressCorrection.value ? { skipTermCorrect: true } : {}),
+          // 登记过的写法随请求带上去：服务端只在本条转写里用，不落盘、不影响别人。
+          // 一条都没有时整个字段不出现，保持与旧请求体逐字一致。
+          ...(() => {
+            const termPairs = currentUserTermPairs();
+            return termPairs.length ? { termPairs } : {};
+          })()
         })
       });
       if (!response.ok) {

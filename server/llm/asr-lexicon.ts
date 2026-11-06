@@ -48,9 +48,10 @@ export interface Correction {
   at: number;
   /**
    * 靠什么判定的。回传给界面与评测，是为了让"这条改动有多硬"可审计：
-   * exact/alias 是确定命中，distance 是等长一字之差，syllable 是完全同音。
+   * exact/alias 是确定命中，distance 是等长一字之差，syllable 是完全同音，
+   * **user 是说话的人自己登记的写法**（不是系统猜的，见 sanitizeTermPairs）。
    */
-  via: 'exact' | 'distance' | 'syllable' | 'alias';
+  via: 'exact' | 'distance' | 'syllable' | 'alias' | 'user';
 }
 
 export interface CorrectResult {
@@ -193,6 +194,57 @@ export interface CorrectOptions {
   protect?: ReadonlySet<string>;
   /** 一个音节串对应多个标准词的歧义键，整键跳过 —— 同音歧义下任何选择都是猜 */
   ambiguous?: ReadonlySet<string>;
+  /** 说话的人自己登记的「识别成 → 应该是」（已过 sanitizeTermPairs） */
+  userPairs?: readonly UserTermPair[];
+  /**
+   * 只跑用户登记的那一遍，跳过词典自动规则。
+   * 界面上「本页不再自动调整术语」停的是**自动**改动，用户自己写的词对不该被一起关掉；
+   * 关掉它等于让一个明确的人类决定被一个"临时别再猜"的开关顺带否决。
+   */
+  skipLexicon?: boolean;
+}
+
+/** 用户登记的一对写法：from = 识别出来的样子，to = 应该是什么 */
+export interface UserTermPair {
+  from: string;
+  to: string;
+}
+
+/**
+ * 词对约束。为什么是这几条：
+ * - 最短 2 字：单字的同音面太宽，用户手滑写一个「机」就能把全句的「机」换掉，
+ *   那是"一次输入毁掉一句识别"的形状，不给通过。
+ * - 最长 24：超出上限的"词"多半是把整句话粘进来了，替换后果不可预期。
+ * - from ≠ to、去空白、去控制字符、同一 from 只认第一条、最多 100 条：
+ *   全部是为了**行为可复现**，而不是为了省算力。
+ */
+const MIN_USER_PAIR_CHARS = 2;
+const MAX_USER_PAIR_CHARS = 24;
+const MAX_USER_PAIRS = 100;
+
+/** 把请求体里来路不明的 termPairs 清洗成可用词对；非法条目直接丢弃，不报错也不猜 */
+export function sanitizeTermPairs(raw: unknown): UserTermPair[] {
+  if (!Array.isArray(raw)) return [];
+  const out: UserTermPair[] = [];
+  const seen = new Set<string>();
+  for (const item of raw as unknown[]) {
+    if (out.length >= MAX_USER_PAIRS) break;
+    if (!item || typeof item !== 'object') continue;
+    const record = item as Record<string, unknown>;
+    const from = typeof record['from'] === 'string' ? record['from'].trim() : '';
+    const to = typeof record['to'] === 'string' ? record['to'].trim() : '';
+    const fromChars = [...from].length;
+    const toChars = [...to].length;
+    if (fromChars < MIN_USER_PAIR_CHARS || fromChars > MAX_USER_PAIR_CHARS) continue;
+    if (toChars < 1 || toChars > MAX_USER_PAIR_CHARS) continue;
+    if (from === to) continue;
+    // eslint-disable-next-line no-control-regex
+    if (/[\u0000-\u001f\u007f]/.test(from) || /[\u0000-\u001f\u007f]/.test(to)) continue;
+    if (seen.has(from)) continue;
+    seen.add(from);
+    out.push({ from, to });
+  }
+  return out;
 }
 
 /**
@@ -239,7 +291,12 @@ function findAll(text: string, word: string): number[] {
  * @param opts Tier B 同音纠错所需三份数据；不传则**只做原来的 Tier A 规则**，行为与升级前一致
  */
 export function correctTranscript(text: string, lexicon: readonly LexiconEntry[], opts: CorrectOptions = {}): CorrectResult {
-  if (!text || !lexicon.length) return { text, corrections: [], aborted: false };
+  // 长的先占位：否则「叶枪」会把「一叶枪」切成两段各改一次，改完谁也认不出原句
+  const userPairs = (opts.userPairs ?? [])
+    .filter((p) => p && typeof p.from === 'string' && typeof p.to === 'string' && p.from !== p.to)
+    .slice()
+    .sort((a, b) => b.from.length - a.from.length);
+  if (!text || (!lexicon.length && !userPairs.length)) return { text, corrections: [], aborted: false };
 
   const planned: Planned[] = [];
   /** 已经被占用的区间不再改，避免两遍规则叠在同一处反复替换 */
@@ -250,6 +307,16 @@ export function correctTranscript(text: string, lexicon: readonly LexiconEntry[]
     planned.push({ at, length, correction: { from: text.slice(at, at + length), to, kind, at, via } });
   };
 
+  // ---------- 第零遍：说话的人自己登记的写法（整串精确替换，优先级最高）----------
+  // 为什么它敢绕过"最短 4 字 / 必须完全同音"这些自动规则：自动规则是在没人负责的情况下猜，
+  // 猜错的代价由用户承担；这里的每一对都是用户亲手写的，而且界面能逐条删除。
+  // 仍守住三条下限：from ≥2 字（sanitizeTermPairs 把关）、命中区间不让后面几遍再改、
+  // 与词典改动共用同一个"超上限就整段放弃"的预算。
+  for (const pair of userPairs) {
+    for (const at of findAll(text, pair.from)) push(at, pair.from.length, pair.to, 'term', 'user');
+  }
+
+  const skipLexicon = opts.skipLexicon === true;
   const rooms = lexicon.filter((entry) => entry.kind === 'room' && !entry.sy);
   // 带 sy 的条目走第三遍，不参与"≥4 字 + 等长距离"那条老路
   const words = lexicon.filter(
@@ -257,7 +324,7 @@ export function correctTranscript(text: string, lexicon: readonly LexiconEntry[]
   );
 
   // ---------- 第一遍：房间号（正则定位，永远不猜裸数字） ----------
-  if (rooms.length) {
+  if (!skipLexicon && rooms.length) {
     for (const match of text.matchAll(ROOM_CANDIDATE)) {
       const raw = match[0];
       const at = match.index ?? 0;
@@ -291,7 +358,7 @@ export function correctTranscript(text: string, lexicon: readonly LexiconEntry[]
 
   // ---------- 第二遍：中文班级名/课程名（滑动窗口 + 编辑距离）----------
   // 文本过长时跳过：这类文本本身不像一句口头指令，纠错收益低而代价高
-  if (words.length && text.length <= MAX_CN_SCAN_CHARS) {
+  if (!skipLexicon && words.length && text.length <= MAX_CN_SCAN_CHARS) {
     for (const entry of words) {
       const sizes = [entry.canonical.length, entry.canonical.length - 1, entry.canonical.length + 1];
       // 词越短越容易撞车：4 字要求完全一致，5 字以上才容忍 1 字误差
@@ -326,7 +393,7 @@ export function correctTranscript(text: string, lexicon: readonly LexiconEntry[]
   // 这是唯一被允许降到 2 字门槛的路径，因为它要求**完全同音**，而不是字符距离接近。
   // 四道闸门，任一不过就不改：歧义音节键 → 保护词 → 未知字 → 邻接阻断。
   const termEntries = lexicon.filter((entry) => entry.sy && entry.kind !== 'room');
-  if (termEntries.length && opts.syllables?.size && text.length <= MAX_CN_SCAN_CHARS) {
+  if (!skipLexicon && termEntries.length && opts.syllables?.size && text.length <= MAX_CN_SCAN_CHARS) {
     const table = opts.syllables;
     const ambiguous = opts.ambiguous ?? new Set<string>();
     const protect = opts.protect ?? new Set<string>();

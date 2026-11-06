@@ -4,7 +4,7 @@ import {preferences} from '../preferences';import {t as tr} from '../i18n';
 import {useSessionStore} from '../stores/session';import {useRunStore} from '../stores/run';import {useBusinessStore} from '../stores/business';
 import type {useConversationController} from '../composables/useConversationController';
 import type {Target} from '@shared/labops-targets.js';import UiIcon from '../components/UiIcon.vue';
-import {useVoiceInput} from '../composables/useVoiceInput';import {useHoldToTalk} from '../composables/useHoldToTalk';import {useVoiceCorrection} from '../composables/useVoiceCorrection';import VoiceCorrectionBar from '../components/VoiceCorrectionBar.vue';
+import {useVoiceInput} from '../composables/useVoiceInput';import {useHoldToTalk} from '../composables/useHoldToTalk';import {useVoiceCorrection} from '../composables/useVoiceCorrection';import VoiceCorrectionBar from '../components/VoiceCorrectionBar.vue';import VoiceTermPanel from '../components/VoiceTermPanel.vue';
 const props=defineProps<{section?:string;controller:ReturnType<typeof useConversationController>}>(),emit=defineEmits<{navigate:[Target]}>();
 const session=useSessionStore(),run=useRunStore(),business=useBusinessStore(),draft=ref(session.draftFor('__new'));
 // 长按说话（与桌面 CommandBar 共用同一组合式函数）：按住录音、松手识别回填
@@ -46,6 +46,6 @@ const suggestions=computed(()=>identity.value==='volunteer'
 <div class="mobile-start-input-row"><label class="sr-only" for="mobile-question">{{tr('查询实验室，或准备办理工作…')}}</label><button v-if="voice.supported.value&&!voiceMode" type="button" class="mobile-mic" :disabled="busy" :aria-label="tr('语音输入')" @click="enterVoice"><UiIcon name="mic"/></button><button v-else-if="voice.supported.value&&voiceMode" type="button" class="mobile-mic" :disabled="busy" :aria-label="tr('切换到键盘')" @click="exitVoice"><UiIcon name="keyboard"/></button><button v-if="voiceMode" type="button" class="mobile-speak" :class="{'is-recording':voice.status.value==='recording','is-sliding':hold.sliding.value}" :disabled="busy" v-on="hold.handlers"><span>{{tr(hold.sliding.value?'松开取消':voice.status.value==='recording'?'松开结束':'按住 说话')}}</span></button><textarea v-else ref="textareaRef" id="mobile-question" v-model="draft" rows="2" maxlength="3000" :disabled="busy||voice.working.value" :placeholder="voice.working.value?tr('正在聆听，松手结束…'):tr('查询实验室，或准备办理工作…')" @keydown="key"/><button v-if="!voiceMode" class="mobile-primary" :disabled="busy||!draft.trim()" type="submit"><UiIcon name="send"/>{{tr(busy?'生成中…':'发送')}}</button></div>
 <p v-if="controller.error.value" class="mobile-start-error" role="alert">{{controller.error.value}}</p>
 <p v-if="voiceHint" class="mobile-voice-hint" role="alert">{{voiceHint}}</p>
-<VoiceCorrectionBar :corrections="voice.lastCorrections.value" :original-text="voiceFix.originalText.value" :suppressed="voiceFix.suppressed.value" @restore="voiceFix.restore" @suppress="voiceFix.suppress" @unsuppress="voiceFix.unsuppress"/>
+<VoiceCorrectionBar :corrections="voice.lastCorrections.value" :original-text="voiceFix.originalText.value" :suppressed="voiceFix.suppressed.value" @restore="voiceFix.restore" @suppress="voiceFix.suppress" @unsuppress="voiceFix.unsuppress"/><VoiceTermPanel v-if="voice.supported.value"/>
 </form>
 </section></template>

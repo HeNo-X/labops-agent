@@ -18,6 +18,7 @@ import { useVoiceInput } from '../composables/useVoiceInput';
 import { useHoldToTalk } from '../composables/useHoldToTalk';
 import { useVoiceCorrection } from '../composables/useVoiceCorrection';
 import VoiceCorrectionBar from './VoiceCorrectionBar.vue';
+import VoiceTermPanel from './VoiceTermPanel.vue';
 import StatusTag from './StatusTag.vue';
 import UiIcon from './UiIcon.vue';
 
@@ -318,6 +319,9 @@ function onKeydown(e: KeyboardEvent): void {
       @suppress="voiceFix.suppress"
       @unsuppress="voiceFix.unsuppress"
     />
+
+    <!-- 语音可用时才给登记入口：键盘输入的人不需要"这个词被识别成了什么" -->
+    <VoiceTermPanel v-if="voice.supported.value" />
 
     <div v-if="busy" class="bar__hint">
       <StatusTag
@@ -642,7 +646,7 @@ function onKeydown(e: KeyboardEvent): void {
 .bar__speak {
   flex: 1 1 auto;
   min-width: 0;
-  min-height: 40px;
+  min-height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -662,7 +666,7 @@ function onKeydown(e: KeyboardEvent): void {
   transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
 }
 .bar--hero .bar__speak {
-  min-height: 56px;
+  min-height: 84px;
 }
 .bar__speak:hover:not(:disabled) {
   border-color: var(--primary);

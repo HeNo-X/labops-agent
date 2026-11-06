@@ -623,6 +623,10 @@ Object.assign(en,{
  '有缺口':'Gap', '无账面缺口':'No book gap',
  '未签到学号：':'Not checked in (student IDs): ',
  '缺口=应到−实到的账面差，需现场核实后再定性；请勿代替学生签到。未签到名单为学号（账号），不含姓名。':'A gap is the book difference (expected − checked-in); verify on site before drawing conclusions. Never sign in for students. The list contains student IDs (accounts), never names.',
- '默认已可查询课表、房间状态、本人签到状态与签到汇总（管理员）等只读工具；此处勾选用于追加草稿类动作。':'Read-only tools (timetable, room status, my check-in status, and the admin check-in summary) are available by default; tick here only to add draft actions.'
+ '默认已可查询课表、房间状态、本人签到状态与签到汇总（管理员）等只读工具；此处勾选用于追加草稿类动作。':'Read-only tools (timetable, room status, my check-in status, and the admin check-in summary) are available by default; tick here only to add draft actions.',
+ '语音识别按实验室术语表调整了 {n} 处':'Speech-to-text adjusted {n} term(s) against the laboratory glossary',
+ '另有 {n} 处未列出':'plus {n} more not listed',
+ '还原原文':'Restore original',
+ '本轮不要调整术语':"Don't adjust terms this round",
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

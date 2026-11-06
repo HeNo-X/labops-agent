@@ -32,6 +32,13 @@ export type VoiceErrorCode =
   | 'empty'            // 识别结果为空
   | 'unknown';
 
+/** 服务端术语纠错的单条改动；via 说明靠什么判定的，界面用它决定措辞轻重 */
+export interface VoiceCorrection {
+  from: string;
+  to: string;
+  via: string;
+}
+
 export interface VoiceInputOptions {
   /** 单段录音上限（秒），到点自动收尾并转写 */
   maxSeconds?: number;
@@ -55,6 +62,14 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
   const status = ref<VoiceStatus>('idle');
   const seconds = ref(0);
   const errorCode = ref<VoiceErrorCode | null>(null);
+  /**
+   * 上一次转写的服务端纠错结果。用并列 ref 而不是改 stop() 的返回类型：
+   * stop() 目前有 PC/移动两端的长按封装共用，改签名会波及所有在制调用方。
+   */
+  const lastOriginalText = ref<string>('');
+  const lastCorrections = ref<VoiceCorrection[]>([]);
+  /** 用户点了"本轮不要调整术语"后置真；下一次录音照原样返回，不再走纠错 */
+  const suppressCorrection = ref<boolean>(false);
 
   const recording = computed(() => status.value === 'recording');
   const working = computed(() => status.value !== 'idle');
@@ -100,7 +115,13 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
       const response = await clientFetch('/api/agent/transcribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ audio, mime: payload.mime, seconds: Math.round(payload.seconds) })
+        body: JSON.stringify({
+          audio,
+          mime: payload.mime,
+          seconds: Math.round(payload.seconds),
+          // 用户明确说过"本轮不要动术语"，就按请求级别跳过纠错；服务端仍照实返回未改动
+          ...(suppressCorrection.value ? { skipTermCorrect: true } : {})
+        })
       });
       if (!response.ok) {
         if (response.status === 503) errorCode.value = 'not_configured';
@@ -109,8 +130,20 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
         else errorCode.value = 'upstream';
         return null;
       }
-      const data = (await response.json()) as { text?: string };
+      const data = (await response.json()) as {
+        text?: string;
+        originalText?: string;
+        corrections?: Array<{ from: string; to: string; kind?: string; via?: string }>;
+      };
       const text = (data.text ?? '').trim();
+      // 服务端只在真的改过时才回传 originalText/corrections；这里原样接住给界面展示。
+      // 不接就等于把"替你改了两个字"这件事藏起来 —— 用户有权知道并且一键还原。
+      lastCorrections.value = Array.isArray(data.corrections)
+        ? data.corrections
+          .filter((c) => typeof c?.from === 'string' && typeof c?.to === 'string' && c.from !== c.to)
+          .map((c) => ({ from: c.from, to: c.to, via: c.via ?? 'unknown' }))
+        : [];
+      lastOriginalText.value = lastCorrections.value.length ? (data.originalText ?? '') : '';
       if (!text) {
         errorCode.value = 'empty';
         return null;
@@ -129,6 +162,9 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
       return;
     }
     errorCode.value = null;
+    // 每次重新录音都清掉上一轮的改动记录，否则提示行会说这轮没做过的事
+    lastOriginalText.value = '';
+    lastCorrections.value = [];
     if (!supported.value) {
       errorCode.value = typeof window !== 'undefined' && window.isSecureContext === false ? 'insecure' : 'unsupported';
       return;
@@ -221,5 +257,20 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
     cleanupMedia();
   });
 
-  return { status, seconds, errorCode, supported, recording, working, start, stop, cancel };
+  /** 用户选择"还原原文"后调用：清掉提示，避免同一批改动被反复提示 */
+  function clearCorrections(): void {
+    lastCorrections.value = [];
+    lastOriginalText.value = '';
+  }
+
+  /** 用户选择"本轮不要调整术语"：关掉后续请求的纠错，并清掉当前提示 */
+  function suppressCorrections(): void {
+    suppressCorrection.value = true;
+    clearCorrections();
+  }
+
+  return {
+    status, seconds, errorCode, supported, recording, working, start, stop, cancel,
+    lastOriginalText, lastCorrections, suppressCorrection, clearCorrections, suppressCorrections
+  };
 }

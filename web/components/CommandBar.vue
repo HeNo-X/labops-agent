@@ -16,6 +16,8 @@ import { computed } from 'vue';
 import { useRunStore } from '../stores/run';
 import { useVoiceInput } from '../composables/useVoiceInput';
 import { useHoldToTalk } from '../composables/useHoldToTalk';
+import { useVoiceCorrection } from '../composables/useVoiceCorrection';
+import VoiceCorrectionBar from './VoiceCorrectionBar.vue';
 import StatusTag from './StatusTag.vue';
 import UiIcon from './UiIcon.vue';
 
@@ -111,12 +113,10 @@ const voiceHint = computed(() => {
 });
 
 // 长按说话：按下开始录音，松手结束并回填。交互逻辑在 useHoldToTalk（PC/移动端共用一份）。
+const voiceFix = useVoiceCorrection(voice, text);
 const hold = useHoldToTalk({
   voice,
-  onText: (recognized) => {
-    // 识别结果并入草稿而非覆盖：用户可能已经打了一半
-    text.value = text.value ? `${text.value.replace(/\s+$/, '')} ${recognized}` : recognized;
-  }
+  onText: voiceFix.applyText
 });
 
 function onKeydown(e: KeyboardEvent): void {
@@ -210,6 +210,13 @@ function onKeydown(e: KeyboardEvent): void {
     <p v-if="props.notice" class="bar__notice" role="status">{{ tr(props.notice) }}</p>
 
     <p v-if="voiceHint" class="bar__voice-hint" role="alert">{{ voiceHint }}</p>
+
+    <VoiceCorrectionBar
+      :corrections="voice.lastCorrections.value"
+      :original-text="voiceFix.originalText.value"
+      @restore="voiceFix.restore"
+      @suppress="voiceFix.suppress"
+    />
 
     <div v-if="busy" class="bar__hint">
       <StatusTag

@@ -117,7 +117,10 @@ export function buildLexiconReport(
     const fits = hotwordFits(word);
     const why2 = fits ? '' : '；注意它超出官方热词长度上限（非 ASCII 15 字 / 纯 ASCII 7 段），换原生协议时不会进即时热词表';
     if (!config.contextEnabled) {
-      return { word, verdict: 'bias-off', hotwordFits: fits, why: '服务端事前偏置当前是关的（ASR_CONTEXT_ENABLED=0），常用词不会发给模型' };
+      // 主结论仍是"没发出去"（这是用户此刻最该知道的事实），但内置表已有这个词更值得说一句：
+      // 开不开偏置它都不该重复登记
+      const alsoBuiltin = canonicalSet.has(word) ? '；而且内置术语表本来就有这个词，开不开偏置它都是重复登记' : '';
+      return { word, verdict: 'bias-off', hotwordFits: fits, why: `服务端事前偏置当前是关的（ASR_CONTEXT_ENABLED=0），常用词不会发给模型${alsoBuiltin}` };
     }
     if (canonicalSet.has(word)) {
       return { word, verdict: 'already-in-builtin', hotwordFits: fits, why: '内置术语表本来就有这个词，重复登记不额外起作用' + why2 };

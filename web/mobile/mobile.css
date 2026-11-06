@@ -644,3 +644,31 @@
 .mobile-start-input-row .mobile-primary {
   min-height: 44px;
 }
+
+/* 空会话态（打开即主会话区）：问候 + 快捷胶囊，替代原来的独立入口页 */
+.mobile-empty {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding: 8px 2px;
+}
+.mobile-empty__hi {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* 空会话态（打开即主会话区）：问候 + 快捷胶囊，替代原来的独立入口页 */
+.mobile-empty {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding: 8px 2px;
+}
+.mobile-empty__hi {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}

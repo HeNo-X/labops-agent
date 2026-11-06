@@ -201,3 +201,15 @@ test('extraTerms（Tier A 的房间/班级/课程）进上下文时去重、去�
   assert.equal([...out.text.matchAll(/E310/g)].length, 1);
   assert.ok(out.text.includes('D517'));
 });
+
+test('紧预算下房间号要争到位置：它们最容易被听错，排在最后等于白留预算', () => {
+  const terms = [
+    term('投影仪', ['tou', 'ying', 'yi'], [], 5, 'equipment'),
+    term('服务器', ['fu', 'wu', 'qi'], [], 5, 'equipment'),
+    term('万用表', ['wan', 'yong', 'biao'], [], 5, 'equipment')
+  ];
+  // 预算刚好只放得下 header + 一个块
+  const out = buildContextText(terms, { maxChars: 40, extraTerms: ['E310', 'D517'] });
+  assert.ok(out.text.includes('E310'), `房间号被挤掉了：\n${out.text}`);
+  assert.ok(out.omitted > 0, '被丢弃的词必须计数，否则"词表被截了"是隐形的');
+});

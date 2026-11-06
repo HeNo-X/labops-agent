@@ -259,19 +259,20 @@ export function buildContextText(terms: readonly GlossaryTerm[], opts: ContextTe
   // 固定短语（节次/检查项/楼栋）整块先保：它们最长、最容易被预算挤掉，而口语里几乎必现
   const fixedPhrase = (domain: AsrDomain): number => (domain === 'period' || domain === 'check' || domain === 'place' ? 0 : 1);
 
-  const candidates = [...terms]
-    .sort(
-      (a, b) =>
-        fixedPhrase(a.domain) - fixedPhrase(b.domain) ||
-        rank(a.domain) - rank(b.domain) ||
-        b.weight - a.weight ||
-        (a.canonical < b.canonical ? -1 : a.canonical > b.canonical ? 1 : 0)
-    )
-    .map((t) => ({ label: labelOf[t.domain], word: t.canonical }));
-
-  for (const extra of [...new Set((opts.extraTerms ?? []).map((s) => s.trim()).filter(Boolean))]) {
-    candidates.push({ label: '对象', word: extra });
-  }
+  // 数据集来的房间号/班级/课程按满权重参与竞争：它们恰恰是最容易被听错的一类，
+  // 排在最后等于让紧俏预算先便宜了器材词。
+  const extras = [...new Set((opts.extraTerms ?? []).map((s) => s.trim()).filter(Boolean))];
+  interface Candidate { label: string; word: string; fixed: number; rank: number; weight: number }
+  const candidates: Candidate[] = [
+    ...terms.map((t) => ({ label: labelOf[t.domain], word: t.canonical, fixed: fixedPhrase(t.domain), rank: rank(t.domain), weight: t.weight })),
+    ...extras.map((word) => ({ label: '对象', word, fixed: 1, rank: 0, weight: 5 }))
+  ].sort(
+    (a, b) =>
+      a.fixed - b.fixed ||
+      a.rank - b.rank ||
+      b.weight - a.weight ||
+      (a.word < b.word ? -1 : a.word > b.word ? 1 : 0)
+  );
 
   const header = '实验室管理领域参考词（中文）：';
   let lines: string[] = [header];

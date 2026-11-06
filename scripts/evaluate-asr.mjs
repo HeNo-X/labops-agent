@@ -42,7 +42,7 @@ process.env.LABOPS_AUTH_MODE = 'demo';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'labops-asr-eval-'));
 process.env.LABOPS_DB_PATH = path.join(temp, 'eval.sqlite');
 
-const { loadGlossaryData, glossaryToLexicon, validateGlossary, ambiguousSyllables, charSyllableTable, glossaryFingerprint } = await import('../server/llm/asr-glossary.ts');
+const { loadGlossaryData, glossaryToLexicon, validateGlossary, ambiguousSyllables, charSyllableTable, glossaryFingerprint, buildContextText } = await import('../server/llm/asr-glossary.ts');
 const { loadDataset } = await import('../server/data/store.ts');
 const { lexiconFromDataset, correctTranscript } = await import('../server/llm/asr-lexicon.ts');
 
@@ -262,54 +262,94 @@ if (mode === 'live') {
       result.live = { status: 'not_run', reason: `清单里 ${absent.length} 个音频文件不存在：${absent.slice(0, 5).map((r) => r.file).join(', ')}` };
       result.metrics = { raw: null, current: null, merged: null, perDomain: null, harmful: null, harmfulMerged: null, e2eToolHit: result.metrics.e2eToolHit };
     } else {
-      // 真跑：逐条转写 → 过纠正层 → 与 referenceText 比。这是 B2 开/关对比的同一套管线。
+      // 真跑：同一段音频走两遍 —— 一遍不发上下文、一遍发 —— 才把"偏置有没有用"和
+      // "事后纠正有没有用"分开。只跑一遍就归功于偏置，是这类评测最容易犯的假账。
       const { transcribeAudio } = await import('../server/llm/asr.ts');
+      const contextText = buildContextText(glossary, {
+        maxChars: cfg.contextMaxChars,
+        extraTerms: tierA.map((e) => e.canonical)
+      }).text;
       const mimeOf = (f) => (f.endsWith('.wav') ? 'audio/wav' : f.endsWith('.mp3') ? 'audio/mpeg' : f.endsWith('.m4a') ? 'audio/mp4' : f.endsWith('.ogg') ? 'audio/ogg' : 'audio/webm');
-      const rows = [];
-      for (const r of manifest.recordings) {
-        const buf = fs.readFileSync(path.join(audioDir, r.file));
-        const res = await transcribeAudio({ base64: buf.toString('base64'), mime: mimeOf(r.file) });
-        if (!res.ok) {
-          rows.push({ id: r.id, status: 'failed', code: res.code, message: res.message });
-          continue;
-        }
+
+      /** 一条转写结果的可比字段（targets 显式传入，不靠闭包里的可变状态） */
+      const profile = (res, targets) => {
+        if (!res.ok) return { ok: false, code: res.code, message: res.message };
         const fixed = correctTranscript(res.text, mergedEntries, mergedOpts);
-        const ok = countPresent(res.text, r.targetTerms ?? []);
-        const okFixed = countPresent(fixed.text, r.targetTerms ?? []);
-        rows.push({
-          id: r.id,
-          status: 'ok',
+        return {
+          ok: true,
           upstream: res.text,
           corrected: fixed.text,
-          reference: r.referenceText,
-          targets: (r.targetTerms ?? []).length,
-          rawHits: ok.present,
-          correctedHits: okFixed.present,
+          upstreamHits: countPresent(res.text, targets).present,
+          correctedHits: countPresent(fixed.text, targets).present,
           corrections: fixed.corrections,
-          elapsedMs: res.elapsedMs
-        });
+          applied: res.applied,
+          elapsedMs: res.elapsedMs,
+          promptTokens: res.usage?.promptTokens,
+          seconds: res.usage?.seconds
+        };
+      };
+
+      const rows = [];
+      for (const r of manifest.recordings) {
+        const targets = r.targetTerms ?? [];
+        const buf = fs.readFileSync(path.join(audioDir, r.file));
+        const base64 = buf.toString('base64');
+        const mime = mimeOf(r.file);
+        const plain = profile(await transcribeAudio({ base64, mime }), targets);
+        const biased = profile(await transcribeAudio({ base64, mime, contextText }), targets);
+        if (!plain.ok || !biased.ok) {
+          rows.push({ id: r.id, status: 'failed', plain, biased });
+          continue;
+        }
+        rows.push({ id: r.id, status: 'ok', reference: r.referenceText, targets: targets.length, plain, biased });
       }
+
       const done = rows.filter((x) => x.status === 'ok');
-      const sum = (k) => done.reduce((a, b) => a + b[k], 0);
-      const targetTotal = sum('targets');
-      result.live = {
+      const sum = (side, k) => done.reduce((a, b) => a + (b[side]?.[k] ?? 0), 0);
+      const targetTotal = done.reduce((a, b) => a + b.targets, 0);
+      const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+      const tokens = (side) => done.map((x) => x[side]?.promptTokens).filter((v) => typeof v === 'number');
+      const result_ = {
         status: 'run',
         model: cfg.model,
         protocol: cfg.protocol,
+        contextChars: contextText.length,
         recordings: rows.length,
         succeeded: done.length,
         failed: rows.length - done.length,
-        upstreamRecall: targetTotal > 0 ? sum('rawHits') / targetTotal : null,
-        correctedRecall: targetTotal > 0 ? sum('correctedHits') / targetTotal : null,
+        /** 上游原样（不经事后纠错）的术语命中 —— 偏置的作用只体现在这一行 */
+        upstreamRecallPlain: targetTotal > 0 ? sum('plain', 'upstreamHits') / targetTotal : null,
+        upstreamRecallBiased: targetTotal > 0 ? sum('biased', 'upstreamHits') / targetTotal : null,
+        /** 事后纠错之后的命中 —— 两遍都过同一套纠正层 */
+        correctedRecallPlain: targetTotal > 0 ? sum('plain', 'correctedHits') / targetTotal : null,
+        correctedRecallBiased: targetTotal > 0 ? sum('biased', 'correctedHits') / targetTotal : null,
+        degradedBiasedRequests: done.filter((x) => x.biased.applied?.degraded).length,
+        contextSentRequests: done.filter((x) => x.biased.applied?.context).length,
+        meanElapsedPlainMs: mean(done.map((x) => x.plain.elapsedMs)),
+        meanElapsedBiasedMs: mean(done.map((x) => x.biased.elapsedMs)),
+        meanPromptTokensPlain: mean(tokens('plain')),
+        meanPromptTokensBiased: mean(tokens('biased')),
         rows
       };
-      // live 模式的"误改"口径：参考文本本身正确时，纠正层不得改动任何字
-      const cleanRows = done.filter((x) => x.upstream === x.reference);
-      const chars = cleanRows.reduce((a, b) => a + Array.from(b.upstream).length, 0);
-      const edited = cleanRows.reduce((a, b) => a + b.corrections.reduce((s, c) => s + Array.from(c.from).length, 0), 0);
+      result.live = result_;
+      // live 模式的"误改"口径：上游本来就写对的那些条，事后纠错不得动一个字
+      const cleanRows = done.filter((x) => x.biased.upstream === x.reference);
+      const chars = cleanRows.reduce((a, b) => a + Array.from(b.biased.upstream).length, 0);
+      const edited = cleanRows.reduce((a, b) => a + b.biased.corrections.reduce((s, c) => s + Array.from(c.from).length, 0), 0);
       result.live.controlLikeRows = cleanRows.length;
       result.live.harmfulEditRate = chars > 0 ? edited / chars : null;
-      result.notVerified.push('live 模式的开/关 A/B 要等 B2 落地 ASR_CONTEXT_ENABLED 才能做；本轮只给单值基线。');
+      if (result_.upstreamRecallPlain !== null && result_.upstreamRecallBiased !== null) {
+        const delta = result_.upstreamRecallBiased - result_.upstreamRecallPlain;
+        result.live.upstreamRecallDelta = delta;
+        result.notVerified.push(
+          delta > 0
+            ? `偏置在上游层面带来 +${(delta * 100).toFixed(1)} 个百分点，但样本 ${done.length} 条、口音与环境单一，不能当总体结论。`
+            : `偏置没有带来可测的上游提升（Δ=${(delta * 100).toFixed(1)}pp）。本批不宣称它有效，需要更多录音或改走 vocabulary 通道。`
+        );
+      }
+      if (result_.meanPromptTokensPlain === null || result_.meanPromptTokensBiased === null) {
+        result.notVerified.push('上游未回传 usage.prompt_tokens，偏置的 token 代价本次无法核对（只记了耗时）。');
+      }
     }
   }
 }

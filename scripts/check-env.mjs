@@ -127,6 +127,49 @@ function line(mark, title, detail) {
   }
 }
 
+// ---------------------------------------------------------------- 语音输入（ASR）
+{
+  const envPath = path.join(ROOT, '.env');
+  const envText = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+  // present 与 value 要分开判：ASR_LANGUAGE= （显式置空）意思是"不发 language"，
+  // 而未设置才是"用默认 zh"。只看值会把这两种配置说成同一个。
+  const hasVar = (name) =>
+    process.env[name] !== undefined || new RegExp('^\\s*' + name + '\\s*=', 'm').test(envText);
+  const readVar = (name) => {
+    if (process.env[name]) return process.env[name].trim();
+    const m = new RegExp('^\\s*' + name + '\\s*=\\s*(.+)$', 'm').exec(envText);
+    return m && m[1].trim() ? m[1].trim() : '';
+  };
+  // Key 回落口径与 server/llm/asr.ts 一致：ASR_API_KEY 空则复用 DASHSCOPE_API_KEY
+  const key = readVar('ASR_API_KEY') || readVar('DASHSCOPE_API_KEY');
+  if (!key) {
+    line(C.warn('!'), '语音输入', '未配置（ASR_API_KEY / DASHSCOPE_API_KEY 都空）');
+    warnings.push('语音输入将如实降级为不可用（提示"未配置"，不假装识别）。要启用：配 DASHSCOPE_API_KEY 即可，与聊天链共用同一把 Key。');
+  } else {
+    const model = readVar('ASR_MODEL') || 'qwen3-asr-flash';
+    const protocol = readVar('ASR_PROTOCOL') || 'chat_audio';
+    const ctxOn = readVar('ASR_CONTEXT_ENABLED') !== '0';
+    const itnOn = readVar('ASR_ENABLE_ITN') === '1';
+    const lang = hasVar('ASR_LANGUAGE') ? readVar('ASR_LANGUAGE') : 'zh';
+    const correctOn = readVar('ASR_TERM_CORRECT') !== '0';
+    line(
+      C.ok('✓'),
+      '语音输入',
+      `${model} @ ${protocol}｜事后纠错${correctOn ? '开' : '关'}｜事前偏置${ctxOn ? '开' : '关'}（语种 ${lang || '不设'}，ITN ${itnOn ? '开' : '关'}）`
+    );
+    notes.push(
+      '语音输入：实体词表作为首位 system 上下文发给模型做事前偏置，返回后再按词典做完全同音的事后纠错；' +
+        '两次改动都只走同音/等长判定，界面可「还原原文」或「本轮不要调整术语」。'
+    );
+    if (itnOn) {
+      warnings.push('ASR_ENABLE_ITN=1：口语数字会被规范成阿拉伯数字（"三十一"→"31"）。先用 `npm run eval:asr -- --mode=live` 确认真实录音里没有"一班→1班"这类非预期改写。');
+    }
+    if (!ctxOn) {
+      warnings.push('ASR_CONTEXT_ENABLED=0：只做事后纠错，不发上下文。想知道偏置有没有用，跑 npm run eval:asr -- --mode=live 对比开/关。');
+    }
+  }
+}
+
 // ---------------------------------------------------------------- 端口
 async function checkPort(port) {
   return new Promise((resolve) => {

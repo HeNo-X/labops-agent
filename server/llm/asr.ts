@@ -29,7 +29,29 @@ export interface AsrConfig {
   model: string;
   protocol: AsrProtocol;
   timeoutMs: number;
+  /** 音频语种。空字符串 = 不发 language（混合语种时官方建议不设） */
+  language: string;
+  /** 逆文本规范化：口语数字→阿拉伯数字。默认关，实测达标再开 */
+  enableItn: boolean;
+  /** 是否把术语表当上下文发给模型（事前偏置） */
+  contextEnabled: boolean;
+  /** 上下文字符上限；超出按权重丢弃并如实计数 */
+  contextMaxChars: number;
 }
+
+/**
+ * 上游参数支持的保守默认。
+ * 依据阿里云《非实时语音识别（Qwen-ASR）API 参考》：qwen3-asr-flash 的 OpenAI 兼容模式
+ * 支持「首位 system 消息作为 Context（可用于实体词表）」与 asr_options{language,enable_itn}，
+ * 且**不支持传统系统提示词** —— 所以那条消息只放词、不放指令。
+ */
+const DEFAULT_ASR_LANGUAGE = 'zh';
+const DEFAULT_CONTEXT_MAX_CHARS = 1200;
+/**
+ * transcriptions 协议走 Whisper 系，`prompt` 只有 **224 token** 窗口（官方 Whisper prompting guide）。
+ * 这里没有分词器，用字符数保守近似上限；宁可少放也不能让请求被拒。
+ */
+const WHISPER_PROMPT_MAX_CHARS = 480;
 
 /** 音频解码后的大小上限（base64 6 MiB 请求体 ≈ 解码 4 MiB） */
 export const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
@@ -69,7 +91,12 @@ export function getAsrConfig(): AsrConfig {
     baseUrl: (env.ASR_BASE_URL || dashscopeBase).replace(/\/+$/, ''),
     model: env.ASR_MODEL || 'qwen3-asr-flash',
     protocol: env.ASR_PROTOCOL === 'transcriptions' ? 'transcriptions' : env.ASR_PROTOCOL === 'chat_audio' ? 'chat_audio' : 'chat_audio',
-    timeoutMs: clampInt(env.ASR_TIMEOUT_MS, 30000, 3000, 120000)
+    timeoutMs: clampInt(env.ASR_TIMEOUT_MS, 30000, 3000, 120000),
+    // 显式置空（ASR_LANGUAGE=）表示"不发 language"，与"未设置=用默认 zh"是两种意思
+    language: env.ASR_LANGUAGE === undefined ? DEFAULT_ASR_LANGUAGE : env.ASR_LANGUAGE.trim(),
+    enableItn: env.ASR_ENABLE_ITN === '1',
+    contextEnabled: env.ASR_CONTEXT_ENABLED !== '0',
+    contextMaxChars: clampInt(env.ASR_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_CHARS, 0, 20000)
   };
 }
 
@@ -77,8 +104,27 @@ export function isAsrConfigured(): boolean {
   return Boolean(getAsrConfig().apiKey);
 }
 
+/** 本次请求实际带上了哪些可选参数 —— 失败降级后必须让人看得见，不许静默假装生效 */
+export type AsrApplied = {
+  context: boolean;
+  options: boolean;
+  language: string;
+  itn: boolean;
+  contextChars: number;
+  /** 真为"上游不收这些参数，已降级重发"。不许静默假装增强生效 */
+  degraded: boolean;
+};
+
+/** 上游回报的用量。上下文偏置会增加 input token，代价必须可核对而不是"感觉不贵" */
+export type AsrUsage = {
+  promptTokens?: number;
+  completionTokens?: number;
+  audioTokens?: number;
+  seconds?: number;
+};
+
 export type AsrResult =
-  | { ok: true; text: string; model: string; protocol: AsrProtocol; elapsedMs: number }
+  | { ok: true; text: string; model: string; protocol: AsrProtocol; elapsedMs: number; applied: AsrApplied; usage: AsrUsage }
   | { ok: false; code: 'asr_not_configured' | 'bad_audio' | 'empty' | 'upstream_error'; message: string; status?: number };
 
 export interface TranscribeInput {
@@ -86,6 +132,11 @@ export interface TranscribeInput {
   base64: string;
   /** 浏览器 MediaRecorder 的 mimeType（可含 codecs 后缀，这里会归一化） */
   mime: string;
+  /**
+   * 术语表上下文文本，由 API 层构造好传进来。
+   * 本模块不认识词典：保持 llm 层可单测，也不让它反向依赖数据层。
+   */
+  contextText?: string;
 }
 
 /** 把 MediaRecorder 的 mimeType 归一化为协议需要的基础类型 */
@@ -127,34 +178,105 @@ export function validateAudioPayload(input: { base64: string; mime: string }): {
   return { ok: true, buffer };
 }
 
-function buildTranscriptionsRequest(config: AsrConfig, buffer: Buffer, mime: string): { url: string; init: RequestInit } {
+/**
+ * 一次上游请求的可选增强开关。降级阶梯就是按顺序试这几组：
+ *   ①{上下文+参数} → ②{只参数} → ③{裸请求}
+ * 先摘 asr_options（那是非标准的顶层字段，最容易被兼容网关拒绝），再摘 system 上下文。
+ */
+interface RequestVariant {
+  withContext: boolean;
+  withOptions: boolean;
+}
+
+function buildTranscriptionsRequest(
+  config: AsrConfig,
+  buffer: Buffer,
+  mime: string,
+  variant: RequestVariant,
+  contextText: string
+): { url: string; init: RequestInit; applied: Omit<AsrApplied, 'degraded'> } {
   const form = new FormData();
   form.append('file', new Blob([new Uint8Array(buffer)], { type: normalizeMime(mime) }), `audio.${extForMime(mime)}`);
   form.append('model', config.model);
+  // Whisper 系的 prompt 有 224 token 窗口，只能放权重最高的一小撮，超了会被拒或失效
+  const prompt = variant.withContext && contextText ? contextText.slice(0, WHISPER_PROMPT_MAX_CHARS) : '';
+  if (prompt) form.append('prompt', prompt);
+  if (variant.withOptions && config.language) form.append('language', config.language);
   return {
     url: `${config.baseUrl}/audio/transcriptions`,
-    init: { method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}` }, body: form }
+    init: { method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}` }, body: form },
+    applied: {
+      context: Boolean(prompt),
+      options: Boolean(variant.withOptions && config.language),
+      language: variant.withOptions ? config.language : '',
+      itn: false, // transcriptions 协议没有 enable_itn，别谎报
+      contextChars: prompt.length
+    }
   };
 }
 
-function buildChatAudioRequest(config: AsrConfig, base64: string, mime: string): { url: string; init: RequestInit } {
+function buildChatAudioRequest(
+  config: AsrConfig,
+  base64: string,
+  mime: string,
+  variant: RequestVariant,
+  contextText: string
+): { url: string; init: RequestInit; applied: Omit<AsrApplied, 'degraded'> } {
+  const messages: unknown[] = [];
+  // 官方文档：这条 system 消息**必须在第一位**，且只用于背景文本与实体词表，
+  // "不支持设置模型角色等传统系统提示词"。所以内容只有词表，没有任何指令句。
+  // 形态照官方示例用 [{type:'text',text}]，不用裸字符串。
+  if (variant.withContext && contextText) {
+    messages.push({ role: 'system', content: [{ type: 'text', text: contextText }] });
+  }
   // DashScope 兼容模式实测（2026-10-29，真实 Key）：input_audio.data 必须是完整
   // data URI（data:audio/wav;base64,xxx）——裸 base64 会被网关当 URL 解析而报
   // "The provided URL does not appear to be valid"。
+  messages.push({
+    role: 'user',
+    content: [{ type: 'input_audio', input_audio: { data: `data:${normalizeMime(mime)};base64,${base64}`, format: extForMime(mime) } }]
+  });
+
+  const body: Record<string, unknown> = { model: config.model, messages };
+  const asrOptions: Record<string, unknown> = {};
+  if (config.language) asrOptions['language'] = config.language;
+  if (config.enableItn) asrOptions['enable_itn'] = true;
+  const sendOptions = variant.withOptions && Object.keys(asrOptions).length > 0;
+  if (sendOptions) body['asr_options'] = asrOptions; // Node 侧作为请求体顶层参数（官方文档）
+
   return {
     url: `${config.baseUrl}/chat/completions`,
-    init: {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: config.model,
-        messages: [{
-          role: 'user',
-          content: [{ type: 'input_audio', input_audio: { data: `data:${normalizeMime(mime)};base64,${base64}`, format: extForMime(mime) } }]
-        }]
-      })
+    init: { method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
+    applied: {
+      context: variant.withContext && Boolean(contextText),
+      options: sendOptions,
+      language: sendOptions && config.language ? config.language : '',
+      itn: sendOptions && config.enableItn,
+      contextChars: variant.withContext && contextText ? contextText.length : 0
     }
   };
+}
+
+function buildRequest(
+  config: AsrConfig,
+  input: TranscribeInput,
+  buffer: Buffer,
+  variant: RequestVariant,
+  contextText: string
+): { url: string; init: RequestInit; applied: Omit<AsrApplied, 'degraded'> } {
+  return config.protocol === 'chat_audio'
+    ? buildChatAudioRequest(config, input.base64, input.mime, variant, contextText)
+    : buildTranscriptionsRequest(config, buffer, input.mime, variant, contextText);
+}
+
+/**
+ * 上游 4xx 是否长得像"参数不认识"。只有这类错误值得摘参数重发；
+ * 音频格式、鉴权、体积之类换个参数也不会好，退一次是白费额度。
+ */
+function looksLikeParameterRejection(status: number, body: string): boolean {
+  if (status < 400 || status >= 500) return false;
+  const text = body.toLowerCase();
+  return /unknown (field|parameter|property)|unrecognized (key|field|argument)|unexpected key|extra inputs|not supported|unsupported param|invalid (param|body|request)|field required|input_schema_error|invalid_parameter/.test(text);
 }
 
 /** 从 chat/completions 的回复里取纯文本（content 可能是 string，也可能是分段数组） */
@@ -171,6 +293,35 @@ function textFromChatCompletion(payload: unknown): string {
   return '';
 }
 
+/**
+ * 取上游用量。两种形态都要认：OpenAI 兼容的 usage.prompt_tokens /
+ * prompt_tokens_details.audio_tokens，与 DashScope 原生的 input_tokens_details + seconds。
+ * 拿不到就留空 —— 缺数据要看得见，不许填 0 冒充测过。
+ */
+function parseUsage(payload: unknown): AsrUsage {
+  const root = payload as {
+    usage?: {
+      prompt_tokens?: unknown;
+      completion_tokens?: unknown;
+      seconds?: unknown;
+      prompt_tokens_details?: { audio_tokens?: unknown };
+      input_tokens_details?: { text_tokens?: unknown };
+    };
+  } | null;
+  const u = root?.usage;
+  const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+  const usage: AsrUsage = {};
+  const prompt = num(u?.prompt_tokens);
+  if (prompt !== undefined) usage.promptTokens = prompt;
+  const completion = num(u?.completion_tokens);
+  if (completion !== undefined) usage.completionTokens = completion;
+  const audio = num(u?.prompt_tokens_details?.audio_tokens);
+  if (audio !== undefined) usage.audioTokens = audio;
+  const seconds = num(u?.seconds);
+  if (seconds !== undefined) usage.seconds = seconds;
+  return usage;
+}
+
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** 容错 JSON 解析：上游偶发截断/HTML 错误页时不抛异常 */
@@ -182,7 +333,11 @@ function safeJson(raw: string): unknown {
   }
 }
 
-/** 主入口：音频 base64 → 文本。网络/5xx/429 自动重试一次，超时可配。 */
+/**
+ * 主入口：音频 base64 → 文本。
+ * 网络/5xx/429 自动重试一次；4xx 里只有"像参数不认识"的才摘掉增强重发下一档，
+ * 其余（鉴权、格式、体积）换参数也不会好，直接结束 —— 免得白烧上游额度。
+ */
 export async function transcribeAudio(input: TranscribeInput): Promise<AsrResult> {
   const config = getAsrConfig();
   if (!config.apiKey) {
@@ -195,37 +350,57 @@ export async function transcribeAudio(input: TranscribeInput): Promise<AsrResult
   const payload = validateAudioPayload(input);
   if (!payload.ok) return { ok: false, code: payload.code, message: payload.message };
 
-  const request = config.protocol === 'chat_audio'
-    ? buildChatAudioRequest(config, input.base64, input.mime)
-    : buildTranscriptionsRequest(config, payload.buffer, input.mime);
+  const contextText = config.contextEnabled ? (input.contextText ?? '').trim().slice(0, config.contextMaxChars) : '';
+  // 降级阶梯与 RequestVariant 注释同序：先摘 asr_options（非标准顶层字段，最容易被兼容网关拒），
+  // 再摘 system 上下文，最后退回改造前的裸请求。
+  const ladder: RequestVariant[] = [{ withContext: Boolean(contextText), withOptions: true }];
+  if (contextText) ladder.push({ withContext: true, withOptions: false });
+  ladder.push({ withContext: false, withOptions: false });
 
   const startedAt = Date.now();
   let lastStatus = 0;
   let lastBody = '';
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const response = await fetch(request.url, { ...request.init, signal: AbortSignal.timeout(config.timeoutMs) });
-      lastStatus = response.status;
-      // 先完整读 body 再解析（响应含完整 JSON；截断会让 JSON.parse 假性失败）
-      const bodyText = await response.text().catch(() => '');
-      if (response.ok) {
-        const text = config.protocol === 'chat_audio'
-          ? textFromChatCompletion(safeJson(bodyText))
-          : String((safeJson(bodyText) as { text?: unknown }).text ?? '').trim();
-        if (!text) {
-          return { ok: false, code: 'empty', message: '没有听清，请靠近一点再说一次', status: lastStatus };
+  for (let i = 0; i < ladder.length; i += 1) {
+    const variant = ladder[i]!;
+    const request = buildRequest(config, input, payload.buffer, variant, contextText);
+    let retryWithLess = false;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await fetch(request.url, { ...request.init, signal: AbortSignal.timeout(config.timeoutMs) });
+        lastStatus = response.status;
+        // 先完整读 body 再解析（响应含完整 JSON；截断会让 JSON.parse 假性失败）
+        const bodyText = await response.text().catch(() => '');
+        if (response.ok) {
+          const text = config.protocol === 'chat_audio'
+            ? textFromChatCompletion(safeJson(bodyText))
+            : String((safeJson(bodyText) as { text?: unknown }).text ?? '').trim();
+          if (!text) {
+            return { ok: false, code: 'empty', message: '没有听清，请靠近一点再说一次', status: lastStatus };
+          }
+          return {
+            ok: true,
+            text,
+            model: config.model,
+            protocol: config.protocol,
+            elapsedMs: Date.now() - startedAt,
+            applied: { ...request.applied, degraded: i > 0 },
+            usage: parseUsage(safeJson(bodyText))
+          };
         }
-        return { ok: true, text, model: config.model, protocol: config.protocol, elapsedMs: Date.now() - startedAt };
+        lastBody = bodyText.slice(0, 300);
+        // 429 是配额/限流，不是"参数不认识"，必须留给同参数的网络重试（改造前就是这个口径）
+        if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+          retryWithLess = i + 1 < ladder.length && looksLikeParameterRejection(response.status, bodyText);
+          break; // 其余 4xx：同参数重试没有意义
+        }
+      } catch (err) {
+        lastBody = err instanceof Error ? err.message : String(err);
+        lastStatus = lastStatus || 0;
       }
-      lastBody = bodyText.slice(0, 300);
-      // 429 / 5xx 换一次机会；其余状态码（4xx）是请求本身的问题，重试无意义
-      if (response.status !== 429 && response.status < 500) break;
-    } catch (err) {
-      lastBody = err instanceof Error ? err.message : String(err);
-      lastStatus = lastStatus || 0;
+      if (attempt === 0) await delay(400);
     }
-    if (attempt === 0) await delay(400);
+    if (!retryWithLess) break;
   }
 
   return {

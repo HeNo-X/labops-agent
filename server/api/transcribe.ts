@@ -15,7 +15,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readJsonBody } from './agent-chat.ts';
 import { currentActor } from '../security/context.ts';
-import { transcribeAudio } from '../llm/asr.ts';
+import { transcribeAudio, getAsrConfig } from '../llm/asr.ts';
 import { loadDataset } from '../data/store.ts';
 import {
   correctTranscript,
@@ -28,7 +28,8 @@ import {
   glossaryToLexicon,
   glossaryFingerprint,
   charSyllableTable,
-  ambiguousSyllables
+  ambiguousSyllables,
+  buildContextText
 } from '../llm/asr-glossary.ts';
 
 const MAX_BODY_BYTES = 6 * 1024 * 1024;
@@ -46,6 +47,10 @@ interface CorrectBundle {
   syllables: Map<string, string>;
   protect: Set<string>;
   ambiguous: Set<string>;
+  /** 事前偏置用的上下文文本（构造一次缓存复用；预算由 ASR_CONTEXT_MAX_CHARS 控制） */
+  contextText: string;
+  contextOmitted: number;
+  contextTerms: number;
 }
 let bundleCache: CorrectBundle | null = null;
 
@@ -57,6 +62,7 @@ function currentBundle(): CorrectBundle {
     glossary = { terms: [], protect: [] };
   }
   const fingerprint = glossaryFingerprint(glossary.terms, glossary.protect);
+  const config = getAsrConfig();
   let tierA: LexiconEntry[] = [];
   let datasetKey = 'no-dataset';
   try {
@@ -66,15 +72,22 @@ function currentBundle(): CorrectBundle {
   } catch {
     /* 数据集拿不到：只靠人工术语表 */
   }
-  const key = `${datasetKey}+${fingerprint}`;
+  const key = `${datasetKey}+${fingerprint}+${config.contextMaxChars}`;
   if (bundleCache?.key === key) return bundleCache;
   const tierB = glossaryToLexicon(glossary.terms);
+  const context = buildContextText(glossary.terms, {
+    maxChars: config.contextMaxChars,
+    extraTerms: tierA.map((entry) => entry.canonical)
+  });
   const bundle: CorrectBundle = {
     key,
-    entries: [...tierA, ...tierB],
+    entries: tierB.length ? [...tierA, ...tierB] : tierA,
     syllables: charSyllableTable(glossary.terms),
     protect: new Set(glossary.protect),
-    ambiguous: ambiguousSyllables(glossary.terms)
+    ambiguous: ambiguousSyllables(glossary.terms),
+    contextText: context.text,
+    contextOmitted: context.omitted,
+    contextTerms: context.termCount
   };
   bundleCache = bundle;
   return bundle;
@@ -125,7 +138,13 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  const result = await transcribeAudio({ base64: audio, mime });
+  const bundle = currentBundle();
+  const skipped = payload['skipTermCorrect'] === true;
+  // 用户说过「本轮不要调整术语」→ 事前偏置与事后纠正一起停：
+  // 两者都是"按词表影响这句话"，只关一半会留下解释不清的中间态。
+  const contextText = skipped ? '' : bundle.contextText;
+
+  const result = await transcribeAudio({ base64: audio, mime, contextText });
   if (!result.ok) {
     reply(res, result.code === 'asr_not_configured' ? 503 : result.code === 'bad_audio' ? 400 : 502, {
       error: result.code,
@@ -134,15 +153,13 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
     return;
   }
 
-  // 专有名词纠错：Tier A 封闭集合走字符距离，Tier B 实验室术语走完全同音。
-  // 不依赖模型侧热词（当前 chat_audio 没有 vocabulary 参数），也不改前端契约。
-  // 用户点过「本轮不要调整术语」时按请求级别跳过 —— 决定权在说话的人手里，不在词典手里。
+  // 事后纠错：Tier A 封闭集合走字符距离，Tier B 实验室术语走完全同音（四道闸门，见 asr-lexicon）。
+  // 事前偏置：实体词表作为首位 system 上下文发给模型（官方支持，不是热词参数）。
+  // 用户点过「本轮不要调整术语」时按请求级别跳过事后纠错 —— 决定权在说话的人手里，不在词典手里。
   const raw = result.text;
   let text = raw;
   let corrections: Correction[] = [];
-  const skipped = payload['skipTermCorrect'] === true;
   if (raw && !skipped && process.env['ASR_TERM_CORRECT'] !== '0') {
-    const bundle = currentBundle();
     const fixed = correctTranscript(raw, bundle.entries, {
       syllables: bundle.syllables,
       protect: bundle.protect,
@@ -159,6 +176,16 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
     ...(corrections.length ? { originalText: raw, corrections } : {}),
     // 用户主动叫停时如实标注，不让人以为"这个词表没生效"是故障
     ...(skipped ? { termCorrectSkipped: true } : {}),
+    // 事前偏置的真实状态：发了多少词、被预算挤掉多少、上游收不收、是否降级重发。
+    // 只报"开了"不够，degraded 与 omitted 都必须看得见。
+    bias: {
+      ...result.applied,
+      termsInContext: bundle.contextTerms,
+      omittedFromBudget: bundle.contextOmitted,
+      suppressedByUser: skipped
+    },
+    // 上游用量原样转述，缺就缺（上下文会增加 input token，代价要能被核对）
+    usage: result.usage,
     model: result.model,
     protocol: result.protocol,
     elapsedMs: result.elapsedMs

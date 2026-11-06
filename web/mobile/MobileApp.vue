@@ -48,7 +48,15 @@ const ptr=usePullToRefresh(()=>content.value??null,()=>['home','rooms','messages
 function newChat(){if(run.inputLocked||controller.submitting.value)return;session.startDraft();navigation.go({view:'assistant'});}
 async function notices(){if(!business.connected)return;try{const result=await businessApi<{notifications:Notice[]}>('proxy/notifications?limit=100');unread.value=result.notifications.filter(n=>!n.readAt).length;}catch{unread.value=null;}}
 async function workspace(){loading.value=true;try{await business.refresh();if(!business.connected)throw new Error(business.error||'主系统业务接口暂不可用，恢复后重新读取');await session.loadConversations();await notices();error.value='';}catch(e){error.value=(e as Error).message;}finally{loading.value=false;}}
-onMounted(async()=>{if(authed.value)await workspace();else loading.value=false;});
+onMounted(async()=>{
+  if(authed.value){
+    await workspace();
+    // 用户口径（2026-11-07）：每次打开移动端都从新会话开始，不再停在上次那个会话里。
+    // 历史会话仍在侧栏（会话列表）里，随时能切回去。
+    session.startDraft();
+    if(route.value.view==='conversation')navigation.go({view:'assistant'},true);
+  }else loading.value=false;
+});
 async function login(){if(loggingIn.value||!account.value.trim()||!password.value)return;loggingIn.value=true;loginError.value='';try{if(auth.mode.value==='native'){const res=await clientFetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account:account.value.trim(),password:password.value})});if(!res.ok)throw await responseError(res);}sessionStorage.removeItem('labops.manual-logout');sessionStorage.setItem('labops.auth',account.value.trim());try{if(rememberAccount.value)localStorage.setItem('labops.saved-account',account.value.trim());else localStorage.removeItem('labops.saved-account');}catch{}password.value='';await bootstrapAuth(true);if(!authed.value)throw new Error(auth.error.value||'身份验证失败');await workspace();navigation.go(auth.target.value,true);}catch(e){loginError.value=(e as Error).message;}finally{loggingIn.value=false;}}
 function clearDrafts(){for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);if(key?.startsWith('labops.native-draft:'))localStorage.removeItem(key);}}
 async function logout(){sessionStorage.setItem('labops.manual-logout','1');controller.dispose();session.clearPrivate();upload.clearPrivate();business.clearPrivate();clearDrafts();clearAuth();unread.value=null;navigation.go({view:'home'},true);try{const response=await clientFetch('/api/auth/logout',{method:'POST'});if(!response.ok)throw await responseError(response);error.value='';}catch(e){loginError.value='已清空本机工作区，服务端退出尚未确认：'+(e as Error).message;}}

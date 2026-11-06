@@ -64,6 +64,8 @@ const baseEnv = (extra: Record<string, string | undefined> = {}): Record<string,
   ASR_BASE_URL: 'https://stub.invalid/v1',
   ASR_MODEL: 'qwen3-asr-flash',
   ASR_PROTOCOL: 'chat_audio',
+  // 本文件测的是"偏置发出去以后对不对"，所以显式打开产品侧默认关着的那个开关
+  ASR_CONTEXT_ENABLED: '1',
   ...extra
 });
 
@@ -181,6 +183,22 @@ test('上下文按 ASR_CONTEXT_MAX_CHARS 截断，不拿"号称"糊弄', async (
   });
 });
 
+test('产品默认不发上下文：收益未量化 + 实测到词表回显，就不该替用户打开', async () => {
+  await withEnv(baseEnv({ ASR_CONTEXT_ENABLED: undefined }), async () => {
+    stubFetch(() => okChat('投影仪好了'));
+    const { getAsrConfig, transcribeAudio } = await import('../server/llm/asr.ts');
+    assert.equal(getAsrConfig().contextEnabled, false, '默认必须是关');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/webm', contextText: CONTEXT });
+    const messages = captured[0]!.body?.['messages'] as Array<{ role: string }>;
+    assert.deepEqual(messages.map((m) => m.role), ['user'], '没打开就不该有 system 消息');
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.applied.context, false);
+      assert.equal(r.applied.contextChars, 0);
+    }
+  });
+});
+
 // ---------------------------------------------------------------- 降级阶梯
 test('上游拒收 asr_options → 摘掉重发；再拒 system → 退成裸请求；最终成功且如实标 degraded', async () => {
   await withEnv(baseEnv(), async () => {
@@ -238,6 +256,39 @@ test('空识别结果仍报 empty，不冒充成功', async () => {
   });
 });
 
+// ---- 上下文偏置的反噬防护（2026-11-06 真实 Key 实测：静音样本下模型把词表原样念回来）
+test('模型回显参考词表 → 判未识别，绝不把词表灌进草稿', async () => {
+  await withEnv(baseEnv(), async () => {
+    stubFetch(() => okChat(CONTEXT));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/webm', contextText: CONTEXT });
+    assert.equal(r.ok, false, `回显必须拦下：${JSON.stringify(r)}`);
+    if (!r.ok) {
+      assert.equal(r.code, 'empty');
+      assert.match(r.message, /参考词表/, '要让人看出是被词表回显拦的，不是"真的没说话"');
+    }
+  });
+});
+
+test('回显防护认标题不认单词：正常句子里出现投影仪/服务器照旧通过', async () => {
+  await withEnv(baseEnv(), async () => {
+    stubFetch(() => okChat('投影仪搬到文渊了，服务器要重启'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/webm', contextText: CONTEXT });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    if (r.ok) assert.equal(r.text, '投影仪搬到文渊了，服务器要重启');
+  });
+});
+
+test('没发上下文时不启用这条判断（标题本身也可能是用户要说的话）', async () => {
+  await withEnv(baseEnv({ ASR_CONTEXT_ENABLED: '0' }), async () => {
+    stubFetch(() => okChat(CONTEXT));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/webm', contextText: CONTEXT });
+    assert.equal(r.ok, true, '本条请求根本没带上下文，不该拿上下文去判回显');
+  });
+});
+
 // ---------------------------------------------------------------- transcriptions 协议
 test('transcriptions 协议走 prompt + language，并按 224 token 窗口保守截断', async () => {
   await withEnv(baseEnv({ ASR_PROTOCOL: 'transcriptions', ASR_MODEL: 'whisper-large-v3-turbo' }), async () => {
@@ -254,11 +305,282 @@ test('transcriptions 协议走 prompt + language，并按 224 token 窗口保守
   });
 });
 
-test('Key 与上下文都不进日志面：请求体外没有别的字段泄漏 Key 之外的东西', async () => {
+// ---------------------------------------------------------------- B4：DashScope 原生协议 + 即时热词
+/** 原生协议的响应体（output.choices[].message.content 是 [{text}]） */
+function okNative(text: string): { status: number; body: unknown } {
+  return { status: 200, body: { output: { choices: [{ message: { content: [{ text }] } }] }, usage: { seconds: 3 } } };
+}
+
+const nativeEnv = (extra: Record<string, string | undefined> = {}): Record<string, string | undefined> =>
+  baseEnv({ ASR_PROTOCOL: 'dashscope_native', ASR_MODEL: 'qwen-audio-3.1-asr-flash', ...extra });
+
+test('原生协议：地址、头、body 形态与 vocabulary 都按官方示例发', async () => {
+  await withEnv(nativeEnv(), async () => {
+    stubFetch(() => okNative('投影仪好了'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({
+      base64: AUDIO,
+      mime: 'audio/wav',
+      contextText: CONTEXT,
+      hotwords: { 投影仪: 5, 文渊: 5, 服务器: 5 }
+    });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.ok(captured[0]!.url.endsWith('/api/v1/services/aigc/multimodal-generation/generation'), captured[0]!.url);
+    const headers = captured[0]!.init.headers as Record<string, string>;
+    assert.equal(headers['X-DashScope-SSE'], 'disable', '官方示例带这个头');
+    const body = captured[0]!.body!;
+    const input = body['input'] as { messages: Array<{ role: string }> };
+    assert.equal(input.messages[0]!.role, 'system', '上下文仍须在第一位');
+    assert.equal(input.messages[1]!.role, 'user');
+    const parameters = body['parameters'] as Record<string, unknown>;
+    assert.equal(parameters['format'], 'wav');
+    assert.deepEqual(parameters['vocabulary'], { 投影仪: 5, 文渊: 5, 服务器: 5 });
+    if (r.ok) {
+      assert.equal(r.applied.hotwords, true);
+      assert.equal(r.applied.hotwordCount, 3);
+      assert.equal(r.protocol, 'dashscope_native');
+    }
+  });
+});
+
+test('原生协议不猜采样率：默认不发 sample_rate，显式配置才发', async () => {
+  await withEnv(nativeEnv(), async () => {
+    stubFetch(() => okNative('x'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    await transcribeAudio({ base64: AUDIO, mime: 'audio/webm' });
+    const parameters = (captured[0]!.body!['parameters'] ?? {}) as Record<string, unknown>;
+    assert.equal(parameters['sample_rate'], undefined, '我们不做重采样，照抄文档示例的 16000 等于谎报');
+  });
+  await withEnv(nativeEnv({ ASR_NATIVE_SAMPLE_RATE: '16000' }), async () => {
+    stubFetch(() => okNative('x'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    await transcribeAudio({ base64: AUDIO, mime: 'audio/wav' });
+    const parameters = (captured[0]!.body!['parameters'] ?? {}) as Record<string, unknown>;
+    assert.equal(parameters['sample_rate'], 16000);
+  });
+});
+
+test('热词按 ASR_HOTWORDS_MAX 截断、权重夹到 1～5，顺序可复现', async () => {
+  await withEnv(nativeEnv({ ASR_HOTWORDS_MAX: '3' }), async () => {
+    stubFetch(() => okNative('x'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({
+      base64: AUDIO,
+      mime: 'audio/wav',
+      hotwords: { 甲: 9, 乙: 4, 丙: 0, 丁: 3, 戊: 5 }
+    });
+    const vocabulary = ((captured[0]!.body!['parameters'] as Record<string, unknown>)['vocabulary']) as Record<string, number>;
+    assert.equal(Object.keys(vocabulary).length, 3, JSON.stringify(vocabulary));
+    for (const w of Object.values(vocabulary)) assert.ok(w >= 1 && w <= 5, `权重越界：${JSON.stringify(vocabulary)}`);
+    if (r.ok) assert.equal(r.applied.hotwordCount, 3);
+  });
+});
+
+test('ASR_HOTWORDS=0 时一条热词都不发', async () => {
+  await withEnv(nativeEnv({ ASR_HOTWORDS: '0' }), async () => {
+    stubFetch(() => okNative('x'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/wav', hotwords: { 投影仪: 5 } });
+    const parameters = (captured[0]!.body!['parameters'] ?? {}) as Record<string, unknown>;
+    assert.equal(parameters['vocabulary'], undefined);
+    if (r.ok) assert.equal(r.applied.hotwords, false);
+  });
+});
+
+test('上游拒收 vocabulary → 先摘热词、保留上下文重发', async () => {
+  await withEnv(nativeEnv(), async () => {
+    stubFetch((i) => (i === 0 ? { status: 400, body: { message: "Unknown parameter: 'vocabulary'." } } : okNative('好了')));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/wav', contextText: CONTEXT, hotwords: { 投影仪: 5 } });
+    assert.equal(captured.length, 2);
+    const second = (captured[1]!.body!['parameters'] ?? {}) as Record<string, unknown>;
+    assert.equal(second['vocabulary'], undefined, '第二次应已摘掉 vocabulary');
+    const messages = (captured[1]!.body!['input'] as { messages: Array<{ role: string }> }).messages;
+    assert.equal(messages[0]!.role, 'system', '上下文这一步不该跟着丢');
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.applied.degraded, true);
+      assert.equal(r.applied.hotwords, false);
+    }
+  });
+});
+
+test('原生地址可显式覆盖为 WorkspaceId 形态，不靠猜租户号', async () => {
+  await withEnv(nativeEnv({ ASR_NATIVE_BASE_URL: 'https://ws123.cn-beijing.maas.aliyuncs.com/api/v1' }), async () => {
+    stubFetch(() => okNative('x'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    await transcribeAudio({ base64: AUDIO, mime: 'audio/wav' });
+    assert.equal(captured[0]!.url, 'https://ws123.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation');
+  });
+});
+
+test('三种 base 写法都收敛到 /api/v1（派生错会得到"看着像对、实际 404"的地址）', async () => {
+  const cases: Array<[string, string]> = [
+    ['https://dashscope.aliyuncs.com/compatible-mode/v1', 'https://dashscope.aliyuncs.com/api/v1'],
+    ['https://stub.invalid/v1', 'https://stub.invalid/api/v1'],
+    ['https://host.example/api/v1', 'https://host.example/api/v1'],
+    ['https://host.example/api/v1/', 'https://host.example/api/v1']
+  ];
+  for (const [base, want] of cases) {
+    await withEnv(nativeEnv({ ASR_BASE_URL: base }), async () => {
+      stubFetch(() => okNative('x'));
+      const { getAsrConfig } = await import('../server/llm/asr.ts');
+      assert.equal(getAsrConfig().nativeBaseUrl, want, `base=${base}`);
+    });
+  }
+});
+
+test('热词表为空时不发送 vocabulary 字段（而不是发一个空对象）', async () => {
+  await withEnv(nativeEnv(), async () => {
+    stubFetch(() => okNative('x'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/wav', hotwords: {} });
+    const parameters = (captured[0]!.body!['parameters'] ?? {}) as Record<string, unknown>;
+    assert.equal(parameters['vocabulary'], undefined);
+    if (r.ok) assert.equal(r.applied.hotwords, false);
+  });
+});
+
+// ---- 原生请求形态逐条对着官方《Qwen-ASR API 参考》钉死（这三点写错都是"200 但没结果"的形状）
+test('原生协议音频走 content 的 audio 键（不是兼容模式的 input_audio），且仍是完整 data URI', async () => {
+  await withEnv(nativeEnv(), async () => {
+    stubFetch(() => okNative('x'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    await transcribeAudio({ base64: AUDIO, mime: 'audio/wav' });
+    const messages = (captured[0]!.body!['input'] as { messages: Array<{ role: string; content?: Array<Record<string, unknown>> }> }).messages;
+    const user = messages.find((m) => m.role === 'user');
+    const part = (user?.content ?? [])[0] ?? {};
+    assert.equal(typeof part['audio'], 'string', `audio 键缺失：${JSON.stringify(user?.content)}`);
+    assert.match(String(part['audio']), /^data:audio\/wav;base64,/);
+    assert.equal(part['input_audio'], undefined, '原生形态不该出现 input_audio');
+    assert.equal(part['type'], undefined, '原生 content 用裸键名，不带 type');
+  });
+});
+
+test('原生协议 asr_options 在 parameters 里，请求体顶层没有它', async () => {
+  await withEnv(nativeEnv({ ASR_ENABLE_ITN: '1' }), async () => {
+    stubFetch(() => okNative('x'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/wav' });
+    const body = captured[0]!.body!;
+    assert.equal(body['asr_options'], undefined, '顶层 asr_options 是兼容协议的写法');
+    const parameters = body['parameters'] as Record<string, unknown>;
+    assert.deepEqual(parameters['asr_options'], { language: 'zh', enable_itn: true }, JSON.stringify(parameters));
+    if (r.ok) {
+      assert.equal(r.applied.options, true);
+      assert.equal(r.applied.itn, true);
+    }
+  });
+});
+
+test('上游拒收 format → 只摘 format，热词与上下文都留着（format 不在文档参数表里，必须可摘）', async () => {
+  await withEnv(nativeEnv(), async () => {
+    stubFetch((i) => (i === 0 ? { status: 400, body: { message: "Unknown parameter: 'format'." } } : okNative('好了')));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/wav', contextText: CONTEXT, hotwords: { 投影仪: 4 } });
+    assert.equal(captured.length, 2);
+    const first = captured[0]!.body!['parameters'] as Record<string, unknown>;
+    const second = captured[1]!.body!['parameters'] as Record<string, unknown>;
+    assert.equal(first['format'], 'wav');
+    assert.equal(second['format'], undefined, '第二次应已摘掉 format');
+    assert.deepEqual(second['vocabulary'], { 投影仪: 4 }, '这一步不该跟着丢热词');
+    assert.ok(second['asr_options'], '这一步也不该跟着丢 asr_options');
+    assert.equal(second['sample_rate'], undefined, '没发 format 时单发 sample_rate 没有意义');
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.applied.degraded, true);
+      assert.equal(r.applied.format, false, '摘掉了就必须说没发');
+      assert.equal(r.applied.hotwords, true);
+    }
+  });
+});
+
+test('摘参数一次只摘一个，且没开的开关不占档位：三次形态必须各不相同', async () => {
+  await withEnv(nativeEnv({ ASR_HOTWORDS: '0', ASR_CONTEXT_ENABLED: '0' }), async () => {
+    stubFetch(() => ({ status: 400, body: { message: "Unsupported parameter: 'asr_options'." } }));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/wav' });
+    assert.equal(r.ok, false);
+    // 全开档（format+options）→ 摘 options（只剩 format）→ 裸请求；vocabulary/context 两档本就为空，不该出现
+    const shapes = captured.map((c) => JSON.stringify(Object.keys((c.body?.['parameters'] ?? {}) as object).sort()));
+    assert.equal(new Set(shapes).size, shapes.length, `形态重复：${shapes.join(' / ')}`);
+    assert.equal(captured.length, 3, `期望 3 档，实际 ${captured.length}：${shapes.join(' / ')}`);
+  });
+});
+
+test('原生 usage 按官方字段解析：input_tokens_details + seconds，没有 prompt_tokens 也不硬凑', async () => {
+  await withEnv(nativeEnv(), async () => {
+    stubFetch(() => ({
+      status: 200,
+      body: {
+        output: { choices: [{ message: { content: [{ text: '投影仪好了' }] } }] },
+        usage: { input_tokens_details: { text_tokens: 210 }, output_tokens_details: { text_tokens: 6 }, seconds: 4 }
+      }
+    }));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/wav', contextText: CONTEXT });
+    assert.equal(r.ok, true);
+    if (r.ok) {
+      assert.equal(r.usage.textTokens, 210, JSON.stringify(r.usage));
+      assert.equal(r.usage.seconds, 4);
+      assert.equal(r.usage.promptTokens, undefined, '官方原生没有这个字段，不许拿别的数冒充');
+    }
+  });
+});
+
+test('原生协议同样拦词表回显（实测两种协议都会犯这个毛病）', async () => {
+  await withEnv(nativeEnv(), async () => {
+    stubFetch(() => okNative(CONTEXT));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/wav', contextText: CONTEXT });
+    assert.equal(r.ok, false, JSON.stringify(r));
+    if (!r.ok) assert.match(r.message, /参考词表/);
+  });
+});
+
+test('超长热词不进 vocabulary（官方：非 ASCII ≤15 字符、纯 ASCII ≤7 段），短词一个不因此丢失', async () => {
+  await withEnv(nativeEnv(), async () => {
+    const { loadGlossaryData, hotwordVocabulary } = await import('../server/llm/asr-glossary.ts');
+    const terms = loadGlossaryData().terms;
+    const long = [...terms.slice(0, 3), { ...terms[0]!, canonical: '这是一条长得超出官方十五个字符限制的热词用来验证过滤' }];
+    const table = hotwordVocabulary(long, 500);
+    assert.equal(Object.keys(table).length, 3, JSON.stringify(table));
+    for (const word of Object.keys(table)) assert.ok([...word].length <= 15, `超出长度限制：${word}`);
+    // 真表里确实都合规：否则这条过滤就是为不存在的形状写的
+    const real = hotwordVocabulary(terms, 500);
+    assert.equal(Object.keys(real).length, terms.length, `真表有条目被过滤掉：${terms.length - Object.keys(real).length} 条`);
+  });
+});
+
+test('非原生协议绝不声称发了热词（chat_audio 的 applied.hotwords 必须为 false）', async () => {
   await withEnv(baseEnv(), async () => {
     stubFetch(() => okChat('x'));
     const { transcribeAudio } = await import('../server/llm/asr.ts');
-    await transcribeAudio({ base64: AUDIO, mime: 'audio/webm', contextText: CONTEXT });
+    const r = await transcribeAudio({ base64: AUDIO, mime: 'audio/webm', hotwords: { 投影仪: 5 } } as never);
+    assert.ok(r.ok);
+    if (r.ok) {
+      assert.equal(r.applied.hotwords, false);
+      assert.equal(r.applied.hotwordCount, 0);
+    }
+    assert.ok(!JSON.stringify(captured[0]!.body).includes('vocabulary'), '兼容协议 body 里不该出现 vocabulary');
+  });
+});
+
+test('未知 ASR_PROTOCOL 值仍按 chat_audio 走，不会掉进原生分支', async () => {
+  await withEnv(baseEnv({ ASR_PROTOCOL: 'typo-value' }), async () => {
+    stubFetch(() => okChat('x'));
+    const { getAsrConfig, transcribeAudio } = await import('../server/llm/asr.ts');
+    assert.equal(getAsrConfig().protocol, 'chat_audio');
+    await transcribeAudio({ base64: AUDIO, mime: 'audio/webm' });
+    assert.ok(captured[0]!.url.endsWith('/chat/completions'));
+  });
+});
+
+test('Key 只在请求头：上下文与热词都不含密钥，请求体里也不该出现密钥', async () => {
+  await withEnv(baseEnv(), async () => {
+    stubFetch(() => okChat('x'));
+    const { transcribeAudio } = await import('../server/llm/asr.ts');
+    await transcribeAudio({ base64: AUDIO, mime: 'audio/webm', contextText: CONTEXT, hotwords: { 投影仪: 5 } });
     const headers = captured[0]!.init.headers as Record<string, string>;
     assert.equal(headers['Authorization'], `Bearer ${FAKE_KEY}`, 'Key 只在请求头');
     assert.ok(!JSON.stringify(captured[0]!.body).includes(FAKE_KEY), 'Key 绝不出现在请求体里');

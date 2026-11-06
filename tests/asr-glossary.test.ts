@@ -18,6 +18,7 @@ import {
   ambiguousSyllables,
   charSyllableTable,
   glossaryFingerprint,
+  hotwordVocabulary,
   buildContextText,
   type AsrDomain,
   type GlossaryTerm
@@ -71,6 +72,30 @@ test('域口径不许漂回通用实验室：本中心是计算机/电子类机�
   const have = new Set(loadGlossary().map((t) => t.canonical));
   for (const word of ['服务器', '投影仪', '门禁', '电源', '鼠标', '键盘', '主机', '显示器', '电源与设备', '门窗与清场', '钥匙交接', '文渊']) {
     assert.ok(have.has(word), `缺一手依据词 ${word}`);
+  }
+});
+
+test('hotwordVocabulary：权重夹在 1～5、按权重降序取前 N，同样输入永远同样输出', () => {
+  const mixed = [
+    term('甲词', ['jia', 'ci'], [], 3, 'operation'),
+    term('乙词', ['yi', 'ci'], [], 9, 'operation'), // 越界权重
+    term('丙词', ['bing', 'ci'], [], 5, 'operation'),
+    term('丁词', ['ding', 'ci'], [], 0, 'operation') // 越界权重
+  ];
+  const all = hotwordVocabulary(mixed, 99);
+  // 排序按**原始**权重，输出时才夹到 1～5：所以越界的 9 仍排在 5 前面
+  assert.deepEqual(Object.entries(all), [['乙词', 5], ['丙词', 5], ['甲词', 3], ['丁词', 1]], JSON.stringify(all));
+  assert.equal(all['丁词'], 1, '权重 0 应被夹到下限 1，而不是原样发给上游');
+  assert.deepEqual(Object.keys(hotwordVocabulary(mixed, 2)).length, 2);
+  assert.deepEqual(hotwordVocabulary(mixed, 0), {});
+
+  // 真实表：不超过 500，且每条都是表里的标准写法
+  const real = hotwordVocabulary(loadGlossary(), 500);
+  const names = new Set(loadGlossary().map((t) => t.canonical));
+  assert.equal(Object.keys(real).length, 148, `线上术语表 148 条，热词表应全量收下：${Object.keys(real).length}`);
+  for (const [word, weight] of Object.entries(real)) {
+    assert.ok(names.has(word), `热词不是表里的标准写法：${word}`);
+    assert.ok(weight >= 1 && weight <= 5, `${word} 权重越界 ${weight}`);
   }
 });
 

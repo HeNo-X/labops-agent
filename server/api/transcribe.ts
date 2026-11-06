@@ -27,6 +27,7 @@ import {
   loadGlossaryData,
   glossaryToLexicon,
   glossaryFingerprint,
+  hotwordVocabulary,
   charSyllableTable,
   ambiguousSyllables,
   buildContextText
@@ -51,6 +52,8 @@ interface CorrectBundle {
   contextText: string;
   contextOmitted: number;
   contextTerms: number;
+  /** 即时热词（仅 dashscope_native 会用；其它协议发了也没人收，所以不构造） */
+  hotwords: Record<string, number>;
 }
 let bundleCache: CorrectBundle | null = null;
 
@@ -72,7 +75,7 @@ function currentBundle(): CorrectBundle {
   } catch {
     /* 数据集拿不到：只靠人工术语表 */
   }
-  const key = `${datasetKey}+${fingerprint}+${config.contextMaxChars}`;
+  const key = `${datasetKey}+${fingerprint}+${config.contextMaxChars}+${config.protocol}+${config.hotwordsMax}`;
   if (bundleCache?.key === key) return bundleCache;
   const tierB = glossaryToLexicon(glossary.terms);
   const context = buildContextText(glossary.terms, {
@@ -87,7 +90,9 @@ function currentBundle(): CorrectBundle {
     ambiguous: ambiguousSyllables(glossary.terms),
     contextText: context.text,
     contextOmitted: context.omitted,
-    contextTerms: context.termCount
+    contextTerms: context.termCount,
+    // 只有原生协议收 vocabulary；其它协议构造了也是死数据，不如不给
+    hotwords: config.protocol === 'dashscope_native' ? hotwordVocabulary(glossary.terms, config.hotwordsMax) : {}
   };
   bundleCache = bundle;
   return bundle;
@@ -143,8 +148,9 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
   // 用户说过「本轮不要调整术语」→ 事前偏置与事后纠正一起停：
   // 两者都是"按词表影响这句话"，只关一半会留下解释不清的中间态。
   const contextText = skipped ? '' : bundle.contextText;
+  const hotwords = skipped ? {} : bundle.hotwords;
 
-  const result = await transcribeAudio({ base64: audio, mime, contextText });
+  const result = await transcribeAudio({ base64: audio, mime, contextText, hotwords });
   if (!result.ok) {
     reply(res, result.code === 'asr_not_configured' ? 503 : result.code === 'bad_audio' ? 400 : 502, {
       error: result.code,
@@ -177,11 +183,13 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
     // 用户主动叫停时如实标注，不让人以为"这个词表没生效"是故障
     ...(skipped ? { termCorrectSkipped: true } : {}),
     // 事前偏置的真实状态：发了多少词、被预算挤掉多少、上游收不收、是否降级重发。
-    // 只报"开了"不够，degraded 与 omitted 都必须看得见。
+    // 只报"开了"不够，degraded 与 omitted 都必须看得见；
+    // 没发出去（开关关着 / 用户叫停 / 上游拒收后摘掉了）就照实报 0，不拿"备好但没用上"充数。
     bias: {
       ...result.applied,
-      termsInContext: bundle.contextTerms,
-      omittedFromBudget: bundle.contextOmitted,
+      termsInContext: result.applied.context ? bundle.contextTerms : 0,
+      omittedFromBudget: result.applied.context ? bundle.contextOmitted : 0,
+      hotwordsAvailable: Object.keys(bundle.hotwords).length,
       suppressedByUser: skipped
     },
     // 上游用量原样转述，缺就缺（上下文会增加 input token，代价要能被核对）

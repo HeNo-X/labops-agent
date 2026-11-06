@@ -220,6 +220,33 @@ export function glossaryToLexicon(terms: readonly GlossaryTerm[]): LexiconEntry[
   }));
 }
 
+/**
+ * 把术语表转成即时热词（词 → 权重）。权重直接沿用表里的 1～5，语义与官方一致。
+ * 排序按 weight 降序 + canonical 稳定序，保证截断结果可复现；上限由调用方给
+ * （上游各模型线的表容量不同，见 asr.ts 的 DEFAULT_HOTWORDS_MAX 注释）。
+ */
+export function hotwordVocabulary(terms: readonly GlossaryTerm[], max: number): Record<string, number> {
+  const out: Record<string, number> = {};
+  const ordered = [...terms].sort(
+    (a, b) => b.weight - a.weight || (a.canonical < b.canonical ? -1 : a.canonical > b.canonical ? 1 : 0)
+  );
+  for (const t of ordered) {
+    if (Object.keys(out).length >= Math.max(0, Math.floor(max))) break;
+    // 官方热词长度限制（《提升识别准确率》）：含非 ASCII 最长 15 字符，纯 ASCII 最多 7 段。
+    // 超限在这里就摘掉：留着一条超长的词，上游可能整表拒绝，收益反而归零。
+    if (!hotwordFits(t.canonical)) continue;
+    out[t.canonical] = Math.min(5, Math.max(1, Math.round(t.weight)));
+  }
+  return out;
+}
+
+function hotwordFits(word: string): boolean {
+  const w = word.trim();
+  if (!w) return false;
+  if (/^[\x00-\x7F]+$/.test(w)) return w.split(/\s+/).filter(Boolean).length <= 7;
+  return [...w].length <= 15;
+}
+
 /** 表指纹：进缓存键与评测报告，改了词表（含 protect / blockAfter）一定看得见，不会"改了但没生效" */
 export function glossaryFingerprint(terms: readonly GlossaryTerm[], protect: readonly string[] = []): string {
   const body = terms
@@ -275,6 +302,11 @@ export function buildContextText(terms: readonly GlossaryTerm[], opts: ContextTe
   );
 
   const header = '实验室管理领域参考词（中文）：';
+  // 预算连标题都放不下时，返回空串而不是只发一行标题：
+  // 一条没有词的空上下文对模型毫无价值，却会占掉请求位并让人以为"偏置生效了"。
+  if (maxChars < header.length + 8) {
+    return { text: '', termCount: 0, chars: 0, omitted: candidates.length };
+  }
   let lines: string[] = [header];
   let termCount = 0;
   let omitted = 0;

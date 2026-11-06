@@ -42,7 +42,7 @@ process.env.LABOPS_AUTH_MODE = 'demo';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'labops-asr-eval-'));
 process.env.LABOPS_DB_PATH = path.join(temp, 'eval.sqlite');
 
-const { loadGlossaryData, glossaryToLexicon, validateGlossary, ambiguousSyllables, charSyllableTable, glossaryFingerprint, buildContextText } = await import('../server/llm/asr-glossary.ts');
+const { loadGlossaryData, glossaryToLexicon, validateGlossary, ambiguousSyllables, charSyllableTable, glossaryFingerprint, buildContextText, hotwordVocabulary } = await import('../server/llm/asr-glossary.ts');
 const { loadDataset } = await import('../server/data/store.ts');
 const { lexiconFromDataset, correctTranscript } = await import('../server/llm/asr-lexicon.ts');
 
@@ -265,10 +265,16 @@ if (mode === 'live') {
       // 真跑：同一段音频走两遍 —— 一遍不发上下文、一遍发 —— 才把"偏置有没有用"和
       // "事后纠正有没有用"分开。只跑一遍就归功于偏置，是这类评测最容易犯的假账。
       const { transcribeAudio } = await import('../server/llm/asr.ts');
+      // 产品侧 ASR_CONTEXT_ENABLED 默认关（收益未量化 + 静音样本实测到词表回显），
+      // 但 A/B 的"偏置臂"必须真的发出去：这里只在本次评测进程里把开关打开，
+      // 不改 .env、不改产品默认，跑完就消失。
+      if (!cfg.contextEnabled) process.env.ASR_CONTEXT_ENABLED = '1';
       const contextText = buildContextText(glossary, {
         maxChars: cfg.contextMaxChars,
         extraTerms: tierA.map((e) => e.canonical)
       }).text;
+      // 只有原生协议收 vocabulary；其余协议传了也不会发，applied.hotwords 会如实是 false
+      const hotwords = cfg.protocol === 'dashscope_native' ? hotwordVocabulary(glossary, cfg.hotwordsMax) : {};
       const mimeOf = (f) => (f.endsWith('.wav') ? 'audio/wav' : f.endsWith('.mp3') ? 'audio/mpeg' : f.endsWith('.m4a') ? 'audio/mp4' : f.endsWith('.ogg') ? 'audio/ogg' : 'audio/webm');
 
       /** 一条转写结果的可比字段（targets 显式传入，不靠闭包里的可变状态） */
@@ -296,7 +302,7 @@ if (mode === 'live') {
         const base64 = buf.toString('base64');
         const mime = mimeOf(r.file);
         const plain = profile(await transcribeAudio({ base64, mime }), targets);
-        const biased = profile(await transcribeAudio({ base64, mime, contextText }), targets);
+        const biased = profile(await transcribeAudio({ base64, mime, contextText, hotwords }), targets);
         if (!plain.ok || !biased.ok) {
           rows.push({ id: r.id, status: 'failed', plain, biased });
           continue;
@@ -325,6 +331,8 @@ if (mode === 'live') {
         correctedRecallBiased: targetTotal > 0 ? sum('biased', 'correctedHits') / targetTotal : null,
         degradedBiasedRequests: done.filter((x) => x.biased.applied?.degraded).length,
         contextSentRequests: done.filter((x) => x.biased.applied?.context).length,
+        hotwordsSentRequests: done.filter((x) => x.biased.applied?.hotwords).length,
+        hotwordCountPerRequest: done[0]?.biased.applied?.hotwordCount ?? 0,
         meanElapsedPlainMs: mean(done.map((x) => x.plain.elapsedMs)),
         meanElapsedBiasedMs: mean(done.map((x) => x.biased.elapsedMs)),
         meanPromptTokensPlain: mean(tokens('plain')),

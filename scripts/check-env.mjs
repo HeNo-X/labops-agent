@@ -148,24 +148,33 @@ function line(mark, title, detail) {
   } else {
     const model = readVar('ASR_MODEL') || 'qwen3-asr-flash';
     const protocol = readVar('ASR_PROTOCOL') || 'chat_audio';
-    const ctxOn = readVar('ASR_CONTEXT_ENABLED') !== '0';
+    const ctxOn = readVar('ASR_CONTEXT_ENABLED') === '1';
     const itnOn = readVar('ASR_ENABLE_ITN') === '1';
+    const hwOn = readVar('ASR_HOTWORDS') !== '0';
     const lang = hasVar('ASR_LANGUAGE') ? readVar('ASR_LANGUAGE') : 'zh';
     const correctOn = readVar('ASR_TERM_CORRECT') !== '0';
+    // 热词只在原生协议有意义，所以这一项按协议显示，不能让人以为 chat_audio 也在发热词
+    const hwNote = protocol === 'dashscope_native' ? (hwOn ? '热词开' : '热词关') : '热词不适用';
     line(
       C.ok('✓'),
       '语音输入',
-      `${model} @ ${protocol}｜事后纠错${correctOn ? '开' : '关'}｜事前偏置${ctxOn ? '开' : '关'}（语种 ${lang || '不设'}，ITN ${itnOn ? '开' : '关'}）`
+      `${model} @ ${protocol}｜事后纠错${correctOn ? '开' : '关'}｜上下文偏置${ctxOn ? '开' : '关'}（语种 ${lang || '不设'}，ITN ${itnOn ? '开' : '关'}，${hwNote}）`
     );
     notes.push(
-      '语音输入：实体词表作为首位 system 上下文发给模型做事前偏置，返回后再按词典做完全同音的事后纠错；' +
-        '两次改动都只走同音/等长判定，界面可「还原原文」或「本轮不要调整术语」。'
+      '语音输入：返回后按实验室术语表做完全同音的事后纠错（默认开，误改率实测 0）；' +
+        '改动逐条可见，界面可「还原原文」，也可「本页不再自动调整术语」叫停并随时恢复。' +
+        (ctxOn
+          ? '事前偏置已开：实体词表作为首位 system 上下文发给模型。'
+          : '事前偏置默认关（效果未在真实录音上 A/B 过），设 ASR_CONTEXT_ENABLED=1 才发。')
     );
     if (itnOn) {
       warnings.push('ASR_ENABLE_ITN=1：口语数字会被规范成阿拉伯数字（"三十一"→"31"）。先用 `npm run eval:asr -- --mode=live` 确认真实录音里没有"一班→1班"这类非预期改写。');
     }
-    if (!ctxOn) {
-      warnings.push('ASR_CONTEXT_ENABLED=0：只做事后纠错，不发上下文。想知道偏置有没有用，跑 npm run eval:asr -- --mode=live 对比开/关。');
+    if (ctxOn) {
+      warnings.push(
+        'ASR_CONTEXT_ENABLED=1：偏置的收益仍未量化，且 2026-11-06 真实 Key 实测到静音样本下模型会把词表整段念回来' +
+          '（服务端已按"未识别"拦下，不会进草稿）。开之前请跑 npm run eval:asr -- --mode=live 用真实录音做开/关对比。'
+      );
     }
   }
 }

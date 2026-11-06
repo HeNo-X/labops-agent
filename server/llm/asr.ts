@@ -21,7 +21,7 @@
 
 import { getConfig } from '../config.ts';
 
-export type AsrProtocol = 'transcriptions' | 'chat_audio';
+export type AsrProtocol = 'transcriptions' | 'chat_audio' | 'dashscope_native';
 
 export interface AsrConfig {
   apiKey: string;
@@ -37,6 +37,15 @@ export interface AsrConfig {
   contextEnabled: boolean;
   /** 上下文字符上限；超出按权重丢弃并如实计数 */
   contextMaxChars: number;
+  /**
+   * 原生协议下的热词表（vocabulary）开关与条数上限。
+   * 仅 `dashscope_native` 支持：即时热词是 `parameters.vocabulary`，
+   * OpenAI 兼容的 chat_audio **没有这个参数**（只有 context 通道）。
+   */
+  hotwordsEnabled: boolean;
+  hotwordsMax: number;
+  /** 原生协议的服务地址（WorkspaceId 形态与兼容模式不同，不能直接复用 baseUrl） */
+  nativeBaseUrl: string;
 }
 
 /**
@@ -47,6 +56,11 @@ export interface AsrConfig {
  */
 const DEFAULT_ASR_LANGUAGE = 'zh';
 const DEFAULT_CONTEXT_MAX_CHARS = 1200;
+/**
+ * 即时热词条数上限。官方：Qwen-Audio 系每张表 ≤2000 词，Fun-ASR/Paraformer ≤500。
+ * 这里保守取 500 —— 换到哪条模型线都不会超限，而超限时上游是直接报错而不是静默截断。
+ */
+const DEFAULT_HOTWORDS_MAX = 500;
 /**
  * transcriptions 协议走 Whisper 系，`prompt` 只有 **224 token** 窗口（官方 Whisper prompting guide）。
  * 这里没有分词器，用字符数保守近似上限；宁可少放也不能让请求被拒。
@@ -82,21 +96,49 @@ function clampInt(raw: string | undefined, fallback: number, min: number, max: n
  */
 getConfig();
 
+/**
+ * 从兼容模式地址派生原生协议地址。三种写法都要收敛到 `/api/v1`，
+ * 否则会拼出"看着像对、实际 404"的地址：
+ *   https://x/compatible-mode/v1 → https://x/api/v1
+ *   https://x/v1                 → https://x/api/v1
+ *   https://x/api/v1             → 原样
+ * WorkspaceId 形态请显式配 ASR_NATIVE_BASE_URL —— 不猜租户号，猜错只会得到一个难懂的 404。
+ */
+function deriveNativeBase(baseUrl: string): string {
+  const clean = baseUrl.replace(/\/+$/, '');
+  if (/\/api\/v1$/.test(clean)) return clean;
+  if (/\/compatible-mode\/v1$/.test(clean)) return `${clean.slice(0, -'/compatible-mode/v1'.length)}/api/v1`;
+  if (/\/v1$/.test(clean)) return `${clean.slice(0, -'/v1'.length)}/api/v1`;
+  return clean;
+}
+
 export function getAsrConfig(): AsrConfig {
   const env = process.env;
   const dashscopeKey = env.DASHSCOPE_API_KEY ?? '';
   const dashscopeBase = (env.DASHSCOPE_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1').replace(/\/+$/, '');
+  const baseUrl = (env.ASR_BASE_URL || dashscopeBase).replace(/\/+$/, '');
+  const protocol: AsrProtocol =
+    env.ASR_PROTOCOL === 'transcriptions' ? 'transcriptions'
+      : env.ASR_PROTOCOL === 'dashscope_native' ? 'dashscope_native'
+        : 'chat_audio';
   return {
     apiKey: env.ASR_API_KEY || dashscopeKey,
-    baseUrl: (env.ASR_BASE_URL || dashscopeBase).replace(/\/+$/, ''),
+    baseUrl,
     model: env.ASR_MODEL || 'qwen3-asr-flash',
-    protocol: env.ASR_PROTOCOL === 'transcriptions' ? 'transcriptions' : env.ASR_PROTOCOL === 'chat_audio' ? 'chat_audio' : 'chat_audio',
+    protocol,
     timeoutMs: clampInt(env.ASR_TIMEOUT_MS, 30000, 3000, 120000),
     // 显式置空（ASR_LANGUAGE=）表示"不发 language"，与"未设置=用默认 zh"是两种意思
     language: env.ASR_LANGUAGE === undefined ? DEFAULT_ASR_LANGUAGE : env.ASR_LANGUAGE.trim(),
     enableItn: env.ASR_ENABLE_ITN === '1',
-    contextEnabled: env.ASR_CONTEXT_ENABLED !== '0',
-    contextMaxChars: clampInt(env.ASR_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_CHARS, 0, 20000)
+    // 默认**关**。理由有两边：一是收益没在真实录音上 A/B 过（没有录音），
+    // 二是 2026-11-06 真实 Key 实测到"模型把参考词表整段念回来"（静音样本，两种协议都犯）。
+    // 没测出来的好处不默认替用户打开 —— 要试就显式设 ASR_CONTEXT_ENABLED=1，跑 --mode=live 对比再定。
+    contextEnabled: env.ASR_CONTEXT_ENABLED === '1',
+    contextMaxChars: clampInt(env.ASR_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_CHARS, 0, 20000),
+    hotwordsEnabled: env.ASR_HOTWORDS !== '0',
+    hotwordsMax: clampInt(env.ASR_HOTWORDS_MAX, DEFAULT_HOTWORDS_MAX, 1, 2000),
+    // 原生协议的路径前缀与兼容模式不同，统一交给 deriveNativeBase 收敛
+    nativeBaseUrl: deriveNativeBase(env.ASR_NATIVE_BASE_URL ? env.ASR_NATIVE_BASE_URL.trim() : baseUrl)
   };
 }
 
@@ -108,6 +150,14 @@ export function isAsrConfigured(): boolean {
 export type AsrApplied = {
   context: boolean;
   options: boolean;
+  /** 即时热词（parameters.vocabulary）是否真的发出；非原生协议恒 false，不含糊 */
+  hotwords: boolean;
+  hotwordCount: number;
+  /**
+   * parameters.format 是否真的发出。只有原生协议有这个字段；另两种协议的容器信息由
+   * multipart 文件名 / data URI 前缀承载，不存在"没发"的问题，所以如实写 false。
+   */
+  format: boolean;
   language: string;
   itn: boolean;
   contextChars: number;
@@ -120,6 +170,8 @@ export type AsrUsage = {
   promptTokens?: number;
   completionTokens?: number;
   audioTokens?: number;
+  /** 上下文词表占的文本 token：原生协议用它记上下文的代价，兼容模式则体现在 promptTokens */
+  textTokens?: number;
   seconds?: number;
 };
 
@@ -137,6 +189,11 @@ export interface TranscribeInput {
    * 本模块不认识词典：保持 llm 层可单测，也不让它反向依赖数据层。
    */
   contextText?: string;
+  /**
+   * 即时热词（词 → 权重 1～5），仅 dashscope_native 协议使用。
+   * 同样由 API 层从术语表派生后传入，llm 层不认识词典。
+   */
+  hotwords?: Record<string, number>;
 }
 
 /** 把 MediaRecorder 的 mimeType 归一化为协议需要的基础类型 */
@@ -179,13 +236,45 @@ export function validateAudioPayload(input: { base64: string; mime: string }): {
 }
 
 /**
- * 一次上游请求的可选增强开关。降级阶梯就是按顺序试这几组：
- *   ①{上下文+参数} → ②{只参数} → ③{裸请求}
- * 先摘 asr_options（那是非标准的顶层字段，最容易被兼容网关拒绝），再摘 system 上下文。
+ * 一次上游请求的可选增强开关。上游 4xx 报"参数不认识"时**一次只摘一个**再重发，
+ * 摘的顺序按"最可能被拒的先摘"：
+ *   原生协议：vocabulary → parameters.format → parameters.asr_options → 上下文
+ *   兼容协议：asr_options（非标准顶层字段）→ 上下文
+ *   transcriptions：language → prompt
+ * 依据是各参数的"标准化程度"：越是本协议没有文档承诺的字段，越可能被判 unknown parameter。
+ * 上游若点名了具体字段（PARAM_HINTS），先摘被点名的那个 —— 否则就是拿"摘错的那个"再烧一次额度。
+ * `withFormat` 只有原生协议用得到：官方示例里 format 属于 parameters（Qwen-Audio 系），
+ * 而 qwen3-asr-flash 的原生参数表只列了 asr_options，所以它必须可摘，不能卡死退路。
  */
 interface RequestVariant {
   withContext: boolean;
   withOptions: boolean;
+  withHotwords: boolean;
+  withFormat: boolean;
+}
+
+function dropOrderFor(protocol: AsrProtocol): Array<keyof RequestVariant> {
+  return protocol === 'dashscope_native'
+    ? ['withHotwords', 'withFormat', 'withOptions', 'withContext']
+    : ['withOptions', 'withContext'];
+}
+
+/**
+ * 就地关掉一个还开着的增强项：上游点名了就先关它，没点名就按顺序关第一个还开着的。
+ * 全关着还失败时返回 false —— 裸请求都被拒，那不是参数问题，不许再退。
+ */
+function dropVariant(variant: RequestVariant, order: readonly (keyof RequestVariant)[], named?: keyof RequestVariant): boolean {
+  if (named && variant[named]) {
+    variant[named] = false;
+    return true;
+  }
+  for (const key of order) {
+    if (variant[key]) {
+      variant[key] = false;
+      return true;
+    }
+  }
+  return false;
 }
 
 function buildTranscriptionsRequest(
@@ -208,6 +297,9 @@ function buildTranscriptionsRequest(
     applied: {
       context: Boolean(prompt),
       options: Boolean(variant.withOptions && config.language),
+      hotwords: false, // vocabulary 是原生协议独有，兼容/transcriptions 都不支持，不谎报
+      hotwordCount: 0,
+      format: false, // 这两种协议没有 parameters.format，容器信息在文件名 / data URI 里
       language: variant.withOptions ? config.language : '',
       itn: false, // transcriptions 协议没有 enable_itn，别谎报
       contextChars: prompt.length
@@ -250,6 +342,9 @@ function buildChatAudioRequest(
     applied: {
       context: variant.withContext && Boolean(contextText),
       options: sendOptions,
+      hotwords: false, // chat_audio 没有 vocabulary 参数；只有原生那条路能发热词
+      hotwordCount: 0,
+      format: false, // 同上：兼容模式没有 parameters，容器信息在 data URI 前缀里
       language: sendOptions && config.language ? config.language : '',
       itn: sendOptions && config.enableItn,
       contextChars: variant.withContext && contextText ? contextText.length : 0
@@ -257,13 +352,113 @@ function buildChatAudioRequest(
   };
 }
 
+/**
+ * DashScope 原生协议：唯一支持 `parameters.vocabulary`（即时热词）的一条路。
+ * 形态照官方《非实时语音识别（Qwen-ASR）API 参考》+《提升识别准确率》：
+ *   body = { model, input:{ messages }, parameters:{ asr_options, format, vocabulary } }
+ *   音频在 content 的 audio 键里（data URI），可选参数全在 parameters，顶层没有 asr_options。
+ * 热词权重官方区间 1～5（建议 4 起步），超级热词（权重 50）本表暂未使用。
+ *
+ * ⚠ 有意**不发 sample_rate**：我们不做重采样，浏览器 MediaRecorder 给的是 44.1k/48k，
+ *   照着文档示例写 16000 等于对上游谎报采样率。要用 16k 通道请显式配
+ *   ASR_NATIVE_SAMPLE_RATE（并且自己保证音频确实是那个采样率）。
+ */
+function buildNativeRequest(
+  config: AsrConfig,
+  input: TranscribeInput,
+  variant: RequestVariant,
+  contextText: string,
+  hotwords: Record<string, number>
+): { url: string; init: RequestInit; applied: Omit<AsrApplied, 'degraded'> } {
+  const messages: unknown[] = [];
+  // 原生协议的 content 部件用裸键名（{text}/{audio}），不是兼容模式的 {type:'text',...}
+  if (variant.withContext && contextText) {
+    messages.push({ role: 'system', content: [{ text: contextText }] });
+  }
+  // 原生形态：content 里直接给 audio（URL 或 base64 data URI，官方示例同款），
+  // 不是兼容模式那套 type:input_audio —— 写错了上游当没有音频，返回空而不是报错。
+  messages.push({ role: 'user', content: [{ audio: `data:${normalizeMime(input.mime)};base64,${input.base64}` }] });
+
+  // 官方：可选参数全在 parameters 里（asr_options / format / sample_rate / vocabulary），
+  // 请求体顶层没有 asr_options。
+  const parameters: Record<string, unknown> = {};
+  const sampleRate = Number(process.env.ASR_NATIVE_SAMPLE_RATE ?? '');
+  if (variant.withFormat) parameters['format'] = extForMime(input.mime);
+  // 没发 format 时单发 sample_rate 没有意义（format 都不认的网关更不会认它）
+  if (parameters['format'] && Number.isInteger(sampleRate) && sampleRate > 0) parameters['sample_rate'] = sampleRate;
+
+  const asrOptions: Record<string, unknown> = {};
+  if (config.language) asrOptions['language'] = config.language;
+  if (config.enableItn) asrOptions['enable_itn'] = true;
+  const sendOptions = variant.withOptions && Object.keys(asrOptions).length > 0;
+  if (sendOptions) parameters['asr_options'] = asrOptions;
+
+  const sent: Record<string, number> = {};
+  if (variant.withHotwords) {
+    for (const [word, weight] of Object.entries(hotwords)) {
+      sent[word] = Math.min(5, Math.max(1, Math.round(weight))); // 官方：普通热词 1～5
+      if (Object.keys(sent).length >= config.hotwordsMax) break;
+    }
+  }
+  if (Object.keys(sent).length) parameters['vocabulary'] = sent;
+
+  const body: Record<string, unknown> = { model: config.model, input: { messages }, parameters };
+
+  return {
+    url: `${config.nativeBaseUrl}/services/aigc/multimodal-generation/generation`,
+    init: {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+        'X-DashScope-SSE': 'disable'
+      },
+      body: JSON.stringify(body)
+    },
+    applied: {
+      context: variant.withContext && Boolean(contextText),
+      options: sendOptions,
+      hotwords: Boolean(parameters['vocabulary']),
+      hotwordCount: Object.keys(sent).length,
+      format: Boolean(parameters['format']),
+      language: sendOptions && config.language ? config.language : '',
+      itn: sendOptions && config.enableItn,
+      contextChars: variant.withContext && contextText ? contextText.length : 0
+    }
+  };
+}
+
+/** 原生协议的回复文本：output.choices[].message.content 可能是字符串或 [{text}] */
+function parseNativeText(payload: unknown): string {
+  const root = payload as {
+    output?: {
+      text?: unknown;
+      choices?: Array<{ message?: { content?: unknown } }>;
+    };
+  } | null;
+  const content = root?.output?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) {
+    const joined = content
+      .map((part) => (part && typeof part === 'object' ? String((part as { text?: unknown }).text ?? '') : ''))
+      .join('')
+      .trim();
+    if (joined) return joined;
+  }
+  return typeof root?.output?.text === 'string' ? root.output.text.trim() : '';
+}
+
 function buildRequest(
   config: AsrConfig,
   input: TranscribeInput,
   buffer: Buffer,
   variant: RequestVariant,
-  contextText: string
+  contextText: string,
+  hotwords: Record<string, number>
 ): { url: string; init: RequestInit; applied: Omit<AsrApplied, 'degraded'> } {
+  if (config.protocol === 'dashscope_native') {
+    return buildNativeRequest(config, input, variant, contextText, hotwords);
+  }
   return config.protocol === 'chat_audio'
     ? buildChatAudioRequest(config, input.base64, input.mime, variant, contextText)
     : buildTranscriptionsRequest(config, buffer, input.mime, variant, contextText);
@@ -277,6 +472,23 @@ function looksLikeParameterRejection(status: number, body: string): boolean {
   if (status < 400 || status >= 500) return false;
   const text = body.toLowerCase();
   return /unknown (field|parameter|property)|unrecognized (key|field|argument)|unexpected key|extra inputs|not supported|unsupported param|invalid (param|body|request)|field required|input_schema_error|invalid_parameter/.test(text);
+}
+
+/**
+ * 上游点名了哪个字段 → 对应哪个开关。报错文本里带字段名是这两家网关的常见写法
+ * （`Unknown parameter: 'vocabulary'.` / `system role is not supported`），
+ * 认出来就能一步退到位，不必拿"摘错了的那个"再烧一次额度。认不出就交给梯子顺序。
+ */
+const PARAM_HINTS: Array<[RegExp, keyof RequestVariant]> = [
+  [/vocabulary|hotword/i, 'withHotwords'],
+  [/\bformat\b|sample_rate/i, 'withFormat'],
+  [/asr_options|enable_itn|\blanguage\b/i, 'withOptions'],
+  [/\bsystem\b|context|prompt\b/i, 'withContext']
+];
+
+function namedParam(body: string): keyof RequestVariant | undefined {
+  for (const [re, key] of PARAM_HINTS) if (re.test(body)) return key;
+  return undefined;
 }
 
 /** 从 chat/completions 的回复里取纯文本（content 可能是 string，也可能是分段数组） */
@@ -295,7 +507,8 @@ function textFromChatCompletion(payload: unknown): string {
 
 /**
  * 取上游用量。两种形态都要认：OpenAI 兼容的 usage.prompt_tokens /
- * prompt_tokens_details.audio_tokens，与 DashScope 原生的 input_tokens_details + seconds。
+ * prompt_tokens_details.audio_tokens，与 DashScope 原生的 input_tokens_details /
+ * output_tokens_details / seconds（官方明确原生没有 prompt_tokens 这套名字）。
  * 拿不到就留空 —— 缺数据要看得见，不许填 0 冒充测过。
  */
 function parseUsage(payload: unknown): AsrUsage {
@@ -303,23 +516,42 @@ function parseUsage(payload: unknown): AsrUsage {
     usage?: {
       prompt_tokens?: unknown;
       completion_tokens?: unknown;
+      input_tokens?: unknown;
+      output_tokens?: unknown;
       seconds?: unknown;
       prompt_tokens_details?: { audio_tokens?: unknown };
-      input_tokens_details?: { text_tokens?: unknown };
+      input_tokens_details?: { text_tokens?: unknown; audio_tokens?: unknown };
     };
   } | null;
   const u = root?.usage;
   const num = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
   const usage: AsrUsage = {};
-  const prompt = num(u?.prompt_tokens);
+  const prompt = num(u?.prompt_tokens) ?? num(u?.input_tokens);
   if (prompt !== undefined) usage.promptTokens = prompt;
-  const completion = num(u?.completion_tokens);
+  const completion = num(u?.completion_tokens) ?? num(u?.output_tokens);
   if (completion !== undefined) usage.completionTokens = completion;
-  const audio = num(u?.prompt_tokens_details?.audio_tokens);
+  const audio = num(u?.prompt_tokens_details?.audio_tokens) ?? num(u?.input_tokens_details?.audio_tokens);
   if (audio !== undefined) usage.audioTokens = audio;
+  const text = num(u?.input_tokens_details?.text_tokens);
+  if (text !== undefined) usage.textTokens = text;
   const seconds = num(u?.seconds);
   if (seconds !== undefined) usage.seconds = seconds;
   return usage;
+}
+
+/**
+ * 上下文偏置的反噬：模型会把我们发的参考词表整段当识别结果念出来。
+ * 2026-11-06 真实 Key 实测（静音样本）：chat_audio 与原生协议**都**把
+ * 「实验室管理领域参考词（中文）：\n器材 投影仪 服务器」原样返回了，官方社区也有
+ * 同款报告（aliyun/alibabacloud-bailian-speech-demo#50「无故输出全部 corpus」）。
+ * 词表首行是我们自己写的标题，说话的人不可能念它 —— 它一出现就说明模型在念提示词，
+ * 宁可判"没听清"，也绝不能把 1200 字词表灌进用户的草稿里。
+ */
+function looksLikeContextEcho(text: string, contextText: string): boolean {
+  if (!contextText) return false;
+  const head = (contextText.split('\n')[0] ?? '').trim();
+  if (head.length < 6) return false; // 标题太短就没有区分度，不配当判据
+  return text.includes(head) || text.includes(head.replace(/[：:]\s*$/, ''));
 }
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
@@ -351,20 +583,23 @@ export async function transcribeAudio(input: TranscribeInput): Promise<AsrResult
   if (!payload.ok) return { ok: false, code: payload.code, message: payload.message };
 
   const contextText = config.contextEnabled ? (input.contextText ?? '').trim().slice(0, config.contextMaxChars) : '';
-  // 降级阶梯与 RequestVariant 注释同序：先摘 asr_options（非标准顶层字段，最容易被兼容网关拒），
-  // 再摘 system 上下文，最后退回改造前的裸请求。
-  const ladder: RequestVariant[] = [{ withContext: Boolean(contextText), withOptions: true }];
-  if (contextText) ladder.push({ withContext: true, withOptions: false });
-  ladder.push({ withContext: false, withOptions: false });
+  const hotwords = config.protocol === 'dashscope_native' && config.hotwordsEnabled ? input.hotwords ?? {} : {};
+  const variant: RequestVariant = {
+    withContext: Boolean(contextText),
+    withOptions: true,
+    withHotwords: Object.keys(hotwords).length > 0,
+    withFormat: config.protocol === 'dashscope_native'
+  };
+  const dropOrder = dropOrderFor(config.protocol);
 
   const startedAt = Date.now();
   let lastStatus = 0;
   let lastBody = '';
+  let degraded = false;
 
-  for (let i = 0; i < ladder.length; i += 1) {
-    const variant = ladder[i]!;
-    const request = buildRequest(config, input, payload.buffer, variant, contextText);
-    let retryWithLess = false;
+  for (;;) {
+    const request = buildRequest(config, input, payload.buffer, variant, contextText, hotwords);
+    let dropNext = false;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         const response = await fetch(request.url, { ...request.init, signal: AbortSignal.timeout(config.timeoutMs) });
@@ -372,11 +607,22 @@ export async function transcribeAudio(input: TranscribeInput): Promise<AsrResult
         // 先完整读 body 再解析（响应含完整 JSON；截断会让 JSON.parse 假性失败）
         const bodyText = await response.text().catch(() => '');
         if (response.ok) {
+          const parsed = safeJson(bodyText);
           const text = config.protocol === 'chat_audio'
-            ? textFromChatCompletion(safeJson(bodyText))
-            : String((safeJson(bodyText) as { text?: unknown }).text ?? '').trim();
+            ? textFromChatCompletion(parsed)
+            : config.protocol === 'dashscope_native'
+              ? parseNativeText(parsed)
+              : String((parsed as { text?: unknown }).text ?? '').trim();
           if (!text) {
             return { ok: false, code: 'empty', message: '没有听清，请靠近一点再说一次', status: lastStatus };
+          }
+          if (looksLikeContextEcho(text, contextText)) {
+            return {
+              ok: false,
+              code: 'empty',
+              message: '没有听清，请再说一次（模型把参考词表当成了识别内容，已按未识别处理）',
+              status: lastStatus
+            };
           }
           return {
             ok: true,
@@ -384,14 +630,16 @@ export async function transcribeAudio(input: TranscribeInput): Promise<AsrResult
             model: config.model,
             protocol: config.protocol,
             elapsedMs: Date.now() - startedAt,
-            applied: { ...request.applied, degraded: i > 0 },
-            usage: parseUsage(safeJson(bodyText))
+            applied: { ...request.applied, degraded },
+            usage: parseUsage(parsed)
           };
         }
         lastBody = bodyText.slice(0, 300);
         // 429 是配额/限流，不是"参数不认识"，必须留给同参数的网络重试（改造前就是这个口径）
         if (response.status >= 400 && response.status < 500 && response.status !== 429) {
-          retryWithLess = i + 1 < ladder.length && looksLikeParameterRejection(response.status, bodyText);
+          // 只有"像参数不认识"的 4xx 才值得摘一个重发；裸请求仍被拒就是真失败，不再退
+          dropNext = looksLikeParameterRejection(response.status, bodyText)
+            && dropVariant(variant, dropOrder, namedParam(bodyText));
           break; // 其余 4xx：同参数重试没有意义
         }
       } catch (err) {
@@ -400,7 +648,8 @@ export async function transcribeAudio(input: TranscribeInput): Promise<AsrResult
       }
       if (attempt === 0) await delay(400);
     }
-    if (!retryWithLess) break;
+    if (!dropNext) break;
+    degraded = true;
   }
 
   return {

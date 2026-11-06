@@ -348,6 +348,9 @@ export function correctTranscript(text: string, lexicon: readonly LexiconEntry[]
       // ③ 音节滑窗：定长、逐字可查、连读完全等于 sy 才改
       const size = Array.from(entry.canonical).length;
       if (size < MIN_SYLLABLE_TERM_LENGTH) continue; // 单字绝不参与（同音字海了去了）
+      // 术语本身含非 BMP 字符（emoji 等）时整条跳过：下面的 at/length 全是 UTF-16 下标，
+      // 码点数与 UTF-16 长度不等会让窗口与替换位置错位——那是把对的改错的形状。
+      if (size !== entry.canonical.length) continue;
       for (let at = 0; at + size <= text.length; at += 1) {
         const window = text.slice(at, at + size);
         if (window === entry.canonical) continue; // 本来就是对的

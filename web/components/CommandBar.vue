@@ -235,7 +235,7 @@ function onKeydown(e: KeyboardEvent): void {
         {{tr(props.submitLabel ?? '发送')}}
       </button>
       <template v-else>
-        <button type="button" class="bar__btn bar__btn--queue" :disabled="!text.trim()" @click="submit">
+        <button v-if="!voiceMode" type="button" class="bar__btn bar__btn--queue" :disabled="!text.trim()" @click="submit">
           {{tr('加入待发送')}}
         </button>
         <button type="button" class="bar__btn bar__btn--ghost" @click="emit('cancel')">{{tr("停止")}}</button>
@@ -297,45 +297,7 @@ function onKeydown(e: KeyboardEvent): void {
   margin: 0 auto;
   padding: var(--sp-4) var(--sp-5);
 }
-.bar--hero .bar__speak {
-  flex: 1;
-  min-width: 0;
-  min-height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface-2);
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-  touch-action: none;
-}
-.bar__speak:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.bar__speak:hover:not(:disabled) {
-  border-color: var(--primary);
-  color: var(--primary);
-}
-.bar__speak.is-active {
-  border-color: var(--primary);
-  background: var(--primary-weak, #eef4ff);
-  color: var(--primary);
-}
-.bar__speak.is-cancel {
-  border-color: var(--danger, #d93026);
-  background: var(--danger-weak, #fdecec);
-  color: var(--danger, #d93026);
-}
-.bar__input {
+.bar--hero .bar__input {
   font-size: calc(var(--ui-font-size) * 1.15385);
   min-height: 56px;
 }
@@ -618,5 +580,57 @@ function onKeydown(e: KeyboardEvent): void {
   .bar__hint {
     margin-top: var(--sp-1);
   }
+}
+
+/* 语音条：与输入框同高、吃满剩余宽度。
+   为什么不是普通按钮样式——它替代的是输入框，必须让人一眼看出「这里是按住说话的位置」。 */
+.bar__speak {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+.bar--hero .bar__speak {
+  min-height: 56px;
+}
+.bar__speak:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 6%, var(--surface-2));
+}
+.bar__speak.is-active {
+  border-style: solid;
+  border-color: var(--primary);
+  background: var(--primary-weak, #eef4ff);
+  color: var(--primary);
+}
+.bar__speak.is-cancel {
+  border-style: solid;
+  border-color: var(--danger, #d93026);
+  background: var(--danger-weak, #fdecec);
+  color: var(--danger, #d93026);
+}
+.bar__speak:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.bar__speak-text {
+  font-weight: 500;
 }
 </style>

@@ -537,6 +537,22 @@ await mctx.route('**/api/agent/transcribe', async (route: Route) => {
     })
   });
 });
+// 移动端共用同一个 VoiceTermPanel：这里只验"体检这条路在手机上也接上了"，
+// 结论渲染的细节由 PC 那段负责，不重复堆断言
+await mctx.route('**/api/agent/asr-lexicon-check', async (route: Route) => {
+  await route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      ok: true,
+      builtIn: { terms: 148, fingerprint: '1131ddb19f00', protect: 9, ambiguousKeys: 0 },
+      effective: { protocol: 'chat_audio', contextEnabled: false, contextMaxChars: 1200, hotwordsEnabled: true, hotwordsMax: 500, termCorrectEnabled: true, contextTerms: 8, contextChars: 26, omittedFromBudget: 140 },
+      keywords: [{ word: '门禁电源板', verdict: 'bias-off', hotwordFits: true, why: '服务端事前偏置当前是关的（ASR_CONTEXT_ENABLED=0）' }],
+      pairs: [],
+      merge: { candidates: [{ canonical: '门禁电源板', syll: ['men', 'jin', 'dian', 'yuan', 'ban'], aliases: [], weight: 4, domain: 'user', blockAfter: [] }], needPinyin: [] }
+    })
+  });
+});
 const mpage = await mctx.newPage();
 const merrors: string[] = [];
 mpage.on('pageerror', (e) => merrors.push(e.message));
@@ -611,6 +627,26 @@ if (mmicCount > 0) {
     } else {
       check('移动端「还原原文」同样生效', false, '没找到还原按钮');
     }
+  }
+  // 词汇体检：同一份组件、同一个端点，移动端不该另写一套
+  const mToggle = mpage.locator('.vtp__toggle');
+  if ((await mToggle.count()) > 0) {
+    await mToggle.click();
+    await mpage.waitForTimeout(250);
+    await mpage.fill('#vtp-word', '门禁电源板');
+    await mpage.press('#vtp-word', 'Enter');
+    await mpage.waitForTimeout(250);
+    const mCheck = mpage.getByRole('button', { name: '体检我的词汇', exact: true });
+    check('移动端同样有体检入口且登记后可用', (await mCheck.count()) > 0 && !(await mCheck.isDisabled().catch(() => true)), `count=${await mCheck.count()}`);
+    await mCheck.click();
+    await mpage.waitForTimeout(500);
+    const mReport = (await mpage.locator('.vtp__report').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+    check('移动端渲染同一份服务端结论（不是各写一遍的近似版）',
+      /内置 148 条（指纹 1131ddb19f00）/.test(mReport) && /事前偏置 关/.test(mReport), mReport);
+    await mpage.screenshot({ path: path.join(SHOT, 'mobile-lexicon-check.png') });
+  } else {
+    check('移动端同样有体检入口且登记后可用', false, '没找到 .vtp__toggle');
+    check('移动端渲染同一份服务端结论（不是各写一遍的近似版）', false, '上一步就没找到入口');
   }
   check('移动端无页面错误', merrors.length === 0, merrors.slice(0, 2).join(' | ') || '0 条');
 }

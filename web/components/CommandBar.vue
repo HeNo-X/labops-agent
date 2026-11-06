@@ -173,7 +173,6 @@ function onKeydown(e: KeyboardEvent): void {
       <span class="bar__voice-dot" aria-hidden="true"></span>
       <b>{{ tr(voice.status.value === 'transcribing' ? '识别中…' : voice.status.value === 'requesting' ? '等待麦克风…' : '正在聆听') }}</b>
       <span class="bar__voice-time">{{ Math.floor(voice.seconds.value) }}s / 60s</span>
-      <button type="button" class="bar__voice-cancel" @click="hold.cancel">{{ tr('取消') }}</button>
     </div>
 
     <div class="bar__row">
@@ -211,6 +210,7 @@ function onKeydown(e: KeyboardEvent): void {
         type="button"
         class="bar__speak"
         :class="{ 'is-active': voice.status.value === 'recording', 'is-cancel': hold.sliding.value }"
+        :style="hold.sliding.value ? { borderColor: '#e5484d', color: '#e5484d', background: 'rgba(229,72,77,0.14)', borderStyle: 'solid' } : undefined"
         :disabled="busy"
         :aria-label="tr('按住说话')"
         v-on="hold.handlers"
@@ -238,9 +238,30 @@ function onKeydown(e: KeyboardEvent): void {
         <button v-if="!voiceMode" type="button" class="bar__btn bar__btn--queue" :disabled="!text.trim()" @click="submit">
           {{tr('加入待发送')}}
         </button>
-        <button type="button" class="bar__btn bar__btn--ghost" @click="emit('cancel')">{{tr("停止")}}</button>
+        <!-- 运行中：停止占据发送按钮的位置（同一列、同一尺寸），结束后自动换回发送 -->
+        <button type="button" class="bar__btn bar__btn--stop" @click="emit('cancel')">{{tr("停止")}}</button>
       </template>
     </div>
+
+    <!-- 录音遮罩：按住说话期间把主内容区压暗，中央给出明确指引（上滑可取消） -->
+    <Teleport to="body">
+      <div
+        v-if="voice.status.value === 'recording' || hold.sliding.value"
+        class="voice-mask"
+        :class="{ 'is-cancel': hold.sliding.value }"
+        role="status"
+        aria-live="polite"
+      >
+        <div class="voice-mask__card">
+          <span class="voice-mask__wave" aria-hidden="true"></span>
+          <b class="voice-mask__title">{{ tr(hold.sliding.value ? '松开取消' : '正在聆听') }}</b>
+          <span class="voice-mask__hint">{{
+            tr(hold.sliding.value ? '手指已上移，松手即放弃这段录音' : '上滑可取消 · 松手结束并转成文字')
+          }}</span>
+          <span class="voice-mask__time">{{ Math.floor(voice.seconds.value) }}s / 60s</span>
+        </div>
+      </div>
+    </Teleport>
 
     <!-- 待发送：细线提示行 + 可取消。只表达"暂存意图"，不代表已经发出 -->
     <div v-if="props.pendingText" class="bar__pending" role="status">
@@ -299,7 +320,7 @@ function onKeydown(e: KeyboardEvent): void {
 }
 .bar--hero .bar__input {
   font-size: calc(var(--ui-font-size) * 1.15385);
-  min-height: 56px;
+  min-height: 84px;
 }
 .bar--hero .bar__btn {
   min-height: 56px;
@@ -423,8 +444,9 @@ function onKeydown(e: KeyboardEvent): void {
   flex: 1;
   min-width: 0;
   resize: vertical;
-  min-height: 40px;
-  max-height: 140px;
+  /* 2026-11-06：高度 ×1.5（40→60、上限 140→210），长问题更好读 */
+  min-height: 60px;
+  max-height: 210px;
   padding: 9px var(--sp-3);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -621,10 +643,11 @@ function onKeydown(e: KeyboardEvent): void {
   color: var(--primary);
 }
 .bar__speak.is-cancel {
+  /* 不用 var(--danger)：暗色主题里它是 #d99a9a（淡粉），在深底上根本不像"取消" */
   border-style: solid;
-  border-color: var(--danger, #d93026);
-  background: var(--danger-weak, #fdecec);
-  color: var(--danger, #d93026);
+  border-color: #e5484d;
+  background: rgba(229, 72, 77, 0.14);
+  color: #e5484d;
 }
 .bar__speak:disabled {
   opacity: 0.6;
@@ -632,5 +655,72 @@ function onKeydown(e: KeyboardEvent): void {
 }
 .bar__speak-text {
   font-weight: 500;
+}
+
+/* 停止：运行中占据发送按钮的位置，做成实底主按钮，避免与"发送"混淆 */
+.bar__btn--stop {
+  /* 固定深红：暗色主题的 --danger 是淡粉，配白字对比不足 */
+  background: #c02b2b;
+  border-color: #c02b2b;
+  color: #fff;
+  font-weight: 600;
+}
+.bar__btn--stop:hover:not(:disabled) {
+  filter: brightness(0.94);
+}
+
+/* 录音遮罩：只压暗主内容区，不挡输入条本身（用户还要看到「松开取消」） */
+.voice-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 20, 28, 0.42);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+}
+.voice-mask.is-cancel {
+  background: rgba(120, 20, 18, 0.34);
+}
+.voice-mask__card {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  min-width: 220px;
+  padding: 18px 22px;
+  border-radius: 16px;
+  background: rgba(28, 32, 40, 0.92);
+  color: #fff;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.voice-mask.is-cancel .voice-mask__card {
+  background: rgba(150, 28, 24, 0.94);
+}
+.voice-mask__wave {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.18);
+  animation: voice-pulse 1.1s ease-in-out infinite;
+}
+@keyframes voice-pulse {
+  0%, 100% { transform: scale(0.85); opacity: 0.75; }
+  50% { transform: scale(1.15); opacity: 1; }
+}
+.voice-mask__title {
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+.voice-mask__hint {
+  font-size: 12px;
+  opacity: 0.82;
+}
+.voice-mask__time {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
 }
 </style>

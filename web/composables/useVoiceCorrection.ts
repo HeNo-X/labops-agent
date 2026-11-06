@@ -47,5 +47,12 @@ export function useVoiceCorrection(voice: Voice, draft: Ref<string>) {
     lastInsert.value = '';
   }
 
-  return { lastInsert, applyText, originalText, restore, suppress };
+  function unsuppress(): void {
+    voice.unsuppressCorrections();
+  }
+
+  /** 抑制状态的作用域是"本页会话"，不是"本轮" —— 界面措辞与此保持一致 */
+  const suppressed = computed(() => voice.suppressCorrection.value);
+
+  return { lastInsert, applyText, originalText, suppressed, restore, suppress, unsuppress };
 }

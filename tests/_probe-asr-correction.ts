@@ -4,7 +4,8 @@
  *  验的是**前端链路**，不是识别准确率：
  *    ① 服务端回传 corrections/originalText 后，提示条是否真的出现并写明改了哪几处
  *    ② 「还原原文」是否把草稿里的这一段换回上游原文
- *    ③ 「本轮不要调整术语」是否真的让下一次请求带上 skipTermCorrect
+ *    ③ 「本页不再自动调整术语」是否真的让后续请求带上 skipTermCorrect，
+ *       并且这个状态看得见、点一下就能撤回（只给开关不给回头路不算交付）
  *    ④ 用户已经手改过草稿时，还原按钮必须是禁用态（不能把用户的修改覆盖掉）
  *
  *  ⚠ /api/agent/transcribe 由 page.route **桩替代**：本探针只证明契约与交互接通，
@@ -150,7 +151,7 @@ const barGone = await page.locator('.vcb').count();
 check('还原后提示条收起，不重复纠缠', barGone === 0, `剩余 .vcb=${barGone}`);
 await page.screenshot({ path: path.join(SHOT, 'restored.png') });
 
-// ---- 叫停：本轮不要调整术语 ----
+// ---- 叫停：本页不再自动调整术语（含恢复） ----
 await page.locator('#cmd').fill('');
 await holdToTalk(900);
 const beforeSuppress = (await page.locator('.vcb').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
@@ -160,10 +161,22 @@ await page.waitForTimeout(400);
 await page.locator('#cmd').fill('');
 await holdToTalk(900);
 const skipSent = transcribeBodies.some((b) => b['skipTermCorrect'] === true);
-check('「本轮不要调整术语」后的请求真的带上 skipTermCorrect', skipSent, JSON.stringify(transcribeBodies.map((b) => ({ skip: b['skipTermCorrect'] === true }))));
+check('「本页不再自动调整术语」后的请求真的带上 skipTermCorrect', skipSent, JSON.stringify(transcribeBodies.map((b) => ({ skip: b['skipTermCorrect'] === true }))));
 const draft4 = await page.locator('#cmd').inputValue();
 check('叫停后草稿用的就是上游原文（逐字相等，没有半纠正的中间态）', draft4 === MISWRITTEN, `草稿="${draft4}"`);
-check('叫停后不再出现提示条', (await page.locator('.vcb').count()) === 0, '');
+// 抑制状态必须**看得见**并且能撤回：只给开关不给回头路，不算"决定权在用户"
+const suppressedLine = (await page.locator('.vcb').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+check('叫停后仍留一行可见状态（不静默改变行为）', /已停止自动调整术语/.test(suppressedLine), suppressedLine);
+const resume = page.locator('.vcb__btn--ghost');
+check('叫停后给出「恢复术语调整」入口', (await resume.count()) > 0, `count=${await resume.count()}`);
+await page.locator('#cmd').fill('');
+await resume.click();
+await page.waitForTimeout(400);
+await holdToTalk(900);
+const draft5 = await page.locator('#cmd').inputValue();
+check('恢复后下一次请求不再带 skipTermCorrect，草稿重新是纠正版',
+  transcribeBodies.at(-1)?.['skipTermCorrect'] !== true && draft5.includes('移液枪'),
+  `最后一条请求 skip=${transcribeBodies.at(-1)?.['skipTermCorrect'] === true}；草稿="${draft5}"`);
 await page.screenshot({ path: path.join(SHOT, 'suppressed.png') });
 
 const realErrors = errors.filter((e) => !/503 \(Service Unavailable\)|favicon/.test(e));

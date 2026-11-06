@@ -627,6 +627,8 @@ Object.assign(en,{
  '语音识别按实验室术语表调整了 {n} 处':'Speech-to-text adjusted {n} term(s) against the laboratory glossary',
  '另有 {n} 处未列出':'plus {n} more not listed',
  '还原原文':'Restore original',
- '本轮不要调整术语':"Don't adjust terms this round",
+ '本页不再自动调整术语':"Don't auto-adjust terms on this page",
+ '本页已停止自动调整术语，识别结果按上游原文直接使用':'Term auto-adjustment is off on this page; results are used exactly as transcribed.',
+ '恢复术语调整':'Resume term adjustment',
 });
 export function t(value:unknown,values:Record<string,string|number>={}){const text=String(value??'');const result=language.value==='en'?en[text]||text:text;return result.replace(/\{(\w+)\}/g,(match,key)=>String(values[key]??match));}

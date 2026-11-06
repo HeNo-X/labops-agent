@@ -263,14 +263,19 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
     lastOriginalText.value = '';
   }
 
-  /** 用户选择"本轮不要调整术语"：关掉后续请求的纠错，并清掉当前提示 */
+  /** 用户选择"本页不再自动调整术语"：关掉后续请求的纠错，并清掉当前提示 */
   function suppressCorrections(): void {
     suppressCorrection.value = true;
     clearCorrections();
   }
 
+  /** 撤回上面的选择。抑制状态必须能取消 —— 只给开关不给回头路不是"决定权在用户" */
+  function unsuppressCorrections(): void {
+    suppressCorrection.value = false;
+  }
+
   return {
     status, seconds, errorCode, supported, recording, working, start, stop, cancel,
-    lastOriginalText, lastCorrections, suppressCorrection, clearCorrections, suppressCorrections
+    lastOriginalText, lastCorrections, suppressCorrection, clearCorrections, suppressCorrections, unsuppressCorrections
   };
 }

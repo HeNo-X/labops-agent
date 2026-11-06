@@ -4,7 +4,9 @@
  * ============================================================================
  *  为什么必须存在：纠错层现在敢改 2 字词，收益变大，风险也变大。
  *  只靠"我们自测误改率为 0"不足以让用户信任 —— 所以每一次改动都要摊开，
- *  并且留两条退路：还原原文、本轮别再改。缺了这两条，就不该放宽短词门槛。
+ *  并且留两条退路：还原原文、这一页别再自动改。缺了这两条，就不该放宽短词门槛。
+ *  "叫停"的作用域如实写进文案：它是本页会话级的开关，不是本轮级，
+ *  所以必须同时给出「恢复术语调整」，否则用户关了就回不去。
  *
  *  PC 与移动共用本组件（本仓库已被"同一能力两端各写一遍"坑过多次）。
  */
@@ -16,17 +18,22 @@ const props = defineProps<{
   corrections: VoiceCorrection[];
   /** 服务端回传的上游原文，还原动作用它，不在前端重新猜 */
   originalText?: string;
+  /** 用户已选择"本页不再自动改术语"：这个状态必须可见，也必须能撤回 */
+  suppressed?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: 'restore', original: string): void;
   (e: 'suppress'): void;
+  (e: 'unsuppress'): void;
 }>();
 
 const MAX_SHOWN = 3;
 const shown = computed(() => props.corrections.slice(0, MAX_SHOWN));
 const hidden = computed(() => Math.max(0, props.corrections.length - MAX_SHOWN));
 const canRestore = computed(() => typeof props.originalText === 'string' && props.originalText !== '');
+// 没有改动也没有抑制状态时整条不渲染，免得在输入框下面常驻一行没人需要的提示
+const visible = computed(() => props.corrections.length > 0 || Boolean(props.suppressed));
 
 function restore(): void {
   if (!canRestore.value) return;
@@ -35,9 +42,9 @@ function restore(): void {
 </script>
 
 <template>
-  <p v-if="corrections.length" class="vcb" role="status" aria-live="polite">
-    <span class="vcb__mark" aria-hidden="true">⌁</span>
-    <span class="vcb__text">
+  <p v-if="visible" class="vcb" role="status" aria-live="polite">
+    <span class="vcb__mark" aria-hidden="true">{{ suppressed ? '⊘' : '⌁' }}</span>
+    <span v-if="corrections.length" class="vcb__text">
       {{ tr('语音识别按实验室术语表调整了 {n} 处', { n: corrections.length }) }}
       <span v-for="(c, i) in shown" :key="`${c.from}-${i}`" class="vcb__pair">
         <span class="vcb__from">{{ c.from }}</span>
@@ -46,9 +53,11 @@ function restore(): void {
       </span>
       <span v-if="hidden">{{ tr('另有 {n} 处未列出', { n: hidden }) }}</span>
     </span>
+    <span v-else class="vcb__text">{{ tr('本页已停止自动调整术语，识别结果按上游原文直接使用') }}</span>
     <span class="vcb__actions">
-      <button type="button" class="vcb__btn" :disabled="!canRestore" @click="restore">{{ tr('还原原文') }}</button>
-      <button type="button" class="vcb__btn vcb__btn--ghost" @click="emit('suppress')">{{ tr('本轮不要调整术语') }}</button>
+      <button v-if="corrections.length" type="button" class="vcb__btn" :disabled="!canRestore" @click="restore">{{ tr('还原原文') }}</button>
+      <button v-if="!suppressed" type="button" class="vcb__btn vcb__btn--ghost" @click="emit('suppress')">{{ tr('本页不再自动调整术语') }}</button>
+      <button v-else type="button" class="vcb__btn vcb__btn--ghost" @click="emit('unsuppress')">{{ tr('恢复术语调整') }}</button>
     </span>
   </p>
 </template>

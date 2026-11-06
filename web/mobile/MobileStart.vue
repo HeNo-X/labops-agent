@@ -40,6 +40,6 @@ const suggestions=computed(()=>identity.value==='volunteer'
 <div class="mobile-start-input-row"><label class="sr-only" for="mobile-question">{{tr('查询实验室，或准备办理工作…')}}</label><textarea id="mobile-question" v-model="draft" rows="2" maxlength="3000" :disabled="busy||voice.working.value" :placeholder="voice.working.value?tr('正在聆听，松手结束…'):tr('查询实验室，或准备办理工作…')" @keydown="key"/><button v-if="voice.supported.value" type="button" class="mobile-mic" :class="{'is-recording':voice.status.value==='recording'}" :disabled="busy" :aria-label="tr(voice.status.value==='recording'?'松手结束并识别':'按住说话')" v-on="hold.handlers"><UiIcon name="mic"/></button><button class="mobile-primary" :disabled="busy||!draft.trim()" type="submit"><UiIcon name="send"/>{{tr(busy?'生成中…':'发送')}}</button></div>
 <p v-if="controller.error.value" class="mobile-start-error" role="alert">{{controller.error.value}}</p>
 <p v-if="voiceHint" class="mobile-voice-hint" role="alert">{{voiceHint}}</p>
-<VoiceCorrectionBar :corrections="voice.lastCorrections.value" :original-text="voiceFix.originalText.value" @restore="voiceFix.restore" @suppress="voiceFix.suppress"/>
+<VoiceCorrectionBar :corrections="voice.lastCorrections.value" :original-text="voiceFix.originalText.value" :suppressed="voiceFix.suppressed.value" @restore="voiceFix.restore" @suppress="voiceFix.suppress" @unsuppress="voiceFix.unsuppress"/>
 </form>
 </section></template>

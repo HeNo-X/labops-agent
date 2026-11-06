@@ -214,8 +214,10 @@ function onKeydown(e: KeyboardEvent): void {
     <VoiceCorrectionBar
       :corrections="voice.lastCorrections.value"
       :original-text="voiceFix.originalText.value"
+      :suppressed="voiceFix.suppressed.value"
       @restore="voiceFix.restore"
       @suppress="voiceFix.suppress"
+      @unsuppress="voiceFix.unsuppress"
     />
 
     <div v-if="busy" class="bar__hint">

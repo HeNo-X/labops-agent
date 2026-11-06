@@ -429,7 +429,7 @@
 /* B. 语音条：占据输入框位置的长条按钮
       touch-action / user-select / touch-callout 三个都必须有：
       iOS 上长按可编辑元素会弹系统选择菜单并吞掉 pointerup，录音会被瞬间打断。 */
-.mobile-composer .mobile-speak {
+.mobile-speak {
   flex: 1;
   min-width: 0;
   min-height: 44px;
@@ -448,17 +448,17 @@
   -webkit-tap-highlight-color: transparent;
   cursor: pointer;
 }
-.mobile-composer .mobile-speak.is-recording {
+.mobile-speak.is-recording {
   background: var(--primary-weak, #eef4ff);
   border-color: var(--primary);
   color: var(--primary);
 }
-.mobile-composer .mobile-speak.is-sliding {
+.mobile-speak.is-sliding {
   background: var(--danger-weak, #fdecec);
   border-color: var(--danger, #d93026);
   color: var(--danger, #d93026);
 }
-.mobile-composer .mobile-speak[disabled] {
+.mobile-speak[disabled] {
   opacity: .6;
 }
 .mobile-composer .mobile-mic {
@@ -503,7 +503,7 @@
 /* B. 语音条：占据输入框位置的长条按钮
       touch-action / user-select / touch-callout 三个都必须有：
       iOS 上长按可编辑元素会弹系统选择菜单并吞掉 pointerup，录音会被瞬间打断。 */
-.mobile-composer .mobile-speak {
+.mobile-speak {
   flex: 1;
   min-width: 0;
   min-height: 44px;
@@ -522,19 +522,25 @@
   -webkit-tap-highlight-color: transparent;
   cursor: pointer;
 }
-.mobile-composer .mobile-speak.is-recording {
+.mobile-speak.is-recording {
   background: var(--primary-weak, #eef4ff);
   border-color: var(--primary);
   color: var(--primary);
 }
-.mobile-composer .mobile-speak.is-sliding {
+.mobile-speak.is-sliding {
   background: var(--danger-weak, #fdecec);
   border-color: var(--danger, #d93026);
   color: var(--danger, #d93026);
 }
-.mobile-composer .mobile-speak[disabled] {
+.mobile-speak[disabled] {
   opacity: .6;
 }
 .mobile-composer .mobile-mic {
   flex: 0 0 auto;
+}
+
+/* 语音条同时用于会话页输入条与首页输入行（同一套交互，样式共用） */
+.mobile-start-input-row .mobile-speak {
+  flex: 1;
+  min-width: 0;
 }

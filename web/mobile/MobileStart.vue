@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import {computed,ref,watch} from 'vue';
+import {computed,nextTick,ref,watch} from 'vue';
 import {preferences} from '../preferences';import {t as tr} from '../i18n';
 import {useSessionStore} from '../stores/session';import {useRunStore} from '../stores/run';import {useBusinessStore} from '../stores/business';
 import type {useConversationController} from '../composables/useConversationController';
@@ -9,7 +9,12 @@ const props=defineProps<{section?:string;controller:ReturnType<typeof useConvers
 const session=useSessionStore(),run=useRunStore(),business=useBusinessStore(),draft=ref(session.draftFor('__new'));
 // 长按说话（与桌面 CommandBar 共用同一组合式函数）：按住录音、松手识别回填
 const voice=useVoiceInput();
-const voiceFix=useVoiceCorrection(voice,draft);const hold=useHoldToTalk({voice,onText:voiceFix.applyText});
+const voiceFix=useVoiceCorrection(voice,draft);
+// 与会话页同一套微信式交互：点麦克风进语音模式（输入框→整行语音条、麦克风→键盘键）
+const voiceMode=ref(false),textareaRef=ref<HTMLTextAreaElement|null>(null);
+const hold=useHoldToTalk({voice,onText:(recognized)=>{voiceFix.applyText(recognized);voiceMode.value=false;void nextTick(()=>textareaRef.value?.focus());}});
+function enterVoice():void{if(busy.value||voice.working.value)return;voiceMode.value=true;}
+function exitVoice():void{voiceMode.value=false;void nextTick(()=>textareaRef.value?.focus());}
 const mode=ref<'chat'|'task'>(props.section==='chat'?'chat':props.section==='work'?'task':preferences.value.defaultMode);
 const busy=computed(()=>run.inputLocked||props.controller.submitting.value);
 watch(()=>props.section,value=>{if(value)mode.value=value==='chat'?'chat':'task';});
@@ -37,7 +42,7 @@ const suggestions=computed(()=>identity.value==='volunteer'
 <div class="mobile-start-mode-row" role="group" :aria-label="tr('会话模式')"><button type="button" class="mobile-start-mode" :aria-pressed="mode==='chat'" @click="mode='chat'">{{tr('聊天')}}</button><button type="button" class="mobile-start-mode" :aria-pressed="mode==='task'" @click="mode='task'">{{tr('工作')}}</button></div>
 <p class="mobile-start-mode-hint">{{tr(mode==='task'?'可查询并准备办理单':'只查询，不办理业务')}}</p>
 <div v-if="voice.working.value" class="mobile-voice-bar" role="status" aria-live="polite"><span class="mobile-voice-dot" aria-hidden="true"></span><b>{{tr(voice.status.value==='transcribing'?'识别中…':voice.status.value==='requesting'?'等待麦克风…':'正在聆听')}}</b><span class="mobile-voice-time">{{Math.floor(voice.seconds.value)}}s / 60s</span><button type="button" @click="hold.cancel">{{tr('取消')}}</button></div>
-<div class="mobile-start-input-row"><label class="sr-only" for="mobile-question">{{tr('查询实验室，或准备办理工作…')}}</label><textarea id="mobile-question" v-model="draft" rows="2" maxlength="3000" :disabled="busy||voice.working.value" :placeholder="voice.working.value?tr('正在聆听，松手结束…'):tr('查询实验室，或准备办理工作…')" @keydown="key"/><button v-if="voice.supported.value" type="button" class="mobile-mic" :class="{'is-recording':voice.status.value==='recording'}" :disabled="busy" :aria-label="tr(voice.status.value==='recording'?'松手结束并识别':'按住说话')" v-on="hold.handlers"><UiIcon name="mic"/></button><button class="mobile-primary" :disabled="busy||!draft.trim()" type="submit"><UiIcon name="send"/>{{tr(busy?'生成中…':'发送')}}</button></div>
+<div class="mobile-start-input-row"><label class="sr-only" for="mobile-question">{{tr('查询实验室，或准备办理工作…')}}</label><button v-if="voice.supported.value&&!voiceMode" type="button" class="mobile-mic" :disabled="busy" :aria-label="tr('语音输入')" @click="enterVoice"><UiIcon name="mic"/></button><button v-else-if="voice.supported.value&&voiceMode" type="button" class="mobile-mic" :disabled="busy" :aria-label="tr('切换到键盘')" @click="exitVoice"><UiIcon name="keyboard"/></button><button v-if="voiceMode" type="button" class="mobile-speak" :class="{'is-recording':voice.status.value==='recording','is-sliding':hold.sliding.value}" :disabled="busy" v-on="hold.handlers"><span>{{tr(hold.sliding.value?'松开取消':voice.status.value==='recording'?'松开结束':'按住 说话')}}</span></button><textarea v-else ref="textareaRef" id="mobile-question" v-model="draft" rows="2" maxlength="3000" :disabled="busy||voice.working.value" :placeholder="voice.working.value?tr('正在聆听，松手结束…'):tr('查询实验室，或准备办理工作…')" @keydown="key"/><button v-if="!voiceMode" class="mobile-primary" :disabled="busy||!draft.trim()" type="submit"><UiIcon name="send"/>{{tr(busy?'生成中…':'发送')}}</button></div>
 <p v-if="controller.error.value" class="mobile-start-error" role="alert">{{controller.error.value}}</p>
 <p v-if="voiceHint" class="mobile-voice-hint" role="alert">{{voiceHint}}</p>
 <VoiceCorrectionBar :corrections="voice.lastCorrections.value" :original-text="voiceFix.originalText.value" :suppressed="voiceFix.suppressed.value" @restore="voiceFix.restore" @suppress="voiceFix.suppress" @unsuppress="voiceFix.unsuppress"/>

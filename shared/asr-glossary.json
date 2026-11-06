@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "note": "LabOps 语音输入实验室术语表（Tier B）v2。域按一手依据重定：本实验中心是计算机/电子类机房（依据：视觉项目设备词、主系统 CHECKS、seed location、课程名），不收化学玻璃仪器与生物器材。syll 为逐字无声调严格同音音节，与 canonical 码点 1:1；非汉字段原样小写保留（如「晚上AB节」的 a/b、「文渊E区」的 e）。aliases 是真实同音/近音误写（前后鼻音、平翘舌允许），只做精确串匹配，绝不参与音节推断。weight 1-5 对齐上游热词权重，为 vocabulary 通道预留。",
+  "version": 3,
+  "note": "LabOps 语音输入实验室术语表（Tier B）v3。域按一手依据定为计算机/电子类机房（视觉项目设备词、主系统 CHECKS、seed location、课程名），不收化学玻璃仪器与生物器材。syll 为逐字无声调严格同音，与 canonical 码点 1:1；非汉字段原样小写保留。aliases 是真实同音/近音误写，只做整串精确替换、绝不参与音节推断；**独立常用词一律不当别名**（保修/登机/接钥匙/节用等已删）。blockAfter 与 protect 用来挡住\"同音串其实是另一个词\"的情况——中文无词边界，音节匹配是定长滑窗，光靠\"词不在表里\"防不住。weight 1-5 对齐上游热词权重。",
   "domains": [
     "equipment",
     "check",
@@ -8,6 +8,17 @@
     "operation",
     "period",
     "document"
+  ],
+  "protect": [
+    "保修",
+    "登机",
+    "接手",
+    "教室",
+    "课标",
+    "班机",
+    "注记",
+    "学好",
+    "要是"
   ],
   "terms": [
     {
@@ -19,7 +30,8 @@
       ],
       "aliases": [],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "电脑",
@@ -31,7 +43,8 @@
         "点脑"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "主机",
@@ -43,7 +56,8 @@
         "住机"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "台式机",
@@ -57,7 +71,8 @@
         "台式鸡"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "笔记本",
@@ -70,7 +85,8 @@
         "比记本"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "服务器",
@@ -84,7 +100,8 @@
         "扶物器"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "显示器",
@@ -97,7 +114,8 @@
         "显式器"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "键盘",
@@ -109,7 +127,8 @@
         "见盘"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "鼠标",
@@ -121,7 +140,8 @@
         "书标"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "耳机",
@@ -133,7 +153,8 @@
         "二机"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "耳麦",
@@ -145,7 +166,8 @@
         "二埋"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "摄像头",
@@ -158,7 +180,8 @@
         "射像头"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "监控",
@@ -170,7 +193,8 @@
         "见孔"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "投影仪",
@@ -184,7 +208,8 @@
         "头影仪"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "幕布",
@@ -196,7 +221,8 @@
         "木不"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "白板",
@@ -208,7 +234,8 @@
         "百班"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "电子白板",
@@ -222,7 +249,8 @@
         "点子白板"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "打印机",
@@ -235,7 +263,8 @@
         "达印机"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "碎纸机",
@@ -248,7 +277,8 @@
         "岁纸机"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "处理器",
@@ -261,7 +291,8 @@
         "出理器"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "内存",
@@ -271,7 +302,8 @@
       ],
       "aliases": [],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "显卡",
@@ -281,7 +313,8 @@
       ],
       "aliases": [],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "硬盘",
@@ -291,7 +324,8 @@
       ],
       "aliases": [],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "固态硬盘",
@@ -305,7 +339,8 @@
         "固态硬拼"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "优盘",
@@ -317,7 +352,8 @@
         "有盘"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "移动硬盘",
@@ -331,7 +367,8 @@
         "以动硬盘"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "开发板",
@@ -344,7 +381,8 @@
         "开法板"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "单片机",
@@ -357,7 +395,8 @@
         "单片鸡"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "树莓派",
@@ -370,7 +409,8 @@
         "树没派"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "路由器",
@@ -383,7 +423,8 @@
         "露由器"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "交换机",
@@ -397,7 +438,8 @@
         "交话机"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "网线",
@@ -409,7 +451,8 @@
         "往线"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "数据线",
@@ -422,7 +465,8 @@
         "书据线"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "电源线",
@@ -435,7 +479,8 @@
         "店源线"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "电源",
@@ -448,7 +493,8 @@
         "垫源"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "插座",
@@ -461,7 +507,8 @@
         "茶做"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "插排",
@@ -473,7 +520,8 @@
         "查牌"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "排插",
@@ -485,7 +533,8 @@
         "牌查"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "稳压器",
@@ -498,7 +547,8 @@
         "纹压器"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "开关电源",
@@ -512,7 +562,8 @@
         "开关店源"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "空气开关",
@@ -526,7 +577,8 @@
         "空器开关"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "断路器",
@@ -539,7 +591,8 @@
         "端路器"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "配电箱",
@@ -552,7 +605,8 @@
         "配点箱"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "漏电保护",
@@ -566,7 +620,8 @@
         "落电保护"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "接地线",
@@ -579,7 +634,8 @@
         "姐地线"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "空调",
@@ -588,11 +644,12 @@
         "tiao"
       ],
       "aliases": [
-        "空条",
-        "恐调"
+        "恐调",
+        "空条"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "照明",
@@ -601,11 +658,11 @@
         "ming"
       ],
       "aliases": [
-        "赵明",
         "造明"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "灯具",
@@ -617,7 +674,8 @@
         "登具"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "门禁",
@@ -626,11 +684,19 @@
         "jin"
       ],
       "aliases": [
-        "门金",
-        "门进"
+        "门金"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": [
+        "入",
+        "出",
+        "来",
+        "去",
+        "内",
+        "外",
+        "后"
+      ]
     },
     {
       "canonical": "指纹仪",
@@ -643,7 +709,8 @@
         "指文仪"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "刷卡器",
@@ -656,7 +723,8 @@
         "耍卡器"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "窗帘",
@@ -668,7 +736,8 @@
         "床帘"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "门锁",
@@ -680,7 +749,8 @@
         "门缩"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "桌椅",
@@ -688,11 +758,10 @@
         "zhuo",
         "yi"
       ],
-      "aliases": [
-        "卓一"
-      ],
+      "aliases": [],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "万用表",
@@ -705,7 +774,8 @@
         "万用标"
       ],
       "weight": 5,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "示波器",
@@ -719,7 +789,8 @@
         "是波器"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "信号发生器",
@@ -734,7 +805,8 @@
         "信号发升器"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "频谱仪",
@@ -747,7 +819,8 @@
         "平谱仪"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "逻辑分析仪",
@@ -762,7 +835,8 @@
         "逻辑分息仪"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "电烙铁",
@@ -775,7 +849,8 @@
         "地烙铁"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "烙铁",
@@ -783,11 +858,10 @@
         "lao",
         "tie"
       ],
-      "aliases": [
-        "老铁"
-      ],
+      "aliases": [],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "焊接台",
@@ -800,7 +874,8 @@
         "含接台"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "热风枪",
@@ -813,7 +888,8 @@
         "热锋枪"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "吸锡器",
@@ -824,7 +900,8 @@
       ],
       "aliases": [],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "镊子",
@@ -836,7 +913,8 @@
         "聂子"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "剥线钳",
@@ -849,7 +927,8 @@
         "波线钱"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "压线钳",
@@ -862,7 +941,8 @@
         "牙线钱"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "测电笔",
@@ -875,7 +955,8 @@
         "则电壁"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "螺丝刀",
@@ -888,7 +969,8 @@
         "罗思刀"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "游标卡尺",
@@ -902,7 +984,8 @@
         "游标卡次"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "直尺",
@@ -914,7 +997,8 @@
         "直次"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "天平",
@@ -927,7 +1011,8 @@
         "添平"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "电子秤",
@@ -940,7 +1025,8 @@
         "电子成"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "温湿度计",
@@ -954,7 +1040,8 @@
         "纹湿度计"
       ],
       "weight": 3,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "计时器",
@@ -967,7 +1054,8 @@
         "记时器"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "灭火器",
@@ -980,7 +1068,8 @@
         "灭伙器"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "应急灯",
@@ -993,7 +1082,8 @@
         "应集灯"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "实验台",
@@ -1006,7 +1096,8 @@
         "实验抬"
       ],
       "weight": 4,
-      "domain": "equipment"
+      "domain": "equipment",
+      "blockAfter": []
     },
     {
       "canonical": "电源与设备",
@@ -1021,7 +1112,8 @@
         "电源与蛇备"
       ],
       "weight": 5,
-      "domain": "check"
+      "domain": "check",
+      "blockAfter": []
     },
     {
       "canonical": "门窗与清场",
@@ -1036,7 +1128,8 @@
         "门窗与清常"
       ],
       "weight": 5,
-      "domain": "check"
+      "domain": "check",
+      "blockAfter": []
     },
     {
       "canonical": "钥匙交接",
@@ -1050,7 +1143,8 @@
         "药时交接"
       ],
       "weight": 5,
-      "domain": "check"
+      "domain": "check",
+      "blockAfter": []
     },
     {
       "canonical": "未完成事项",
@@ -1065,7 +1159,8 @@
         "未完成事想"
       ],
       "weight": 4,
-      "domain": "check"
+      "domain": "check",
+      "blockAfter": []
     },
     {
       "canonical": "清场",
@@ -1078,7 +1173,8 @@
         "亲场"
       ],
       "weight": 5,
-      "domain": "check"
+      "domain": "check",
+      "blockAfter": []
     },
     {
       "canonical": "文渊",
@@ -1088,11 +1184,11 @@
       ],
       "aliases": [
         "文远",
-        "文园",
-        "文苑"
+        "文园"
       ],
       "weight": 5,
-      "domain": "place"
+      "domain": "place",
+      "blockAfter": []
     },
     {
       "canonical": "文渊E区",
@@ -1107,7 +1203,8 @@
         "文园E区"
       ],
       "weight": 4,
-      "domain": "place"
+      "domain": "place",
+      "blockAfter": []
     },
     {
       "canonical": "文渊D区",
@@ -1122,7 +1219,8 @@
         "文园D区"
       ],
       "weight": 4,
-      "domain": "place"
+      "domain": "place",
+      "blockAfter": []
     },
     {
       "canonical": "楼层",
@@ -1132,7 +1230,8 @@
       ],
       "aliases": [],
       "weight": 4,
-      "domain": "place"
+      "domain": "place",
+      "blockAfter": []
     },
     {
       "canonical": "签到",
@@ -1145,7 +1244,8 @@
         "铅到"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "签退",
@@ -1157,7 +1257,8 @@
         "千退"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "交接",
@@ -1170,7 +1271,8 @@
         "教接"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "巡检",
@@ -1183,7 +1285,8 @@
         "讯检"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "报修",
@@ -1192,11 +1295,11 @@
         "xiu"
       ],
       "aliases": [
-        "报休",
-        "保修"
+        "报休"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "停用",
@@ -1209,7 +1312,8 @@
         "停拥"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "调课",
@@ -1222,7 +1326,8 @@
         "条课"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "钥匙",
@@ -1235,7 +1340,8 @@
         "遥匙"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "借钥匙",
@@ -1244,11 +1350,10 @@
         "yao",
         "shi"
       ],
-      "aliases": [
-        "接钥匙"
-      ],
+      "aliases": [],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "还钥匙",
@@ -1261,7 +1366,8 @@
         "环钥匙"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "验收",
@@ -1274,7 +1380,8 @@
         "验手"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "开放登记",
@@ -1288,7 +1395,8 @@
         "开房登记"
       ],
       "weight": 3,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "值班",
@@ -1297,11 +1405,11 @@
         "ban"
       ],
       "aliases": [
-        "直办",
-        "知班"
+        "直办"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "排班",
@@ -1313,7 +1421,8 @@
         "牌班"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "工单",
@@ -1326,7 +1435,8 @@
         "工蛋"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "通知",
@@ -1338,7 +1448,8 @@
         "同知"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "检查清单",
@@ -1352,7 +1463,8 @@
         "检查青丹"
       ],
       "weight": 3,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "补全",
@@ -1364,7 +1476,8 @@
         "不泉"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "流转",
@@ -1376,7 +1489,8 @@
         "留转"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "接收",
@@ -1388,7 +1502,8 @@
         "节收"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "撤回",
@@ -1400,7 +1515,8 @@
         "车回"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "退回",
@@ -1412,7 +1528,8 @@
         "退汇"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "转派",
@@ -1424,7 +1541,8 @@
         "专拍"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "完成",
@@ -1432,11 +1550,10 @@
         "wan",
         "cheng"
       ],
-      "aliases": [
-        "万成"
-      ],
+      "aliases": [],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "异常",
@@ -1448,7 +1565,8 @@
         "一常"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "待确认",
@@ -1461,7 +1579,8 @@
         "带确认"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "未检查",
@@ -1474,7 +1593,8 @@
         "位检查"
       ],
       "weight": 3,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "已读",
@@ -1486,7 +1606,8 @@
         "一都"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "未读",
@@ -1498,7 +1619,8 @@
         "位都"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "备注",
@@ -1510,7 +1632,8 @@
         "背注"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "记录",
@@ -1522,7 +1645,8 @@
         "记露"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "节次",
@@ -1534,7 +1658,8 @@
         "接刺"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "周次",
@@ -1546,7 +1671,8 @@
         "州刺"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "学号",
@@ -1555,10 +1681,12 @@
         "hao"
       ],
       "aliases": [
-        "雪好"
+        "雪好",
+        "雪号"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "班级",
@@ -1570,7 +1698,8 @@
         "半技"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "课表",
@@ -1579,10 +1708,12 @@
         "biao"
       ],
       "aliases": [
-        "科标"
+        "科标",
+        "科表"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "教师",
@@ -1594,7 +1725,8 @@
         "教是"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "学生",
@@ -1606,7 +1738,8 @@
         "雪生"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "志愿者",
@@ -1620,7 +1753,8 @@
         "致愿者"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "管理员",
@@ -1633,7 +1767,8 @@
         "关理员"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "实验室",
@@ -1647,7 +1782,8 @@
         "事验室"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "房间号",
@@ -1660,7 +1796,8 @@
         "房坚号"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "设备",
@@ -1672,7 +1809,8 @@
         "蛇备"
       ],
       "weight": 5,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "器材",
@@ -1684,7 +1822,8 @@
         "其才"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "铭牌",
@@ -1696,7 +1835,8 @@
         "名排"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "容量",
@@ -1708,7 +1848,8 @@
         "熔量"
       ],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "登记",
@@ -1716,11 +1857,10 @@
         "deng",
         "ji"
       ],
-      "aliases": [
-        "登机"
-      ],
+      "aliases": [],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "借用",
@@ -1728,11 +1868,10 @@
         "jie",
         "yong"
       ],
-      "aliases": [
-        "节用"
-      ],
+      "aliases": [],
       "weight": 4,
-      "domain": "operation"
+      "domain": "operation",
+      "blockAfter": []
     },
     {
       "canonical": "上午第一大节",
@@ -1744,9 +1883,13 @@
         "da",
         "jie"
       ],
-      "aliases": [],
+      "aliases": [
+        "上舞第一大节",
+        "上武第一大节"
+      ],
       "weight": 5,
-      "domain": "period"
+      "domain": "period",
+      "blockAfter": []
     },
     {
       "canonical": "上午第二大节",
@@ -1758,9 +1901,13 @@
         "da",
         "jie"
       ],
-      "aliases": [],
+      "aliases": [
+        "上舞第二大节",
+        "上武第二大节"
+      ],
       "weight": 5,
-      "domain": "period"
+      "domain": "period",
+      "blockAfter": []
     },
     {
       "canonical": "下午第一大节",
@@ -1772,9 +1919,13 @@
         "da",
         "jie"
       ],
-      "aliases": [],
+      "aliases": [
+        "下舞第一大节",
+        "下武第一大节"
+      ],
       "weight": 5,
-      "domain": "period"
+      "domain": "period",
+      "blockAfter": []
     },
     {
       "canonical": "下午第二大节",
@@ -1786,9 +1937,13 @@
         "da",
         "jie"
       ],
-      "aliases": [],
+      "aliases": [
+        "下舞第二大节",
+        "下武第二大节"
+      ],
       "weight": 5,
-      "domain": "period"
+      "domain": "period",
+      "blockAfter": []
     },
     {
       "canonical": "晚上AB节",
@@ -1799,9 +1954,13 @@
         "b",
         "jie"
       ],
-      "aliases": [],
+      "aliases": [
+        "晚尚AB节",
+        "网上AB节"
+      ],
       "weight": 5,
-      "domain": "period"
+      "domain": "period",
+      "blockAfter": []
     },
     {
       "canonical": "晚上CD节",
@@ -1812,9 +1971,13 @@
         "d",
         "jie"
       ],
-      "aliases": [],
+      "aliases": [
+        "晚尚CD节",
+        "网上CD节"
+      ],
       "weight": 5,
-      "domain": "period"
+      "domain": "period",
+      "blockAfter": []
     },
     {
       "canonical": "报修单",
@@ -1827,7 +1990,8 @@
         "报修丹"
       ],
       "weight": 4,
-      "domain": "document"
+      "domain": "document",
+      "blockAfter": []
     },
     {
       "canonical": "停用单",
@@ -1840,7 +2004,8 @@
         "停用丹"
       ],
       "weight": 4,
-      "domain": "document"
+      "domain": "document",
+      "blockAfter": []
     },
     {
       "canonical": "交接单",
@@ -1853,7 +2018,8 @@
         "交接丹"
       ],
       "weight": 4,
-      "domain": "document"
+      "domain": "document",
+      "blockAfter": []
     },
     {
       "canonical": "值班表",
@@ -1866,7 +2032,8 @@
         "直班表"
       ],
       "weight": 4,
-      "domain": "document"
+      "domain": "document",
+      "blockAfter": []
     },
     {
       "canonical": "签到表",
@@ -1879,7 +2046,8 @@
         "千到表"
       ],
       "weight": 4,
-      "domain": "document"
+      "domain": "document",
+      "blockAfter": []
     },
     {
       "canonical": "检查表",
@@ -1892,7 +2060,14 @@
         "检查标"
       ],
       "weight": 4,
-      "domain": "document"
+      "domain": "document",
+      "blockAfter": [
+        "准",
+        "确",
+        "志",
+        "示",
+        "明"
+      ]
     },
     {
       "canonical": "日报",
@@ -1901,10 +2076,12 @@
         "bao"
       ],
       "aliases": [
-        "日抱"
+        "日抱",
+        "一日包"
       ],
       "weight": 4,
-      "domain": "document"
+      "domain": "document",
+      "blockAfter": []
     }
   ]
 }

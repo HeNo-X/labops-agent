@@ -66,7 +66,14 @@
       ],
       "asrText": "e31o 这节有课吗",
       "referenceText": "E310 这节有课吗",
-      "note": "已知不覆盖：正则只吃到 e31，与 e310 不等长，现有等长规则按设计放弃"
+      "note": "已知不覆盖：正则只吃到 e31，与 e310 不等长，现有等长规则按设计放弃",
+      "declinedTerms": [
+        "E310"
+      ],
+      "mustRemain": [
+        "e31o"
+      ],
+      "declineWhy": "正则只吃到 e31，与 e310 不等长；补全等于凭空加字，现有\"必须等长\"规则按设计放弃"
     },
     {
       "id": "room-006",
@@ -304,7 +311,14 @@
       ],
       "asrText": "店源和查牌都要保修",
       "referenceText": "电源和插排都要报修",
-      "note": "一句三词"
+      "note": "一句三词",
+      "declinedTerms": [
+        "报修"
+      ],
+      "mustRemain": [
+        "保修"
+      ],
+      "declineWhy": "保修是独立常用词"
     },
     {
       "id": "eq-018",
@@ -434,7 +448,14 @@
       ],
       "asrText": "赵明有两盏不亮",
       "referenceText": "照明有两盏不亮",
-      "note": "二字"
+      "note": "二字",
+      "declinedTerms": [
+        "照明"
+      ],
+      "mustRemain": [
+        "赵明"
+      ],
+      "declineWhy": "赵明是人名，不能假定说错"
     },
     {
       "id": "eq-028",
@@ -579,7 +600,14 @@
       ],
       "asrText": "文苑那边几点开门",
       "referenceText": "文渊那边几点开门",
-      "note": "二字"
+      "note": "二字",
+      "declinedTerms": [
+        "文渊"
+      ],
+      "mustRemain": [
+        "文苑"
+      ],
+      "declineWhy": "文苑是独立词/品牌名"
     },
     {
       "id": "op-001",
@@ -644,7 +672,14 @@
       ],
       "asrText": "这台我要保修",
       "referenceText": "这台我要报修",
-      "note": "保修本身是真实词，风险最高的一档"
+      "note": "保修本身是真实词，风险最高的一档",
+      "declinedTerms": [
+        "报修"
+      ],
+      "mustRemain": [
+        "保修"
+      ],
+      "declineWhy": "保修是独立常用词，改它就是改错"
     },
     {
       "id": "op-006",
@@ -973,7 +1008,14 @@
       ],
       "asrText": "把设备登机一下",
       "referenceText": "把设备登记一下",
-      "note": "二字，登机是真实词"
+      "note": "二字，登机是真实词",
+      "declinedTerms": [
+        "登记"
+      ],
+      "mustRemain": [
+        "登机"
+      ],
+      "declineWhy": "登机是独立常用词"
     },
     {
       "id": "pd-001",

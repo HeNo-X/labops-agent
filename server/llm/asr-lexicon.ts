@@ -18,7 +18,7 @@
  *  4) 每条改动都记录 from/to/kind/at，随响应回传
  */
 
-export type TermKind = 'room' | 'class' | 'course';
+export type TermKind = 'room' | 'class' | 'course' | 'term';
 
 export interface LexiconEntry {
   /** 标准写法，用于替换 */
@@ -26,6 +26,16 @@ export interface LexiconEntry {
   /** 归一化后的比较键 */
   norm: string;
   kind: TermKind;
+  /**
+   * Tier B 专用：逐字无声调音节的连写（如「移液枪」→ yiyeqiang）。
+   * 有它才允许 2–3 字短词参与纠错，且只接受**完全同音**；没有它的条目维持原来的
+   * ≥4 字 + 等长编辑距离 ≤1 规则，一字不改。
+   */
+  sy?: string;
+  /** Tier B 专用：已登记的同音/近音误写，做表层精确替换 */
+  aliases?: string[];
+  /** Tier B 专用：后邻这些字时不改（同音串只是另一个词的开头，如「门进入」） */
+  blockAfter?: string[];
 }
 
 export interface Correction {
@@ -36,6 +46,11 @@ export interface Correction {
   kind: TermKind;
   /** 在原文中的起始下标 */
   at: number;
+  /**
+   * 靠什么判定的。回传给界面与评测，是为了让"这条改动有多硬"可审计：
+   * exact/alias 是确定命中，distance 是等长一字之差，syllable 是完全同音。
+   */
+  via: 'exact' | 'distance' | 'syllable' | 'alias';
 }
 
 export interface CorrectResult {
@@ -157,6 +172,12 @@ const ROOM_CANDIDATE = /[A-Za-z]{1,4}[\s\-]?(?:\d{2,5}|[零〇幺一二三四五
 const MAX_CORRECTIONS = 10;
 const MAX_CN_SCAN_CHARS = 1000;
 const MIN_CN_TERM_LENGTH = 4;
+/**
+ * 第三遍（同音）的最短长度。之所以敢比 MIN_CN_TERM_LENGTH 低两档：
+ * 它要求**逐字完全同音**，而不是字符距离接近 —— 约束强得多。
+ * 但单字仍然排除在外：一个音节对应的候选字实在太多，没有区分度。
+ */
+const MIN_SYLLABLE_TERM_LENGTH = 2;
 
 interface Planned {
   at: number;
@@ -164,18 +185,75 @@ interface Planned {
   correction: Correction;
 }
 
+/** Tier B 同音纠错需要的三份外部数据，都由 asr-glossary 派生，本模块保持纯函数、不自己读文件 */
+export interface CorrectOptions {
+  /** 汉字 → 无声调音节。表里没有的字 → 该窗口直接不改（未知即不改） */
+  syllables?: ReadonlyMap<string, string>;
+  /** 与术语同音的常用词（保修/登机/教室…），命中即整窗不改 */
+  protect?: ReadonlySet<string>;
+  /** 一个音节串对应多个标准词的歧义键，整键跳过 —— 同音歧义下任何选择都是猜 */
+  ambiguous?: ReadonlySet<string>;
+}
+
+/**
+ * 把一段窗口按字查音节。任一字不在表里就返回 null（不改）。
+ * ASCII 字母按字面小写返回，对应「晚上AB节」「文渊E区」里那几个拉丁段的音节；
+ * 代理对（罕见，emoji 等）直接判 null，避免下标错位。
+ */
+function windowSyllables(text: string, at: number, size: number, table: ReadonlyMap<string, string>): string | null {
+  let out = '';
+  for (let i = at; i < at + size; i += 1) {
+    const ch = text[i]!;
+    const code = text.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdfff) return null; // 非 BMP，跳过
+    if (/[a-z]/i.test(ch)) {
+      out += ch.toLowerCase();
+      continue;
+    }
+    const syllable = table.get(ch);
+    if (!syllable) return null; // 未知字 → 整个窗口不参与
+    out += syllable;
+  }
+  return out;
+}
+
+/** 同音串是否只是另一个词的开头（「门进」+「入」） */
+function blockedAt(text: string, at: number, length: number, entry: LexiconEntry): boolean {
+  const next = text[at + length];
+  if (next === undefined) return false;
+  return (entry.blockAfter ?? []).includes(next);
+}
+
+/** 找出 word 在 text 里的所有起点（简单 indexOf 循环，语音短句长度上限 1000 内足够） */
+function findAll(text: string, word: string): number[] {
+  const hits: number[] = [];
+  if (!word) return hits;
+  for (let at = text.indexOf(word); at >= 0; at = text.indexOf(word, at + word.length)) hits.push(at);
+  return hits;
+}
+
 /**
  * 对转写文本做专有名词纠错。
  * @param text ASR 原始文本
- * @param lexicon buildLexicon / lexiconFromDataset 的产物
+ * @param lexicon buildLexicon / lexiconFromDataset / 术语表转换的产物
+ * @param opts Tier B 同音纠错所需三份数据；不传则**只做原来的 Tier A 规则**，行为与升级前一致
  */
-export function correctTranscript(text: string, lexicon: readonly LexiconEntry[]): CorrectResult {
+export function correctTranscript(text: string, lexicon: readonly LexiconEntry[], opts: CorrectOptions = {}): CorrectResult {
   if (!text || !lexicon.length) return { text, corrections: [], aborted: false };
 
   const planned: Planned[] = [];
-  const rooms = lexicon.filter((entry) => entry.kind === 'room');
+  /** 已经被占用的区间不再改，避免两遍规则叠在同一处反复替换 */
+  const covered = (start: number, end: number): boolean =>
+    planned.some((item) => start < item.at + item.length && end > item.at);
+  const push = (at: number, length: number, to: string, kind: TermKind, via: Correction['via']): void => {
+    if (covered(at, at + length)) return;
+    planned.push({ at, length, correction: { from: text.slice(at, at + length), to, kind, at, via } });
+  };
+
+  const rooms = lexicon.filter((entry) => entry.kind === 'room' && !entry.sy);
+  // 带 sy 的条目走第三遍，不参与"≥4 字 + 等长距离"那条老路
   const words = lexicon.filter(
-    (entry) => entry.kind !== 'room' && entry.canonical.length >= MIN_CN_TERM_LENGTH
+    (entry) => entry.kind !== 'room' && !entry.sy && entry.canonical.length >= MIN_CN_TERM_LENGTH
   );
 
   // ---------- 第一遍：房间号（正则定位，永远不猜裸数字） ----------
@@ -207,16 +285,13 @@ export function correctTranscript(text: string, lexicon: readonly LexiconEntry[]
       }
       if (!best) continue;
       if (raw === best.canonical) continue;
-      planned.push({ at, length: raw.length, correction: { from: raw, to: best.canonical, kind: 'room', at } });
+      push(at, raw.length, best.canonical, 'room', best.norm === key ? 'exact' : 'distance');
     }
   }
 
-  // ---------- 第二遍：中文班级名/课程名（滑动窗口 + 编辑距离） ----------
+  // ---------- 第二遍：中文班级名/课程名（滑动窗口 + 编辑距离）----------
   // 文本过长时跳过：这类文本本身不像一句口头指令，纠错收益低而代价高
   if (words.length && text.length <= MAX_CN_SCAN_CHARS) {
-    const covered = (start: number, end: number): boolean =>
-      planned.some((item) => start < item.at + item.length && end > item.at);
-
     for (const entry of words) {
       const sizes = [entry.canonical.length, entry.canonical.length - 1, entry.canonical.length + 1];
       // 词越短越容易撞车：4 字要求完全一致，5 字以上才容忍 1 字误差
@@ -236,17 +311,51 @@ export function correctTranscript(text: string, lexicon: readonly LexiconEntry[]
           if (exact || fuzzy) {
             // 已经就是标准写法，不用改
             if (window === entry.canonical) done = true;
-            else if (!covered(start, start + size)) {
-              planned.push({
-                at: start,
-                length: size,
-                correction: { from: window, to: entry.canonical, kind: entry.kind, at: start }
-              });
+            else {
+              push(start, size, entry.canonical, entry.kind, exact ? 'exact' : 'distance');
               done = true;
             }
             break;
           }
         }
+      }
+    }
+  }
+
+  // ---------- 第三遍：Tier B 同音纠错（器材/操作/节次/单据，2 字起）----------
+  // 这是唯一被允许降到 2 字门槛的路径，因为它要求**完全同音**，而不是字符距离接近。
+  // 四道闸门，任一不过就不改：歧义音节键 → 保护词 → 未知字 → 邻接阻断。
+  const termEntries = lexicon.filter((entry) => entry.sy && entry.kind !== 'room');
+  if (termEntries.length && opts.syllables?.size && text.length <= MAX_CN_SCAN_CHARS) {
+    const table = opts.syllables;
+    const ambiguous = opts.ambiguous ?? new Set<string>();
+    const protect = opts.protect ?? new Set<string>();
+
+    for (const entry of termEntries) {
+      const sy = entry.sy!;
+      // ① 同音歧义键整键跳过：一个读音对应多个标准词时，选谁都等于在猜
+      if (ambiguous.has(sy)) continue;
+
+      // ② 别名：表层精确替换。命中即改——别名是我们逐条人工保证过的真实误写形态
+      for (const alias of entry.aliases ?? []) {
+        if (!alias || alias === entry.canonical || protect.has(alias)) continue;
+        for (const at of findAll(text, alias)) {
+          if (blockedAt(text, at, alias.length, entry)) continue;
+          push(at, alias.length, entry.canonical, entry.kind, 'alias');
+        }
+      }
+
+      // ③ 音节滑窗：定长、逐字可查、连读完全等于 sy 才改
+      const size = Array.from(entry.canonical).length;
+      if (size < MIN_SYLLABLE_TERM_LENGTH) continue; // 单字绝不参与（同音字海了去了）
+      for (let at = 0; at + size <= text.length; at += 1) {
+        const window = text.slice(at, at + size);
+        if (window === entry.canonical) continue; // 本来就是对的
+        if (protect.has(window)) continue; // ④ 同音常用词，永不替换
+        if (blockedAt(text, at, size, entry)) continue;
+        const key = windowSyllables(text, at, size, table);
+        if (key !== sy) continue; // 含表外字 → key=null → 不改
+        push(at, size, entry.canonical, entry.kind, 'syllable');
       }
     }
   }

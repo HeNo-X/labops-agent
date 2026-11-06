@@ -19,16 +19,18 @@ import {
   charSyllableTable,
   glossaryFingerprint,
   buildContextText,
+  type AsrDomain,
   type GlossaryTerm
 } from '../server/llm/asr-glossary.ts';
 
-const term = (canonical: string, syll: string[], aliases: string[] = [], weight = 3, domain = 'equipment'): GlossaryTerm => ({
+const term = (canonical: string, syll: string[], aliases: string[] = [], weight = 3, domain: AsrDomain = 'equipment', blockAfter: string[] = []): GlossaryTerm => ({
   canonical,
   syll,
   sy: syll.join(''),
   aliases,
   weight,
-  domain
+  domain,
+  blockAfter
 });
 
 // ---------------------------------------------------------------- 真表自检
@@ -52,7 +54,7 @@ test('装载即派生 sy，且 sy 是 syll 的连写（匹配层依赖这个一�
 test('术语表规模与域覆盖：不少于 120 条，六个域都有，2–3 字词确有覆盖', () => {
   const terms = loadGlossary();
   assert.ok(terms.length >= 120, `术语表只有 ${terms.length} 条`);
-  const domains = new Set(terms.map((t) => t.domain));
+  const domains: Set<string> = new Set(terms.map((t) => t.domain));
   for (const d of ['equipment', 'check', 'place', 'operation', 'period', 'document']) assert.ok(domains.has(d), `缺域 ${d}`);
   const short = terms.filter((t) => Array.from(t.canonical).length <= 3);
   assert.ok(short.length >= 40, `2–3 字短词只有 ${short.length} 条，不足以支撑 B3 的降门槛`);

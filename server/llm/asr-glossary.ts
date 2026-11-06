@@ -22,6 +22,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { PROJECT_ROOT } from '../config.ts';
+import { normalizeForKey, type LexiconEntry } from './asr-lexicon.ts';
 
 export type AsrDomain = 'equipment' | 'check' | 'place' | 'operation' | 'period' | 'document';
 
@@ -37,19 +38,35 @@ export interface GlossaryTerm {
   /** 1–5，语义对齐上游热词权重（5 最强）；为后续 vocabulary 通道预留 */
   weight: number;
   domain: AsrDomain;
+  /**
+   * 后邻这些字时**整窗不改**。中文没有词边界，同音串常常只是另一个词的开头：
+   * 「门进入」里的"门进"不是门禁，「检查标准」里的"检查标"不是检查表。
+   */
+  blockAfter: string[];
+}
+
+export interface GlossaryData {
+  terms: GlossaryTerm[];
+  /**
+   * 与术语同音的**高频常用词**，永不允许被替换。
+   * ⚠ 删别名并不解决这件事：音节匹配本来就是"任何同音串都可能命中"，
+   *   所以 保修/报修、登机/登记、教室/教师 这类冲突必须显式挡住，而不是指望别名表干净。
+   */
+  protect: string[];
 }
 
 export interface GlossaryFile {
   version: number;
   domains: string[];
+  protect?: string[];
   terms: GlossaryTerm[];
 }
 
 const GLOSSARY_PATH = path.join(PROJECT_ROOT, 'shared', 'asr-glossary.json');
 const VALID_DOMAINS: readonly string[] = ['equipment', 'check', 'place', 'operation', 'period', 'document'];
 
-/** 装载术语表。形状不符即抛 —— 静默返回空数组会让"术语表没生效"变成隐形故障。 */
-export function loadGlossary(file = GLOSSARY_PATH): GlossaryTerm[] {
+/** 装载术语表 + 保护词表。形状不符即抛 —— 静默返回空表会让"术语表没生效"变成隐形故障。 */
+export function loadGlossaryData(file = GLOSSARY_PATH): GlossaryData {
   if (!fs.existsSync(file)) {
     throw new Error(`缺少术语表文件：${path.relative(PROJECT_ROOT, file)}（B1 产物，不可缺失）`);
   }
@@ -59,24 +76,38 @@ export function loadGlossary(file = GLOSSARY_PATH): GlossaryTerm[] {
   } catch (err) {
     throw new Error(`术语表 JSON 解析失败：${(err as Error).message}`);
   }
-  const root = raw as { version?: unknown; terms?: unknown };
+  const root = raw as { version?: unknown; protect?: unknown; terms?: unknown };
   if (!Array.isArray(root.terms)) throw new Error('术语表缺少 terms 数组');
-  const out: GlossaryTerm[] = [];
+  const terms: GlossaryTerm[] = [];
   for (const item of root.terms as unknown[]) {
     const t = item as Record<string, unknown>;
     const canonical = typeof t['canonical'] === 'string' ? t['canonical'].trim() : '';
     const syll = Array.isArray(t['syll']) ? (t['syll'] as unknown[]).map((s) => (typeof s === 'string' ? s : '')) : [];
     const aliases = Array.isArray(t['aliases']) ? (t['aliases'] as unknown[]).filter((a): a is string => typeof a === 'string' && a.trim() !== '') : [];
+    const blockAfter = Array.isArray(t['blockAfter'])
+      ? (t['blockAfter'] as unknown[]).filter((c): c is string => typeof c === 'string' && Array.from(c).length === 1)
+      : [];
     const weight = typeof t['weight'] === 'number' ? t['weight'] : 0;
     const domain = typeof t['domain'] === 'string' ? t['domain'] : '';
     if (!canonical) throw new Error('术语表条目缺 canonical');
     if (!VALID_DOMAINS.includes(domain)) throw new Error(`术语表条目 ${canonical} 的 domain 非法：${domain || '(空)'}`);
-    out.push({ canonical, syll, sy: syll.join(''), aliases, weight, domain: domain as AsrDomain });
+    terms.push({ canonical, syll, sy: syll.join(''), aliases, weight, domain: domain as AsrDomain, blockAfter });
   }
+  const protect = Array.isArray(root.protect)
+    ? [...new Set((root.protect as unknown[]).filter((p): p is string => typeof p === 'string' && Array.from(p).length >= 2))]
+    : [];
   // 装载即自检：坏表不许上线（B1 的验收硬条件之一）
-  const problems = validateGlossary(out);
+  const problems = validateGlossary(terms);
   if (problems.length) throw new Error(`术语表校验未通过（${problems.length} 项）：\n  ${problems.slice(0, 20).join('\n  ')}`);
-  return out;
+  // protect 里若有串正好等于某标准词，会把该词自己的纠错也挡掉 —— 属于自废武功
+  const clash = protect.filter((p) => terms.some((t) => t.canonical === p));
+  if (clash.length) throw new Error(`protect 含与标准词同名的串，会挡住它自己的纠错：${clash.join('、')}`);
+  return { terms, protect };
+}
+
+/** 只要词条（需要 protect 时改用 loadGlossaryData） */
+export function loadGlossary(file = GLOSSARY_PATH): GlossaryTerm[] {
+  return loadGlossaryData(file).terms;
 }
 
 /**
@@ -174,10 +205,27 @@ export function charSyllableTable(terms: readonly GlossaryTerm[]): Map<string, s
   return seen;
 }
 
-/** 表指纹：进缓存键与评测报告，改了词表一定看得见，不会"改了但没生效" */
-export function glossaryFingerprint(terms: readonly GlossaryTerm[]): string {
-  const digest = crypto.createHash('sha256').update(terms.map((t) => `${t.canonical}\u0000${t.sy}\u0000${t.aliases.join('\u0001')}\u0000${t.weight}`).join('\u0002')).digest('hex');
-  return digest.slice(0, 12);
+/**
+ * 把术语表转成 asr-lexicon 的词典条目。
+ * 依赖方向是单向的：本模块知道 LexiconEntry 的形状，asr-lexicon 不认识术语表。
+ */
+export function glossaryToLexicon(terms: readonly GlossaryTerm[]): LexiconEntry[] {
+  return terms.map((t) => ({
+    canonical: t.canonical,
+    norm: normalizeForKey(t.canonical),
+    kind: 'term' as const,
+    sy: t.sy,
+    aliases: t.aliases,
+    blockAfter: t.blockAfter
+  }));
+}
+
+/** 表指纹：进缓存键与评测报告，改了词表（含 protect / blockAfter）一定看得见，不会"改了但没生效" */
+export function glossaryFingerprint(terms: readonly GlossaryTerm[], protect: readonly string[] = []): string {
+  const body = terms
+    .map((t) => `${t.canonical}\u0000${t.sy}\u0000${t.aliases.join('\u0001')}\u0000${t.weight}\u0000${t.blockAfter.join('')}`)
+    .join('\u0002') + `\u0003protect=${protect.join('|')}`;
+  return crypto.createHash('sha256').update(body).digest('hex').slice(0, 12);
 }
 
 export interface ContextTextOptions {

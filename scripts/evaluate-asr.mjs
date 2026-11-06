@@ -42,7 +42,7 @@ process.env.LABOPS_AUTH_MODE = 'demo';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'labops-asr-eval-'));
 process.env.LABOPS_DB_PATH = path.join(temp, 'eval.sqlite');
 
-const { loadGlossary, validateGlossary, ambiguousSyllables, charSyllableTable, glossaryFingerprint, buildContextText } = await import('../server/llm/asr-glossary.ts');
+const { loadGlossaryData, glossaryToLexicon, validateGlossary, ambiguousSyllables, charSyllableTable, glossaryFingerprint } = await import('../server/llm/asr-glossary.ts');
 const { loadDataset } = await import('../server/data/store.ts');
 const { lexiconFromDataset, correctTranscript } = await import('../server/llm/asr-lexicon.ts');
 
@@ -64,6 +64,8 @@ const countPresent = (text, terms) => {
 
 /**
  * 对一批场景算指标。分母为 0 一律返回 null —— 报 0% 会把"没测到"伪装成"测得很差"。
+ * declinedTerms 不计入分母：那些是**设计决定不纠**的词（同音的独立常用词，改了才是错），
+ * 把它们算成失败会同时低估纠错层、并把安全决策伪装成缺陷。
  */
 function score(rows, apply) {
   let targetTotal = 0;
@@ -72,17 +74,41 @@ function score(rows, apply) {
   const misses = [];
   const outputs = rows.map((s) => {
     const out = apply(s.asrText);
-    const ok = countPresent(out.text, s.targetTerms);
-    const bad = countPresent(out.text, s.forbiddenTerms ?? []);
-    targetTotal += s.targetTerms.length;
+    const declined = new Set(s.declinedTerms ?? []);
+    const counted = s.targetTerms.filter((t) => !declined.has(t));
+    const ok = countPresent(out.text, counted);
+    const bad = countPresent(out.text, (s.forbiddenTerms ?? []).filter((f) => !declinedSurface(s, f)));
+    targetTotal += counted.length;
     targetFound += ok.present;
     forbiddenFound += bad.present;
-    for (const t of s.targetTerms) if (!ok.hits.includes(t)) misses.push({ id: s.id, missing: t, output: out.text });
-    return { id: s.id, ...out, present: ok.hits, missing: s.targetTerms.filter((t) => !ok.hits.includes(t)) };
+    for (const t of counted) if (!ok.hits.includes(t)) misses.push({ id: s.id, missing: t, output: out.text });
+    return { id: s.id, ...out, present: ok.hits, missing: counted.filter((t) => !ok.hits.includes(t)) };
   });
   const recall = targetTotal > 0 ? targetFound / targetTotal : null;
   const precision = targetFound + forbiddenFound > 0 ? targetFound / (targetFound + forbiddenFound) : null;
   return { rows: outputs, targetTotal, targetFound, forbiddenFound, recall, precision, misses };
+}
+
+/** 被豁免的误写串（不许当成"写法错误"计进精确率分母，它是我们故意留着的） */
+function declinedSurface(s, surface) {
+  return (s.mustRemain ?? []).includes(surface);
+}
+
+/**
+ * 安全审计：declined 场景里那些误写串必须**仍然原样在输出里**。
+ * 一旦哪条被改了，说明豁免失效 —— 那是把常用词改成术语的实锤误改。
+ */
+function declineAudit(rows, apply) {
+  const broken = [];
+  let checked = 0;
+  for (const s of rows) {
+    for (const surface of s.mustRemain ?? []) {
+      checked += 1;
+      const out = apply(s.asrText);
+      if (!out.text.includes(surface)) broken.push({ id: s.id, surface, output: out.text });
+    }
+  }
+  return { checked, broken };
 }
 
 /** 误改率：control 样本（原文即标准答案）被改掉的字符数 / 总字符数。必须 0。 */
@@ -124,7 +150,8 @@ try {
   datasetError = err instanceof Error ? err.message : String(err);
 }
 
-const glossary = loadGlossary();
+const glossaryData = loadGlossaryData();
+const glossary = glossaryData.terms;
 const glossaryProblems = validateGlossary(glossary);
 const ambiguous = ambiguousSyllables(glossary);
 const syllTable = charSyllableTable(glossary);
@@ -134,6 +161,17 @@ const applyCurrent = (text) => {
   return { text: r.text, corrections: r.corrections, aborted: r.aborted };
 };
 const applyRaw = (text) => ({ text, corrections: [] });
+
+/**
+ * 新层（B3）：Tier A ∪ Tier B + 音节/保护/歧义三份数据。
+ * 口径必须与 server/api/transcribe.ts 的 currentBundle() 一致，否则测的就不是线上跑的。
+ */
+const mergedEntries = [...tierA, ...glossaryToLexicon(glossary)];
+const mergedOpts = { syllables: syllTable, protect: new Set(glossaryData.protect), ambiguous };
+const applyMerged = (text) => {
+  const r = correctTranscript(text, mergedEntries, mergedOpts);
+  return { text: r.text, corrections: r.corrections, aborted: r.aborted };
+};
 
 const termRows = suite.scenarios.filter((s) => s.kind === 'term');
 const controlRows = suite.scenarios.filter((s) => s.kind === 'control');
@@ -147,7 +185,8 @@ for (const d of new Set(termRows.map((s) => domainOf(s.id)))) {
     scenarios: rows.length,
     rawRecall: score(rows, applyRaw).recall,
     currentRecall: score(rows, applyCurrent).recall,
-    currentPrecision: score(rows, applyCurrent).precision
+    mergedRecall: score(rows, applyMerged).recall,
+    mergedPrecision: score(rows, applyMerged).precision
   };
 }
 
@@ -167,8 +206,9 @@ const result = {
     datasetBasis,
     datasetError,
     tierAEntries: tierA.length,
-    glossaryFingerprint: glossaryFingerprint(glossary),
+    glossaryFingerprint: glossaryFingerprint(glossary, glossaryData.protect),
     glossaryTerms: glossary.length,
+    glossaryProtect: glossaryData.protect,
     glossaryValidationProblems: glossaryProblems,
     ambiguousSyllableKeys: [...ambiguous],
     charSyllableTableSize: syllTable.size
@@ -176,15 +216,20 @@ const result = {
   metrics: {
     raw: score(termRows, applyRaw),
     current: score(termRows, applyCurrent),
+    merged: score(termRows, applyMerged),
     perDomain,
     harmful: harmfulness(controlRows, applyCurrent),
-    e2eToolHit: { status: 'not_run', reason: 'B1 未把识别文本接进 Agent 工具选择；B2/B3 落地后补' }
+    harmfulMerged: harmfulness(controlRows, applyMerged),
+    /** 刻意不纠的豁免是否真的守住了（被改了就是误改实锤） */
+    declineAuditMerged: declineAudit(termRows, applyMerged),
+    declinedScenarios: termRows.filter((s) => (s.declinedTerms ?? []).length).map((s) => ({ id: s.id, terms: s.declinedTerms, why: s.declineWhy })),
+    e2eToolHit: { status: 'not_run', reason: '尚未把识别文本接进 Agent 工具选择；B2 之后补' }
   },
   gap: {
     shortTermTargets: shortTargets.size,
     shortCoveredByGlossary: shortInGlossary.length,
     shortNotInGlossary: shortMissingGlossary,
-    note: '2–3 字目标词目前完全不受现有纠正层保护（MIN_CN_TERM_LENGTH=4 且只认字符距离）；glossary 已备好音节键，等 B3 接线。'
+    note: '2–3 字词在 current 口径（只有 Tier A）下完全不受保护；merged 口径已按完全同音接入，两者之差就是 B3 补上的量。'
   },
   notVerified: [
     '上游偏置（实体词表上下文 / asr_options.language / enable_itn）的效果**本模式测不到**——文本层不经过模型。需 --mode=live + 真实录音。',
@@ -206,16 +251,16 @@ if (mode === 'live') {
   if (!isAsrConfigured()) missing.push('未配置 ASR Key（ASR_API_KEY 或 DASHSCOPE_API_KEY）');
   if (!fs.existsSync(audioDir) || !fs.existsSync(manifestPath) || !isAsrConfigured()) {
     result.live = { status: 'not_run', reason: missing.join('；'), model: cfg.model, protocol: cfg.protocol };
-    result.metrics = { raw: null, current: null, perDomain: null, harmful: null, e2eToolHit: result.metrics.e2eToolHit };
+    result.metrics = { raw: null, current: null, merged: null, perDomain: null, harmful: null, harmfulMerged: null, e2eToolHit: result.metrics.e2eToolHit };
   } else {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     const absent = manifest.recordings.filter((r) => !fs.existsSync(path.join(audioDir, r.file)));
     if (!flag('execute')) {
       result.live = { status: 'dry_run', reason: '未加 --execute，默认不发请求、不烧每小时配额', recordings: manifest.recordings.length, missingFiles: absent.map((r) => r.file) };
-      result.metrics = { raw: null, current: null, perDomain: null, harmful: null, e2eToolHit: result.metrics.e2eToolHit };
+      result.metrics = { raw: null, current: null, merged: null, perDomain: null, harmful: null, harmfulMerged: null, e2eToolHit: result.metrics.e2eToolHit };
     } else if (absent.length) {
       result.live = { status: 'not_run', reason: `清单里 ${absent.length} 个音频文件不存在：${absent.slice(0, 5).map((r) => r.file).join(', ')}` };
-      result.metrics = { raw: null, current: null, perDomain: null, harmful: null, e2eToolHit: result.metrics.e2eToolHit };
+      result.metrics = { raw: null, current: null, merged: null, perDomain: null, harmful: null, harmfulMerged: null, e2eToolHit: result.metrics.e2eToolHit };
     } else {
       // 真跑：逐条转写 → 过纠正层 → 与 referenceText 比。这是 B2 开/关对比的同一套管线。
       const { transcribeAudio } = await import('../server/llm/asr.ts');
@@ -228,7 +273,7 @@ if (mode === 'live') {
           rows.push({ id: r.id, status: 'failed', code: res.code, message: res.message });
           continue;
         }
-        const fixed = correctTranscript(res.text, tierA);
+        const fixed = correctTranscript(res.text, mergedEntries, mergedOpts);
         const ok = countPresent(res.text, r.targetTerms ?? []);
         const okFixed = countPresent(fixed.text, r.targetTerms ?? []);
         rows.push({
@@ -293,18 +338,21 @@ code{background:#efeae2;padding:1px 4px;border-radius:2px}ul{margin:6px 0}</styl
 ${mode === 'correction' ? `<h2>纠正层指标（文本层，离线确定性）</h2>
 <table><tr><th>口径</th><th>术语召回</th><th>术语精确</th></tr>
 <tr><td>不纠正（上游原样）</td><td>${pct(result.metrics.raw.recall)}</td><td>${pct(result.metrics.raw.precision)}</td></tr>
-<tr><td>线在跑的纠正层（Tier A 字符距离）</td><td>${pct(result.metrics.current.recall)}</td><td>${pct(result.metrics.current.precision)}</td></tr></table>
-<h2>分域</h2><table><tr><th>域</th><th>场景</th><th>不纠正</th><th>纠正后</th></tr>
-${Object.entries(result.metrics.perDomain).map(([d, v]) => `<tr><td>${domainNames[d] ?? d}</td><td>${v.scenarios}</td><td>${pct(v.rawRecall)}</td><td>${pct(v.currentRecall)}</td></tr>`).join('')}
+<tr><td>升级前：只有 Tier A 字符距离</td><td>${pct(result.metrics.current.recall)}</td><td>${pct(result.metrics.current.precision)}</td></tr>
+<tr><td><b>现在线上：Tier A ∪ Tier B 同音</b></td><td><b>${pct(result.metrics.merged.recall)}</b></td><td><b>${pct(result.metrics.merged.precision)}</b></td></tr></table>
+<h2>分域召回</h2><table><tr><th>域</th><th>场景</th><th>不纠正</th><th>升级前</th><th>现在线上</th></tr>
+${Object.entries(result.metrics.perDomain).map(([d, v]) => `<tr><td>${domainNames[d] ?? d}</td><td>${v.scenarios}</td><td>${pct(v.rawRecall)}</td><td>${pct(v.currentRecall)}</td><td><b>${pct(v.mergedRecall)}</b></td></tr>`).join('')}
 </table>` : ''}
 ${result.live ? `<h2>live</h2><table><tr><th>项</th><th>值</th></tr>
 ${Object.entries(result.live).filter(([, v]) => typeof v !== 'object').map(([k, v]) => `<tr><td>${k}</td><td>${String(v)}</td></tr>`).join('')}</table>` : ''}
-<h2>误改率（对照样本 ${result.basis.controlScenarios} 条，必须 0）</h2>
-${mode === 'correction' ? `<p class="${result.metrics.harmful.harmfulEditRate === 0 ? 'ok' : 'bad'}">harmfulEditRate = ${pct(result.metrics.harmful.harmfulEditRate)} ｜ 被改动样本 ${result.metrics.harmful.dirtyRows}/${result.metrics.harmful.controlCount}</p>
-${result.metrics.harmful.offenders.length ? `<table><tr><th>id</th><th>输入</th><th>输出</th></tr>${result.metrics.harmful.offenders.map((o) => `<tr><td>${o.id}</td><td>${o.input}</td><td>${o.output}</td></tr>`).join('')}</table>` : '<p class="ok">对照样本逐字未被改动。</p>'}` : ''}
-<h2>缺口（B3 要补的量）</h2>
-<p>2–3 字目标词 <b>${result.gap.shortTermTargets}</b> 个，其中 ${result.gap.shortCoveredByGlossary} 个已在术语表备好音节键；表中仍缺：${result.gap.shortNotInGlossary.join('、') || '（无）'}</p>
-<p>歧义音节键（B3 必须跳过）：${result.basis.ambiguousSyllableKeys.length ? result.basis.ambiguousSyllableKeys.join('、') : '当前为 0 —— 空不代表以后也空'}</p>
+<h2>误改率（对照样本 ${result.basis.controlScenarios} 条，<b>必须 0</b>）</h2>
+${mode === 'correction' ? `<p class="${result.metrics.harmfulMerged.harmfulEditRate === 0 ? 'ok' : 'bad'}">现在线上口径 harmfulEditRate = ${pct(result.metrics.harmfulMerged.harmfulEditRate)} ｜ 被改动样本 ${result.metrics.harmfulMerged.dirtyRows}/${result.metrics.harmfulMerged.controlCount}</p>
+<p>对照：升级前口径 = ${pct(result.metrics.harmful.harmfulEditRate)}（被改动 ${result.metrics.harmful.dirtyRows} 条）</p>
+${result.metrics.harmfulMerged.offenders.length ? `<table><tr><th>id</th><th>输入</th><th>输出</th></tr>${result.metrics.harmfulMerged.offenders.map((o) => `<tr><td>${o.id}</td><td>${o.input}</td><td>${o.output}</td></tr>`).join('')}</table>` : '<p class="ok">对照样本逐字未被改动 —— 放宽到 2 字门槛没有换来误改。</p>'}` : ''}
+<h2>缺口</h2>
+<p>2–3 字目标词 <b>${result.gap.shortTermTargets}</b> 个，术语表已收 ${result.gap.shortCoveredByGlossary} 个；表中仍缺：${result.gap.shortNotInGlossary.join('、') || '（无）'}</p>
+<p>保护词（同音常用词，永不替换）：${(result.basis.glossaryProtect || []).join('、')}</p>
+<p>歧义音节键（整键跳过）：${result.basis.ambiguousSyllableKeys.length ? result.basis.ambiguousSyllableKeys.join('、') : '当前为 0 —— 空不代表以后也空，匹配器每次都问'}</p>
 ${result.basis.glossaryValidationProblems.length ? `<h2 class="bad">术语表校验问题</h2><ul>${result.basis.glossaryValidationProblems.map((p) => `<li>${p}</li>`).join('')}</ul>` : '<p class="ok">术语表校验：无问题。</p>'}
 <h2>未验证项（只报好消息的报告不可信）</h2><ul>${result.notVerified.map((n) => `<li>${n}</li>`).join('')}</ul>`;
 const htmlPath = path.join(outDir, `asr-${mode}-${stamp}.html`);
@@ -313,12 +361,13 @@ fs.writeFileSync(htmlPath, html);
 if (!quiet) {
   if (mode === 'correction') {
     console.log(`语音术语评测 · correction`);
-    console.log(`  场景 ${result.basis.scenarios}（术语 ${result.basis.termScenarios} / 对照 ${result.basis.controlScenarios}）｜ Tier A ${result.basis.tierAEntries} ｜ 术语表 ${result.basis.glossaryTerms} 条 ${result.basis.glossaryFingerprint}`);
-    console.log(`  术语召回   不纠正 ${pct(result.metrics.raw.recall)}  →  现纠正层 ${pct(result.metrics.current.recall)}`);
-    console.log(`  术语精确   不纠正 ${pct(result.metrics.raw.precision)}  →  现纠正层 ${pct(result.metrics.current.precision)}`);
-    console.log(`  误改率     ${pct(result.metrics.harmful.harmfulEditRate)}（对照 ${result.metrics.harmful.dirtyRows}/${result.metrics.harmful.controlCount} 条被改动）`);
-    console.log(`  分域       ${Object.entries(result.metrics.perDomain).map(([d, v]) => `${domainNames[d] ?? d} ${pct(v.rawRecall)}→${pct(v.currentRecall)}`).join('  ')}`);
-    console.log(`  缺口       2–3 字词 ${result.gap.shortTermTargets} 个，术语表已覆盖 ${result.gap.shortCoveredByGlossary} 个（等 B3 接线）`);
+    console.log(`  场景 ${result.basis.scenarios}（术语 ${result.basis.termScenarios} / 对照 ${result.basis.controlScenarios}）｜ Tier A ${result.basis.tierAEntries} ｜ 术语表 ${result.basis.glossaryTerms} 条 + 保护 ${result.basis.glossaryProtect.length} 条 ${result.basis.glossaryFingerprint}`);
+    console.log(`  术语召回   不纠正 ${pct(result.metrics.raw.recall)}  →  升级前 ${pct(result.metrics.current.recall)}  →  现在线上 ${pct(result.metrics.merged.recall)}`);
+    console.log(`  术语精确   不纠正 ${pct(result.metrics.raw.precision)}  →  升级前 ${pct(result.metrics.current.precision)}  →  现在线上 ${pct(result.metrics.merged.precision)}`);
+    console.log(`  误改率     升级前 ${pct(result.metrics.harmful.harmfulEditRate)}  →  现在线上 ${pct(result.metrics.harmfulMerged.harmfulEditRate)}（对照被改 ${result.metrics.harmfulMerged.dirtyRows}/${result.metrics.harmfulMerged.controlCount} 条）`);
+    console.log(`  豁免守住   ${result.metrics.declineAuditMerged.checked - result.metrics.declineAuditMerged.broken.length}/${result.metrics.declineAuditMerged.checked}（刻意不纠的常用词被改了就算误改）`);
+    console.log(`  分域召回   ${Object.entries(result.metrics.perDomain).map(([d, v]) => `${domainNames[d] ?? d} ${pct(v.currentRecall)}→${pct(v.mergedRecall)}`).join('  ')}`);
+    console.log(`  缺口       2–3 字词 ${result.gap.shortTermTargets} 个，术语表已收 ${result.gap.shortCoveredByGlossary} 个${result.gap.shortNotInGlossary.length ? `，仍缺 ${result.gap.shortNotInGlossary.join('、')}` : ''}`);
     if (result.basis.glossaryValidationProblems.length) console.log(`  ⚠ 术语表校验 ${result.basis.glossaryValidationProblems.length} 项问题`);
     console.log(`  未验证     ${result.notVerified.length} 项（详见报告）`);
   } else {
@@ -328,8 +377,24 @@ if (!quiet) {
 }
 
 fs.rmSync(temp, { recursive: true, force: true });
-if (mode === 'correction' && result.metrics.harmful.harmfulEditRate !== 0) {
-  console.error('\n误改率非 0 —— 这是发布硬门槛（宁可不改，也不改错），本批不予验收。');
-  process.exitCode = 1;
+// 发布硬门槛：两个口径的误改率都必须是 0，尤其是**现在线上这套**
+if (mode === 'correction') {
+  for (const key of ['harmful', 'harmfulMerged']) {
+    if (result.metrics[key].harmfulEditRate !== 0) {
+      console.error(`\n${key} 误改率非 0 —— 这是发布硬门槛（宁可不改，也不改错），本批不予验收。`);
+      process.exitCode = 1;
+    }
+  }
+  // 豁免必须守住：刻意不纠的常用词（保修/登机/赵明…）被改了，就是把对的改错了
+  if (result.metrics.declineAuditMerged.broken.length) {
+    console.error('\n豁免被击穿 —— 以下"独立常用词"遭替换：' + result.metrics.declineAuditMerged.broken.map((b) => `${b.id}:${b.surface}`).join(', '));
+    process.exitCode = 1;
+  }
+  // 反向门槛：接了同音路径却一点没提升，说明根本没生效，不接受"静默空转"
+  if (result.metrics.merged.recall !== null && result.metrics.current.recall !== null
+    && result.metrics.merged.recall <= result.metrics.current.recall) {
+    console.error('\nmerged 口径召回没有超过升级前 —— Tier B 要么没接上，要么词表没覆盖到这些场景。');
+    process.exitCode = 1;
+  }
 }
 if (result.basis.glossaryValidationProblems.length) process.exitCode = 1;

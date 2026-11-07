@@ -239,12 +239,14 @@ async function handleFeed(res: ServerResponse): Promise<void> {
     'X-Accel-Buffering': 'no'
   });
   const stream = Readable.fromWeb(upstream.body as WebReadableStream<Uint8Array>);
+  // ⚠️ 必须挂 error 监听：上游中断（Vision 服务重启/网络抖动/客户端断开）会让
+  // fromWeb 流发 error 事件——Node 中未处理的 'error' 事件直接把进程带崩
+  // （2026-11-07 两次 "exit code 1" 的根因，pipe 不会自动转发可读流错误）
+  stream.on('error', (err) => {
+    log.warn('vision_feed_stream_error', { message: err instanceof Error ? err.message : String(err) });
+    res.destroy();
+  });
   stream.pipe(res);
-  req_abort_guard(stream, res);
-}
-
-/** 客户端断开时终止上游拉流，避免内网连接与内存被无人观看的画面占住 */
-function req_abort_guard(stream: Readable, res: ServerResponse): void {
   res.on('close', () => {
     stream.destroy();
   });

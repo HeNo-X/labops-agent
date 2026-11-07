@@ -532,4 +532,36 @@ onUnmounted(() => {
   font-size: 12px;
   cursor: pointer;
 }
+
+/* 交互反馈补齐（2026-11-07）；hover 限定指针设备，触屏用 :active 按压反馈 */
+@media (hover: hover) {
+  .vision-actions button:hover:not(:disabled) {
+    background: var(--surface-3);
+    border-color: var(--primary-border);
+  }
+  .vision-actions button.is-primary:hover:not(:disabled) {
+    background: var(--primary-hover);
+    border-color: var(--primary-hover);
+  }
+  .vision-todo button:hover {
+    background: var(--danger-bg, #221414);
+    border-color: var(--danger);
+  }
+  .vision-event-actions button:hover {
+    color: var(--primary);
+    border-color: var(--primary-border);
+  }
+}
+.vision-actions button:active:not(:disabled),
+.vision-todo button:active,
+.vision-event-actions button:active {
+  background: var(--surface-2);
+}
+.vision-actions button:focus-visible,
+.vision-todo button:focus-visible,
+.vision-event-actions button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 </style>

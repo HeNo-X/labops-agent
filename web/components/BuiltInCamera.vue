@@ -295,4 +295,23 @@ async function openCamera(): Promise<void> {
     aspect-ratio: 3 / 4;
   }
 }
+
+/* 交互反馈补齐（2026-11-07） */
+.builtin__actions button:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--primary-border);
+  color: var(--primary);
+}
+.builtin__actions button.builtin__primary:hover:not(:disabled) {
+  background: var(--primary-hover) !important;
+  border-color: var(--primary-hover) !important;
+}
+.builtin__actions button:active:not(:disabled) {
+  background: var(--surface-2);
+}
+.builtin__actions button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 </style>

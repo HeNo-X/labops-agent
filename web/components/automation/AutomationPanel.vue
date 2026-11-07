@@ -878,4 +878,29 @@ useVisibleRefresh(
 }
 .auto-back:hover { background: var(--surface-3); color: var(--text); }
 .auto-back:disabled { opacity: .55; cursor: not-allowed; }
+
+/* 交互反馈补齐（2026-11-07）：面板头部/操作按钮此前无悬浮反馈 */
+.auto-panel__head button:hover:not(:disabled),
+.auto-actions button:hover:not(:disabled),
+.auto-pref button:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--primary-border);
+  color: var(--primary);
+}
+.auto-entry button:hover {
+  color: var(--primary);
+  background: var(--primary-weak);
+}
+.auto-panel__head button:active:not(:disabled),
+.auto-actions button:active:not(:disabled) {
+  background: var(--surface-2);
+}
+.auto-panel__head button:focus-visible,
+.auto-actions button:focus-visible,
+.auto-pref button:focus-visible,
+.auto-entry button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 </style>

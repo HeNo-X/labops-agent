@@ -649,4 +649,24 @@ onUnmounted(() => {
     padding: 14px;
   }
 }
+
+/* 交互反馈补齐（2026-11-07）：头部刷新/关闭此前无悬浮/按压/键盘焦点反馈 */
+.vision-head button:hover:not(:disabled),
+.vision-entry button:hover {
+  background: var(--surface-3);
+  border-color: var(--primary-border);
+  color: var(--primary);
+}
+.vision-head button:active:not(:disabled) {
+  background: var(--surface-2);
+}
+.vision-head button:focus-visible,
+.vision-entry button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.vision-guide summary:hover {
+  color: var(--text);
+}
+
 </style>

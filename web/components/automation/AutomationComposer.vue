@@ -330,6 +330,7 @@ watch(
           </div>
           <fieldset v-if="execMode === 'agent'" class="auto-field auto-field--tools">
             <legend class="auto-field__label">{{ tr('额外允许的动作（默认只读）') }}</legend>
+            <p class="auto-field__hint">{{ tr('默认已可查询课表、房间状态、本人签到状态与签到汇总（管理员）等只读工具；此处勾选用于追加草稿类动作。') }}</p>
             <label v-for="tool in DRAFT_TOOLS" :key="tool.name" class="auto-check">
               <input type="checkbox" :checked="agentTools.includes(tool.name)" :disabled="busy" @change="toggleTool(tool.name)">
               <span>{{ tr(tool.label) }}</span>
@@ -529,7 +530,7 @@ watch(
 }
 .auto-seg button.is-on {
   background: var(--primary);
-  color: #fff;
+  color: var(--primary-contrast);
 }
 .auto-weekdays {
   display: flex;
@@ -549,7 +550,7 @@ watch(
 .auto-weekdays button.is-on {
   background: var(--primary);
   border-color: var(--primary);
-  color: #fff;
+  color: var(--primary-contrast);
 }
 .auto-actions {
   display: flex;
@@ -573,7 +574,7 @@ watch(
 .auto-primary {
   background: var(--primary) !important;
   border-color: var(--primary) !important;
-  color: #fff !important;
+  color: var(--primary-contrast) !important;
   font-weight: 600;
 }
 .auto-error {
@@ -710,4 +711,28 @@ watch(
   font-weight: 700;
 }
 .auto-primary--big:disabled { opacity: .45; cursor: not-allowed; }
+
+/* 交互反馈补齐（2026-11-07） */
+.auto-seg button:hover,
+.auto-weekdays button:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.auto-actions button:hover:not(:disabled) {
+  background: var(--surface-3);
+  border-color: var(--primary-border);
+  color: var(--primary);
+}
+.auto-seg button:active,
+.auto-weekdays button:active,
+.auto-actions button:active:not(:disabled) {
+  background: var(--surface-2);
+}
+.auto-seg button:focus-visible,
+.auto-weekdays button:focus-visible,
+.auto-actions button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
 </style>

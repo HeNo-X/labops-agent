@@ -469,10 +469,12 @@ async function copyExport(): Promise<void> {
   padding-top: var(--sp-2);
   border-top: 1px solid var(--border);
 }
+/* 小节标题不该盖过外层入口标题（设置里的 h3）：用同一档字号 + 加粗区分层级，
+   关键文本（字段名、词条）跟它齐平，解释文本再降一档 */
 .vtp__section-title {
   margin: 0 0 var(--sp-1);
   color: var(--text);
-  font-size: calc(var(--ui-font-size) * 1.0667);
+  font-size: var(--ui-font-size);
   font-weight: 600;
 }
 .vtp__chips {
@@ -584,7 +586,8 @@ async function copyExport(): Promise<void> {
   align-items: center;
   gap: var(--sp-1);
 }
-.vtp__form input {
+/* 带字段名的输入框占满自己那一格；没有字段名的（常用词）保持与按钮同行 */
+.vtp__field input {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;

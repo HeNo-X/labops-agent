@@ -632,6 +632,8 @@ Object.assign(en,{
  '恢复术语调整':'Resume term adjustment',
  // 常用语音热词（设置 → 个性化）
  '常用语音热词':'Speech hot words',
+ '把自己常说的实验室词交给系统：一份确定改写识别结果，一份只是提醒模型该听成什么。改完只影响之后的语音输入，保存在这台浏览器里。':'Give the system the words you actually say: one list rewrites the transcript, the other only hints the model what to expect. Changes apply to later speech input and stay in this browser.',
+ '改这里只影响之后的语音输入；文字输入不受影响，识别出的音频内容也不会被留存。':'These entries only affect later voice input; typed input is untouched, and no audio is retained.',
  '这里放两份词：一份确定改写识别结果，一份只是提醒模型该听成什么。两份都存在本机浏览器，随每次语音请求带到服务端，不保存音频，也不影响其他人。':'Two lists live here: one rewrites what was recognized, the other only hints the model how a word should sound. Both stay in this browser, travel with each speech request, never store audio, and never affect other people.',
  '错误纠正示例':'Correction examples',
  '识别时把「错误词」整串换成「纠正词」，确定生效；每条都能单独删除。':'Replaces every occurrence of the wrong spelling with the correct one — deterministic, and each entry can be deleted on its own.',

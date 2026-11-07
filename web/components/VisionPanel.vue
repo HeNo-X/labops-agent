@@ -27,6 +27,11 @@ const business = useBusinessStore();
 const vision = useVision();
 const open = ref(false);
 const feedFailed = ref(false);
+/** 画面流断线重连：MJPEG 流一旦结束（会话停止/Vision 重启/代理断开），<img> 会触发
+ *  load/error 且**不会自动重连**——这是"画面莫名消失"的根因。3s 后带新时间戳重设
+ *  src 重连（Vision 侧已配合改为无会话时占位帧保活，连接不再主动收尾） */
+const feedBust = ref(Date.now());
+let feedRetryTimer: number | null = null;
 const failedSnapshots = ref<Set<string>>(new Set());
 const feedbackError = ref('');
 const guideOpen = ref(false);
@@ -73,6 +78,16 @@ const edgeMeta = computed(() => {
 
 function snapshotBroken(labId: string): void {
   failedSnapshots.value = new Set([...failedSnapshots.value, labId]);
+}
+
+/** 画面流结束/出错后的自动重连（配合 Vision 侧占位帧保活，任何断流 3s 内自愈） */
+function scheduleFeedRetry(): void {
+  if (feedRetryTimer !== null) return;
+  feedRetryTimer = window.setTimeout(() => {
+    feedRetryTimer = null;
+    feedFailed.value = false;
+    feedBust.value = Date.now();
+  }, 3000);
 }
 
 /** 告警一键起草：预填"AI 线索 + 建议动作"，由 Agent 起草工单、本人确认（HITL）。
@@ -135,6 +150,7 @@ onMounted(() => window.addEventListener('labops-target', onTarget));
 onUnmounted(() => {
   window.removeEventListener('labops-target', onTarget);
   vision.stop();
+  if (feedRetryTimer !== null) window.clearTimeout(feedRetryTimer);
 });
 </script>
 
@@ -175,13 +191,20 @@ onUnmounted(() => {
           <template v-else>
             <p v-if="vision.error.value" class="vision-error" role="alert">{{ vision.error.value }}</p>
 
-            <section v-if="vision.liveAvailable.value === true && !feedFailed" class="vision-live">
-              <img :src="vision.feedUrl()" :alt="tr('实验室实时画面')" @error="feedFailed = true" />
-              <p class="vision-live__note">{{ tr('画面只在本机/内网可达时由本服务代理，不上传云端。') }}</p>
-            </section>
-
             <div class="vision-body">
-              <section class="vision-rooms">
+              <div class="vision-main">
+                <section v-if="vision.liveAvailable.value === true" class="vision-live">
+                  <img
+                    :src="vision.feedUrl() + '?b=' + feedBust"
+                    :alt="tr('实验室实时画面')"
+                    @error="scheduleFeedRetry"
+                    @load="scheduleFeedRetry"
+                  />
+                  <p v-if="feedFailed" class="vision-live__note">{{ tr('画面连接中断，正在自动重连…') }}</p>
+                  <p class="vision-live__note">{{ tr('画面只在本机/内网可达时由本服务代理，不上传云端。') }}</p>
+                </section>
+
+                <section class="vision-rooms">
                 <p v-if="!vision.labs.value.length" class="vision-empty">
                   {{ tr('已接入，但还没有任何房间上报。检查边缘机是否在发心跳。') }}
                 </p>
@@ -230,6 +253,10 @@ onUnmounted(() => {
                 </ul>
               </section>
 
+              <!-- ② 本机相机：当前唯一真实可用的画面来源 -->
+              <BuiltInCamera />
+              </div>
+
               <aside class="vision-events">
                 <h3>{{ tr('事件流水') }} <small>{{ vision.events.value.length }}</small></h3>
                 <p v-if="!vision.events.value.length" class="vision-empty">{{ tr('暂无上报事件。') }}</p>
@@ -266,9 +293,6 @@ onUnmounted(() => {
             </ol>
           </details>
         </section>
-
-        <!-- ② 本机相机：当前唯一真实可用的画面来源 -->
-        <BuiltInCamera />
 
         <footer class="vision-footnote">
           {{ tr('内场画面与人脸不出实验室内网；二维码签到永远是主链，视觉只做辅助线索。') }}
@@ -432,10 +456,23 @@ onUnmounted(() => {
 }
 .vision-live img {
   width: 100%;
-  max-height: 320px;
-  object-fit: contain;
+  aspect-ratio: 16 / 9;
+  max-height: 46dvh;
+  object-fit: cover;
   background: #000;
   border-radius: 8px;
+}
+/* 内场画面与设备内置摄像头画面统一为同尺寸（16:9 + 高度上限）：
+   内场从 320px 上限放大，内置从 4:3 全宽（≈1080px 高，94dvh 装不下）缩小——
+   仅 PC 抽屉内 :deep 覆盖，不影响移动端（移动端屏幕窄无溢出问题） */
+.vision-panel :deep(.builtin__stage) {
+  aspect-ratio: 16 / 9;
+  max-height: 46dvh;
+}
+.vision-panel :deep(.builtin__stage video) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .vision-live__note {
   margin: 6px 0 0;
@@ -531,6 +568,12 @@ onUnmounted(() => {
   background: var(--surface-2);
   position: sticky;
   top: 0;
+}
+.vision-main {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  min-width: 0;
 }
 .vision-events h3 {
   margin: 0 0 8px;

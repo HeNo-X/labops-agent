@@ -104,7 +104,11 @@ test('Y15 业务附件绑定权限、内容签名和版本资料检索接口有�
 test('Y13 工单截止策略先预览后确认，只修改 dueAt 与审计',async()=>{
  const a=await login();const draft=await a.call('/api/business/proxy/workflow/preview',{kind:'issue.create',roomId:'fixture-e310',description:'截止策略隔离测试'}),made=await a.call('/api/business/proxy/plans/commit',{planId:draft.data.plan.id,version:1});assert.equal(made.status,200);const c=(await a.call('/api/business/proxy/context')).data,i=c.issues.find((x:any)=>x.description==='截止策略隔离测试');const preview=await a.call('/api/business/proxy/workflow/preview',{kind:'issue.deadline',issueId:i.id,expectedRevision:i.revision,dueAt:new Date(Date.now()+3600000).toISOString(),note:'人工明确截止'});assert.equal(preview.status,200);assert.equal((await a.call('/api/business/proxy/plans/commit',{planId:preview.data.plan.id,version:1})).status,200);const updated=(await a.call('/api/business/proxy/context')).data.issues.find((x:any)=>x.id===i.id);assert.ok(updated.dueAt);assert.equal(updated.status,'open');assert.equal(updated.history.at(-1).action,'deadline');
 });
-test('Y14 双端诊断区分进程、连接、真实授权与配套版本',async()=>{const a=await login();const r=await a.call('/api/business/proxy/diagnostics');assert.equal(r.status,200);assert.equal(r.data.version,'1.0.5.0');assert.equal(r.data.agentVersion,'1.0.5.0');assert.equal(r.data.agentReachable,true);assert.equal(r.data.authorized,true);assert.ok(r.data.scheduler);});
+test('Y14 双端诊断区分进程、连接、真实授权与配套版本',async()=>{const a=await login();const r=await a.call('/api/business/proxy/diagnostics');assert.equal(r.status,200);
+ // 版本号随发布节奏变化（1.0.5.0→1.0.5.1）——断言改读版本模块，不再硬编码
+ const require2=createRequire(import.meta.url);
+ assert.equal(r.data.version,require2('../../Pages/server/version.js').version);
+ assert.ok(r.data.agentVersion,'agentVersion 必须有值');assert.equal(r.data.agentReachable,true);assert.equal(r.data.authorized,true);assert.ok(r.data.scheduler);});
 test('U07 账号角色变化隐藏旧范围历史，停用后所有保护 API 拒绝访问',async()=>{
  const a=await login(),c=await a.call('/api/conversations',{mode:'chat'}),file=path.join(temporary,'native','credentials.json'),creds=JSON.parse(fs.readFileSync(file,'utf8'));
  try{creds['review-admin'].identity='student';fs.writeFileSync(file,JSON.stringify(creds));

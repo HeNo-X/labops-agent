@@ -4,10 +4,10 @@
  * ============================================================================
  *  两块内容，刻意分开：
  *
- *  ① 【设备内置摄像头】= 本机相机预览（共享组件 BuiltInCamera，移动端同一份）
+ *  ② 【设备内置摄像头】= 本机相机预览（共享组件 BuiltInCamera，移动端同一份）
  *     画面只在本机渲染，不上传、不落盘、不写证据；手机可切前/后置。
  *
- *  ② 【实验室内场摄像头】= 边缘机上报（/api/vision/*）
+ *  ① 【实验室内场摄像头】= 边缘机上报（/api/vision/*）
  *     **未接入就只显示"尚未接入实验室场内摄像头"**，不显示任何人数/告警。
  *     理由：没有真实画面来源时"有没有人""有没有告警"都是不清楚的，
  *     拿演示数据充数会让人误以为真的在监控 —— 这比"看起来有数据"重要得多。
@@ -164,10 +164,7 @@ onUnmounted(() => {
           <button type="button" :aria-label="tr('关闭实验室监控')" @click="close">{{ tr('关闭') }}</button>
         </header>
 
-        <!-- ① 本机相机：当前唯一真实可用的画面来源 -->
-        <BuiltInCamera />
-
-        <!-- ② 内场摄像头：未接入就只说未接入 -->
+        <!-- ① 内场摄像头：未接入就只说未接入 -->
         <section class="vision-edge">
           <h2>{{ tr('实验室内场摄像头') }}</h2>
 
@@ -270,6 +267,9 @@ onUnmounted(() => {
           </details>
         </section>
 
+        <!-- ② 本机相机：当前唯一真实可用的画面来源 -->
+        <BuiltInCamera />
+
         <footer class="vision-footnote">
           {{ tr('内场画面与人脸不出实验室内网；二维码签到永远是主链，视觉只做辅助线索。') }}
           <template v-if="vision.configured.value && vision.status.value?.retentionNote">
@@ -312,7 +312,7 @@ onUnmounted(() => {
   justify-content: center;
 }
 .vision-panel {
-  width: min(1060px, 100%);
+  width: min(75vw, 100%);
   max-height: 94dvh;
   overflow: auto;
   padding: 18px;

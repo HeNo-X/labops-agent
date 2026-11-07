@@ -115,6 +115,14 @@ const titleText = computed(() => (props.jobId ? tr('自动化详情') : tr('自�
 const activeCount = computed(() => automation.jobs.value.filter((job) => job.status === 'active').length);
 const inDetail = computed(() => Boolean(props.jobId || detail.value));
 
+// 动作中文标签：确认区显示中文，避免裸英文 action 无法核对
+const ACTION_LABELS: Record<string, string> = {
+  create: '创建', change: '修改', pause: '暂停', resume: '恢复', archive: '归档', run_now: '立即运行'
+};
+function actionLabel(action: string): string {
+  return tr(ACTION_LABELS[action] || action);
+}
+
 function closeIfOverlay(): void {
   if (!props.inline) open.value = false;
 }
@@ -123,6 +131,7 @@ async function openPanel(): Promise<void> {
   open.value = true;
   composerOpen.value = false;
   editing.value = null;
+  automation.cancelPlan();
   if (!props.jobId) detail.value = null;
   await automation.load();
   if (props.jobId) await automation.loadDetail(props.jobId);
@@ -177,6 +186,15 @@ async function openDetail(job: AutomationJob): Promise<void> {
   }
   if (!job.canViewDetails && !job.canManage) return;
   await automation.loadDetail(job.id);
+}
+
+function backToList(): void {
+  automation.cancelPlan();
+  if (props.inline) {
+    emit('navigate', { view: 'automation' } as Target);
+    return;
+  }
+  automation.closeDetail();
 }
 
 async function toggleJob(job: AutomationJob): Promise<void> {
@@ -281,6 +299,9 @@ useVisibleRefresh(
         <!-- 详情 -->
         <template v-if="inDetail && detail">
           <div class="auto-detail">
+            <button type="button" class="auto-back" :disabled="busy" @click="backToList">
+              <span aria-hidden="true">←</span>{{ tr('返回') }}
+            </button>
             <div class="auto-detail__head">
               <h2>{{ detail.job.spec.name || automation.templates.value[detail.job.spec.kind] || detail.job.spec.kind }}</h2>
               <span class="auto-badge" :class="`auto-badge--${statusMeta(detail.job.displayStatus || detail.job.status).tone}`">
@@ -344,7 +365,7 @@ useVisibleRefresh(
           <!-- 影响核对（详情页里的立即运行/归档也走同一套确认） -->
           <section v-if="plan" class="auto-review">
             <h3>{{ tr('确认后才会生效') }}</h3>
-            <p class="auto-review__line">{{ tr('动作') }}：{{ plan.action }} · {{ tr('接收') }}：{{ tr(recipientsText(plan.spec.recipients)) }}</p>
+            <p class="auto-review__line">{{ tr('动作') }}：{{ actionLabel(plan.action) }} · {{ tr('接收') }}：{{ tr(recipientsText(plan.spec.recipients)) }}</p>
             <p class="auto-review__line">{{ tr('效果') }}：{{ tr(effectsText(plan.effects)) }}</p>
             <ol v-if="plan.futureOccurrences?.length" class="auto-review__occ">
               <li v-for="item in plan.futureOccurrences.slice(0, 3)" :key="item.at">{{ item.local }}</li>
@@ -357,24 +378,33 @@ useVisibleRefresh(
         </template>
 
         <!-- 新建 / 编辑 -->
-        <AutomationComposer
-          v-else-if="composerOpen && !readonly"
-          v-model="spec"
-          :templates="automation.templates.value"
-          :busy="busy"
-          :editing="Boolean(editing)"
-          :plan="plan"
-          :timezone="automation.timezone.value"
-          @request-plan="requestPlan"
-          @confirm="confirmPlan"
-          @cancel="cancelComposer"
-        />
+        <template v-else-if="composerOpen && !readonly">
+          <button type="button" class="auto-back" :disabled="busy" @click="cancelComposer">
+            <span aria-hidden="true">←</span>{{ tr('返回') }}
+          </button>
+          <AutomationComposer
+            v-model="spec"
+            :templates="automation.templates.value"
+            :busy="busy"
+            :editing="Boolean(editing)"
+            :plan="plan"
+            :timezone="automation.timezone.value"
+            @request-plan="requestPlan"
+            @confirm="confirmPlan"
+            @cancel="cancelComposer"
+          />
+        </template>
 
         <!-- 列表（A-Z：ZCode 式标题块 + 任务卡 + 模板网格） -->
         <template v-else>
           <div class="auto-hero">
-            <h1>自动化 <span class="auto-hero__muted">定时任务</span></h1>
+            <h1 class="auto-hero__title">{{ tr('定时任务') }}</h1>
             <p class="auto-hero__sub">{{ tr('到点自动执行：生成日报、提醒值班，或让 Agent 替你查询与整理。') }}</p>
+          </div>
+          <div class="auto-create-bar">
+            <button type="button" class="auto-primary auto-create-btn" :disabled="busy || readonly" @click="startCreate">
+              {{ tr('新建定时任务') }}
+            </button>
           </div>
           <div class="auto-list">
             <AutomationTaskCard
@@ -472,7 +502,7 @@ useVisibleRefresh(
   padding: 0 5px;
   border-radius: 999px;
   background: var(--primary);
-  color: #fff;
+  color: var(--primary-contrast);
   font-size: 11px;
   line-height: 18px;
   text-align: center;
@@ -487,10 +517,11 @@ useVisibleRefresh(
   justify-content: center;
 }
 .auto-panel {
-  width: min(880px, 100%);
-  max-height: 90dvh;
+  width: min(75vw, 100%);
+  max-height: 94dvh;
   overflow: auto;
-  padding: 18px;
+  scrollbar-width: none;
+  padding: 22px;
   background: var(--surface);
   color: var(--text);
   border-radius: 10px;
@@ -498,6 +529,9 @@ useVisibleRefresh(
   display: grid;
   gap: 12px;
   align-content: start;
+}
+.auto-panel::-webkit-scrollbar {
+  display: none;
 }
 .auto-inline .auto-panel {
   width: 100%;
@@ -586,7 +620,7 @@ useVisibleRefresh(
 .auto-primary {
   background: var(--primary) !important;
   border-color: var(--primary) !important;
-  color: #fff !important;
+  color: var(--primary-contrast) !important;
   font-weight: 600;
 }
 .auto-danger-link {
@@ -764,7 +798,7 @@ useVisibleRefresh(
   border-radius: 8px;
   border: 1px solid var(--primary);
   background: var(--primary);
-  color: #fff;
+  color: var(--primary-contrast);
   font: inherit;
   cursor: pointer;
   max-width: 220px;
@@ -794,8 +828,7 @@ useVisibleRefresh(
 <style scoped>
 /* A-Z：ZCode 式标题块（列表页） */
 .auto-hero { margin: 0 0 18px; }
-.auto-hero h1 { margin: 0 0 6px; font-size: calc(var(--ui-font-size) * 1.7); font-weight: 700; }
-.auto-hero__muted { color: var(--text-faint); font-weight: 600; margin-left: 8px; }
+.auto-hero__title { margin: 0 0 6px; font-size: calc(var(--ui-font-size) * 1.7); font-weight: 700; color: var(--text); }
 .auto-hero__sub { margin: 0; color: var(--text-faint); font-size: calc(var(--ui-font-size) * 1.0); }
 /* 空态大卡：居中按钮的大边框卡 */
 .auto-empty-card {
@@ -815,10 +848,10 @@ useVisibleRefresh(
 .auto-tpl-section__title { margin: 0 0 10px; font-size: calc(var(--ui-font-size) * 1.0); color: var(--text-muted); font-weight: 600; }
 .auto-tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .auto-tpl-card {
-  display: flex; flex-direction: column; gap: 6px; text-align: left;
+  display: flex; flex-direction: column; gap: 4px; text-align: left;
   border: 1px solid var(--border); border-radius: var(--radius-lg, 12px);
   background: var(--surface); color: var(--text);
-  padding: 14px 16px; cursor: pointer; font: inherit;
+  padding: 9px 14px; cursor: pointer; font: inherit;
 }
 .auto-tpl-card:hover { border-color: var(--border-strong, var(--primary)); }
 .auto-tpl-card:disabled { opacity: .6; cursor: wait; }
@@ -826,4 +859,21 @@ useVisibleRefresh(
 .auto-tpl-card__hint { color: var(--text-muted); font-size: calc(var(--ui-font-size) * 0.92308); line-height: 1.55; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .auto-tpl-card__sched { color: var(--text-faint); font-size: calc(var(--ui-font-size) * 0.84615); }
 @media(max-width: 720px) { .auto-tpl-grid { grid-template-columns: 1fr; } }
+/* 新建定时任务按钮栏：左对齐、圆角主按钮 */
+.auto-create-bar { display: flex; margin: 0 0 4px; }
+.auto-create-btn {
+  min-height: 38px; padding: 8px 20px;
+  border-radius: 999px; border: 1px solid var(--primary);
+  font: inherit; font-weight: 600; cursor: pointer;
+}
+.auto-create-btn:disabled { opacity: .55; cursor: not-allowed; }
+/* 子页面返回按钮：左对齐、轻量 */
+.auto-back {
+  justify-self: start; display: inline-flex; align-items: center; gap: 6px;
+  min-height: 34px; padding: 6px 10px;
+  background: transparent; border: 0; border-radius: 6px;
+  color: var(--text-muted); font: inherit; cursor: pointer;
+}
+.auto-back:hover { background: var(--surface-3); color: var(--text); }
+.auto-back:disabled { opacity: .55; cursor: not-allowed; }
 </style>

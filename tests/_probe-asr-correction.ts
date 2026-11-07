@@ -318,6 +318,7 @@ check('提示条把来源说清：改动来自你登记的写法，不是系统�
 await page.screenshot({ path: path.join(SHOT, 'user-pair.png') });
 
 // 单字为什么不让登记：一次手滑就能把整句的某个字全换掉，界面必须当场拒绝并说明理由
+await openVocabulary();
 await page.fill('#vtp-from', '枪');
 await page.fill('#vtp-to', '枪头');
 await page.getByRole('button', { name: '保存', exact: true }).click();
@@ -342,7 +343,8 @@ const bar7 = (await page.locator('.vcb').innerText().catch(() => '')).replace(/\
 check('界面说法与行为一致：已停止自动调整，但仍按你登记的写法替换',
   /本页已停止自动调整，只按你登记的写法替换了 1 处/.test(bar7), bar7);
 
-// 收回：删掉登记后必须回到"不带词对"的形态，否则用户没法真正反悔（面板此时仍是展开的）
+// 收回：删掉登记后必须回到"不带词对"的形态，否则用户没法真正反悔
+await openVocabulary();
 await page.locator('.vtp__list .vtp__del').first().click();
 await closeVocabulary();
 await page.waitForTimeout(250);
@@ -388,7 +390,7 @@ await page.fill('#vtp-word', '枪');
 await page.press('#vtp-word', 'Enter');
 await page.waitForTimeout(250);
 const kwNotice = (await page.locator('.vtp__section .vtp__notice').innerText().catch(() => '')).trim();
-check('单字常用词被拦下并指出去哪条路才确定生效', /识别成/.test(kwNotice), kwNotice);
+check('单字常用词被拦下并指出去哪条路才确定生效', /错误纠正示例/.test(kwNotice), kwNotice);
 check('拦下后列表没被塞进脏数据', (await page.locator('.vtp__chips li').count()) === 1, String(await page.locator('.vtp__chips li').count()));
 
 // 把服务端"开关打开"（模拟 .env 改 ASR_CONTEXT_ENABLED=1），界面说法必须跟着变
@@ -418,9 +420,10 @@ const supBody = transcribeBodies.at(-1) ?? {};
 const statusSup = (await page.locator('.settings-voice .vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
 check('叫停后请求带上 skipTermCorrect，状态行说"这次没有发给模型"（不谎报）',
   supBody['skipTermCorrect'] === true && /没有发给模型/.test(statusSup), statusSup);
-await page.locator('.vcb__btn--ghost').click(); // 恢复，给后面的删除步骤一个干净起点
-await page.waitForTimeout(300);
+// 恢复按钮在输入条上，设置是模态层 —— 不先关掉就是点不到，报出来的错还像是功能坏了
 await closeVocabulary();
+await page.locator('.vcb__btn--ghost').click();
+await page.waitForTimeout(300);
 
 // 收回：删掉常用词后不该再往请求里塞字段
 await openVocabulary();

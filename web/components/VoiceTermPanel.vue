@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * 「登记常见误写」面板 —— 说话的人把自己的词交给系统，下次识别就用上
+ * 「常用语音热词」面板 —— 说话的人把自己的词交给系统，下次识别就用上
+ * 入口挂在 设置 → 个性化：它是一份长期生效的个人配置，贴在输入条下方容易被当成一次性提示。
  * ============================================================================
  *  为什么需要它：术语表是**我们**维护的封闭集合，覆盖不到的词就只能靠运气。
  *  而"这个词被我念成什么样"只有本人知道 —— 所以给一个两栏输入，
@@ -18,7 +19,7 @@ import { computed, ref } from 'vue';
 import { t as tr } from '../i18n';
 import { clientFetch } from '../client';
 import { useUserTerms } from '../composables/useUserTerms';
-import type { VoiceBias } from '../composables/useVoiceInput';
+import { lastAsrBias, lastAsrProtocol } from '../composables/useVoiceInput';
 
 /** 服务端体检结论的结构（与 server/api/asr-lexicon-report.ts 一一对应） */
 interface LexiconReport {
@@ -38,15 +39,18 @@ interface LexiconReport {
   merge: { candidates: Array<Record<string, unknown>>; needPinyin: string[] };
 }
 
+
 const props = defineProps<{
-  /** 上一次请求回报的偏置真实状态；没有成功请求过就是 null（面板不许拿"配置开了"代替它） */
-  bias?: VoiceBias | null;
-  /** 上一次请求实际使用的上游协议，用于判断热词这条路存不存在 */
-  protocol?: string;
+  /**
+   * 嵌入态（挂在 设置 → 个性化 里）：折叠头由设置的分栏承担，面板直接摊开内容。
+   * 独立态（默认）留给其它调用点，保持原来的"收起只占一行"行为。
+   */
+  embedded?: boolean;
 }>();
 
 const { pairs, count, add, remove, clear, keywords, keywordCount, addKeyword, removeKeyword, clearKeywords } = useUserTerms();
 
+// 独立态默认收起（这是它当初的设计：不占输入区空间）；嵌入设置时由 embedded 直接摊开
 const open = ref(false);
 const from = ref('');
 const to = ref('');
@@ -65,7 +69,7 @@ const full = computed(() => count.value >= 100);
 const keywordStatus = computed(() => {
   const n = keywordCount.value;
   if (!n) return tr('还没有登记常用词。');
-  const bias = props.bias;
+  const bias = lastAsrBias.value;
   if (!bias) return tr('已登记 {n} 个常用词，但还没有一次成功的识别可以依据。', { n });
   if (bias.suppressedByUser === true) return tr('本页已叫停自动调整，{n} 个常用词这次没有发给模型。', { n });
   const sent = bias.context === true;
@@ -83,7 +87,7 @@ const keywordStatus = computed(() => {
     parts.push(tr('即时热词已发出 {n} 条（该字段实测被上游接受，但权重区间未证实）', {
       n: String(Number(bias.hotwordCount ?? 0))
     }));
-  } else if (props.protocol === 'dashscope_native') {
+  } else if (lastAsrProtocol.value === 'dashscope_native') {
     parts.push(tr('即时热词本次未发'));
   } else {
     parts.push(tr('当前协议没有热词通道'));
@@ -100,6 +104,7 @@ function invalidateReport(): void {
 }
 
 function toggle(): void {
+  if (props.embedded) return; // 嵌入态没有折叠头，防键盘触发出一条不存在的交互
   open.value = !open.value;
   notice.value = '';
   confirmClear.value = false;
@@ -118,7 +123,7 @@ function submit(): void {
   notice.value =
     result.reason === 'empty' ? tr('两边都要填内容')
       : result.reason === 'same' ? tr('两边一样就不用登记')
-        : result.reason === 'tooShort' ? tr('「识别成」至少 2 个字：单字太容易误伤整句')
+        : result.reason === 'tooShort' ? tr('「错误词」至少 2 个字：单字太容易误伤整句')
           : result.reason === 'tooLong' ? tr('一条最多 24 个字，太长的多半是粘了整句话')
             : result.reason === 'duplicate' ? tr('这个写法已经登记过，改它就行')
               : tr('已到 100 条上限，先删掉不用的');
@@ -151,7 +156,7 @@ function submitWord(): void {
   }
   wordNotice.value =
     result.reason === 'empty' ? tr('先写一个词')
-      : result.reason === 'tooShort' ? tr('单个字不必登记：想确定生效，请用上面的「识别成 → 应该是」')
+      : result.reason === 'tooShort' ? tr('单个字不必登记：想确定生效，请用上面的「错误纠正示例」')
         : result.reason === 'tooLong' ? tr('一个词最多 24 个字')
           : result.reason === 'duplicate' ? tr('这个词已经在列表里')
             : tr('已到 100 条上限，先删掉不用的');
@@ -271,21 +276,26 @@ async function copyExport(): Promise<void> {
 </script>
 
 <template>
-  <div class="vtp">
-    <button type="button" class="vtp__toggle" :aria-expanded="open" @click="toggle">
-      <span class="vtp__toggle-label">{{ tr('我的语音词汇') }}</span>
+  <div class="vtp" :class="{ 'vtp--embedded': embedded }">
+    <button v-if="!embedded" type="button" class="vtp__toggle" :aria-expanded="open" @click="toggle">
+      <span class="vtp__toggle-label">{{ tr('常用语音热词') }}</span>
       <span v-if="count" class="vtp__count">{{ count }}</span>
       <span class="vtp__caret" aria-hidden="true">{{ open ? '▾' : '▸' }}</span>
     </button>
 
-    <div v-if="open" class="vtp__body">
-      <p class="vtp__lead">{{ tr('「识别成 → 应该是」会直接改写结果；常用词只是提示模型，可能不生效。') }}</p>
+    <div v-if="open || embedded" class="vtp__body">
+      <p class="vtp__intro">{{ tr('这里放两份词：一份确定改写识别结果，一份只是提醒模型该听成什么。两份都存在本机浏览器，随每次语音请求带到服务端，不保存音频，也不影响其他人。') }}</p>
+      <p class="vtp__lead">{{ tr('改这里只影响之后的语音输入；文字输入不受影响，识别出的音频内容也不会被留存。') }}</p>
+      <p class="vtp__section-title">{{ tr('错误纠正示例') }}</p>
+      <p class="vtp__lead">{{ tr('识别时把「错误词」整串换成「纠正词」，确定生效；每条都能单独删除。') }}</p>
       <form class="vtp__form" @submit.prevent="submit">
-        <label class="sr-only" for="vtp-from">{{ tr('识别成的样子') }}</label>
-        <input id="vtp-from" v-model="from" maxlength="24" :placeholder="tr('识别成（例：一叶枪）')" autocomplete="off">
+        <label class="vtp__field" for="vtp-from">{{ tr('错误词') }}
+          <input id="vtp-from" v-model="from" maxlength="24" :placeholder="tr('（例：第五幺七）')" autocomplete="off">
+        </label>
         <span class="vtp__arrow" aria-hidden="true">→</span>
-        <label class="sr-only" for="vtp-to">{{ tr('应该是') }}</label>
-        <input id="vtp-to" v-model="to" maxlength="24" :placeholder="tr('应该是（例：移液枪）')" autocomplete="off">
+        <label class="vtp__field" for="vtp-to">{{ tr('纠正词') }}
+          <input id="vtp-to" v-model="to" maxlength="24" :placeholder="tr('（例：D517）')" autocomplete="off">
+        </label>
         <button type="submit" class="vtp__save" :disabled="full && !from.trim()">{{ tr('保存') }}</button>
       </form>
       <p v-if="notice" class="vtp__notice" role="alert">{{ notice }}</p>
@@ -304,7 +314,7 @@ async function copyExport(): Promise<void> {
       <p v-else class="vtp__empty">{{ tr('还没有登记。写下的词下次说话就生效，保存在这台设备上。') }}</p>
 
       <p class="vtp__foot">
-        {{ tr('保存后随每次语音请求带到服务端，只用于本次改写，并会逐条显示在提示条里。') }}
+        {{ tr('下一次长按说话就生效；提示条会逐条列出改了哪几处，也可以一键还原原文。') }}
       </p>
       <button v-if="count" type="button" class="vtp__del vtp__del--all" @click="clearAll">
         {{ confirmClear ? tr('确认清除全部？') : tr('清除全部') }}
@@ -312,6 +322,7 @@ async function copyExport(): Promise<void> {
 
       <div class="vtp__section">
         <p class="vtp__section-title">{{ tr('常用词（只填正确写法）') }}</p>
+        <p class="vtp__lead">{{ tr('这类词不改写已经识别出来的字，只是提醒模型该听成什么。收益没在真实录音上量化过，所以服务端事前偏置默认关着：关着时它们不会发给模型，下面的状态行会照实说明发没发。') }}</p>
         <form class="vtp__form" @submit.prevent="submitWord">
           <label class="sr-only" for="vtp-word">{{ tr('常用词') }}</label>
           <input id="vtp-word" v-model="word" maxlength="24" :placeholder="tr('例：稳压器、门禁电源')" autocomplete="off">
@@ -385,6 +396,16 @@ async function copyExport(): Promise<void> {
 .vtp {
   margin-top: var(--sp-1);
 }
+/* 嵌入设置面板时去掉自己那层边框感，靠设置的分隔线呼吸 */
+.vtp--embedded {
+  margin-top: 0;
+}
+.vtp--embedded .vtp__body {
+  border: 0;
+  border-left: 0;
+  padding: 0;
+  background: transparent;
+}
 .vtp__toggle {
   display: inline-flex;
   align-items: center;
@@ -422,10 +443,26 @@ async function copyExport(): Promise<void> {
   background: var(--surface);
 }
 /* 两种词汇的生效方式不同，这句话是唯一能一眼看出差别的地方，别藏进帮助里 */
+/* 关键文本跟设置面板同字号（现在默认 15px），解释性文本统一降一档 */
+.vtp__intro {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-muted);
+  font-size: calc(var(--ui-font-size) * 0.84615);
+  line-height: 1.6;
+}
 .vtp__lead {
   margin: 0 0 var(--sp-2);
   color: var(--text-muted);
-  font-size: calc(var(--ui-font-size) * 0.92308);
+  font-size: calc(var(--ui-font-size) * 0.84615);
+  line-height: 1.6;
+}
+.vtp__field {
+  display: grid;
+  gap: 3px;
+  flex: 1 1 120px;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--ui-font-size);
 }
 .vtp__section {
   margin-top: var(--sp-3);
@@ -435,7 +472,7 @@ async function copyExport(): Promise<void> {
 .vtp__section-title {
   margin: 0 0 var(--sp-1);
   color: var(--text);
-  font-size: calc(var(--ui-font-size) * 0.92308);
+  font-size: calc(var(--ui-font-size) * 1.0667);
   font-weight: 600;
 }
 .vtp__chips {
@@ -456,7 +493,7 @@ async function copyExport(): Promise<void> {
   padding: 1px 2px 1px var(--sp-2);
 }
 .vtp__chip-text {
-  font-size: calc(var(--ui-font-size) * 0.92308);
+  font-size: var(--ui-font-size);
   overflow-wrap: anywhere;
 }
 .vtp__chip-del {
@@ -501,6 +538,7 @@ async function copyExport(): Promise<void> {
 }
 /* 结论用细边框小标签，不用色块：一屏十几条时色块会把"原因"压掉 */
 .vtp__tag {
+  font-size: var(--ui-font-size);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 0 5px;
@@ -547,9 +585,11 @@ async function copyExport(): Promise<void> {
   gap: var(--sp-1);
 }
 .vtp__form input {
-  flex: 1 1 120px;
+  width: 100%;
   min-width: 0;
-  font: inherit;
+  box-sizing: border-box;
+  font-size: var(--ui-font-size);
+  font-family: inherit;
   color: var(--text);
   background: var(--surface-2);
   border: 1px solid var(--border);

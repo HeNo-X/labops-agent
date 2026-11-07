@@ -630,9 +630,21 @@ Object.assign(en,{
  '本页不再自动调整术语':"Don't auto-adjust terms on this page",
  '本页已停止自动调整术语，识别结果按上游原文直接使用':'Term auto-adjustment is off on this page; results are used exactly as transcribed.',
  '恢复术语调整':'Resume term adjustment',
- // U1 用户登记「识别成 → 应该是」
- '我的语音词汇':'My speech vocabulary',
- '「识别成 → 应该是」会直接改写结果；常用词只是提示模型，可能不生效。':'"Heard as → Should be" rewrites the result directly; common words only hint the model and may not take effect.',
+ // 常用语音热词（设置 → 个性化）
+ '常用语音热词':'Speech hot words',
+ '这里放两份词：一份确定改写识别结果，一份只是提醒模型该听成什么。两份都存在本机浏览器，随每次语音请求带到服务端，不保存音频，也不影响其他人。':'Two lists live here: one rewrites what was recognized, the other only hints the model how a word should sound. Both stay in this browser, travel with each speech request, never store audio, and never affect other people.',
+ '错误纠正示例':'Correction examples',
+ '识别时把「错误词」整串换成「纠正词」，确定生效；每条都能单独删除。':'Replaces every occurrence of the wrong spelling with the correct one — deterministic, and each entry can be deleted on its own.',
+ '错误词':'Wrong',
+ '（例：第五幺七）':'(e.g. 第五幺七)',
+ '纠正词':'Correct',
+ '（例：D517）':'(e.g. D517)',
+ '下一次长按说话就生效；提示条会逐条列出改了哪几处，也可以一键还原原文。':'Applies to your next hold-to-talk; the notice bar lists each change and can restore the original text.',
+ '这类词不改写已经识别出来的字，只是提醒模型该听成什么。收益没在真实录音上量化过，所以服务端事前偏置默认关着：关着时它们不会发给模型，下面的状态行会照实说明发没发。':'These words do not rewrite the transcript; they only tell the model what to expect. The benefit was never measured on real recordings, so server-side pre-bias ships off: while off they are not sent, and the status line below says so plainly.',
+ '「错误词」至少 2 个字：单字太容易误伤整句':'The wrong spelling needs at least 2 characters; a single character can rewrite a whole sentence.',
+ '单个字不必登记：想确定生效，请用上面的「错误纠正示例」':'Single characters need no entry here — use Correction examples above for a change that definitely applies.',
+
+
  '常用词（只填正确写法）':'Common words (correct spelling only)',
  '常用词':'Common word',
  '例：稳压器、门禁电源':'e.g. 稳压器, 门禁电源',
@@ -641,7 +653,7 @@ Object.assign(en,{
  '确认清除全部常用词？':'Clear every common word?',
  '清除全部常用词':'Clear all common words',
  '先写一个词':'Write a word first.',
- '单个字不必登记：想确定生效，请用上面的「识别成 → 应该是」':'Single characters need no entry here — use "Heard as → Should be" above for a change that definitely applies.',
+
  '一个词最多 24 个字':'A word may be at most 24 characters.',
  '这个词已经在列表里':'That word is already in the list.',
  '还没有登记常用词。':'No common words logged yet.',
@@ -654,20 +666,20 @@ Object.assign(en,{
  '即时热词已发出 {n} 条（该字段实测被上游接受，但权重区间未证实）':'Sent {n} instant hot words (the field is accepted by the upstream in a live test, but the weight range is unverified)',
  '即时热词本次未发':'No instant hot words were sent this time',
  '当前协议没有热词通道':'The current protocol has no hot-word channel',
- '识别成的样子':'What it heard',
- '应该是':'What it should be',
- '识别成（例：一叶枪）':'Heard as (e.g. 一叶枪)',
- '应该是（例：移液枪）':'Should be (e.g. 移液枪)',
+
+
+
+
  '保存':'Save',
  '两边都要填内容':'Fill in both sides.',
  '两边一样就不用登记':'Both sides are identical — nothing to log.',
- '「识别成」至少 2 个字：单字太容易误伤整句':'The "heard as" side needs at least 2 characters; a single character can rewrite a whole sentence.',
+
  '一条最多 24 个字，太长的多半是粘了整句话':'At most 24 characters per side; longer ones are usually whole sentences pasted in.',
  '这个写法已经登记过，改它就行':'That spelling is already logged — edit the existing entry.',
  '已到 100 条上限，先删掉不用的':'Reached the 100-entry limit — remove the ones you no longer use.',
  '删除这条登记':'Delete this entry',
  '还没有登记。写下的词下次说话就生效，保存在这台设备上。':'Nothing logged yet. What you write applies to your next speech and stays on this device.',
- '保存后随每次语音请求带到服务端，只用于本次改写，并会逐条显示在提示条里。':'Logged pairs travel with each speech request, apply only to that transcription, and are listed one by one in the notice bar.',
+
  '确认清除全部？':'Clear every logged entry?',
  '清除全部':'Clear all',
  '本页已停止自动调整，只按你登记的写法替换了 {n} 处':'Automatic term adjustment is off on this page; {n} change(s) came only from spellings you logged.',

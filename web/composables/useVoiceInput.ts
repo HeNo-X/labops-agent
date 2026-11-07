@@ -21,6 +21,14 @@ import { currentUserTermPairs, currentKeywords } from './useUserTerms';
  * 服务端回报的偏置真实状态（`bias` 字段）。界面只拿它说话，不拿"配置里开了"说话：
  * 配置开了但上游不收、或用户叫停了，applied 会照实是 false —— 差别必须看得见。
  */
+/**
+ * 上一次语音请求的真实偏置结果。放在模块级而不是 composable 实例里，
+ * 因为「常用语音热词」面板现在住在 设置 → 个性化，与输入条不是同一棵组件树 ——
+ * 用实例级 ref 的话面板只能拿到 null，然后理直气壮地显示一句错话。
+ */
+export const lastAsrBias = ref<VoiceBias | null>(null);
+export const lastAsrProtocol = ref<string>('');
+
 export interface VoiceBias {
   context?: boolean;
   options?: boolean;
@@ -88,9 +96,6 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
    */
   const lastOriginalText = ref<string>('');
   const lastCorrections = ref<VoiceCorrection[]>([]);
-  /** 上一次请求的偏置真实状态与上游协议，供「常用词」面板如实显示"发没发出去" */
-  const lastBias = ref<VoiceBias | null>(null);
-  const lastProtocol = ref<string>('');
   /** 用户点了"本页不再自动调整术语"后置真：后续请求停掉**词典自动**改动（用户自己登记的写法仍生效） */
   const suppressCorrection = ref<boolean>(false);
 
@@ -182,8 +187,8 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
         : [];
       lastOriginalText.value = lastCorrections.value.length ? (data.originalText ?? '') : '';
       // 偏置的真实状态：常用词面板靠它说"这次到底发没发出去"，所以没有就是 null，不填默认值。
-      lastBias.value = data.bias && typeof data.bias === 'object' ? (data.bias as VoiceBias) : null;
-      lastProtocol.value = typeof data.protocol === 'string' ? data.protocol : '';
+      lastAsrBias.value = data.bias && typeof data.bias === 'object' ? (data.bias as VoiceBias) : null;
+      lastAsrProtocol.value = typeof data.protocol === 'string' ? data.protocol : '';
       if (!text) {
         errorCode.value = 'empty';
         return null;
@@ -206,8 +211,8 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
     lastOriginalText.value = '';
     lastCorrections.value = [];
     // 偏置状态同理：新录音没结果之前，面板不该继续显示上一轮"发没发出去"
-    lastBias.value = null;
-    lastProtocol.value = '';
+    lastAsrBias.value = null;
+    lastAsrProtocol.value = '';
     if (!supported.value) {
       errorCode.value = typeof window !== 'undefined' && window.isSecureContext === false ? 'insecure' : 'unsupported';
       return;
@@ -319,7 +324,7 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
 
   return {
     status, seconds, errorCode, supported, recording, working, start, stop, cancel,
-    lastOriginalText, lastCorrections, lastBias, lastProtocol,
+    lastOriginalText, lastCorrections,
     suppressCorrection, clearCorrections, suppressCorrections, unsuppressCorrections
   };
 }

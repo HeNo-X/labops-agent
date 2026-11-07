@@ -172,6 +172,28 @@ async function holdToTalk(ms: number): Promise<void> {
   await page.waitForTimeout(600);
 }
 
+
+/**
+ * 词汇面板已迁到 设置 → 个性化（它是一份长期生效的个人配置，不该贴在输入条下面）。
+ * 设置是模态层，语音长按必须在关掉它之后做，所以这里成对提供 open/close，
+ * 并在 close 后等输入框回来 —— 探针要是拿着打开中的设置去点麦克风，只会测到一个假失败。
+ */
+async function openVocabulary(): Promise<void> {
+  await page.getByRole('button', { name: '账户与设置', exact: true }).click();
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.waitForSelector('.settings-dialog', { state: 'visible', timeout: 12000 });
+  const tab = page.getByRole('tab', { name: '个性化', exact: true });
+  if ((await tab.count()) > 0) await tab.click();
+  await page.waitForSelector('.settings-voice', { state: 'visible', timeout: 8000 });
+}
+
+async function closeVocabulary(): Promise<void> {
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.settings-dialog', { state: 'hidden', timeout: 8000 }).catch(() => {});
+  await page.waitForSelector('#cmd', { state: 'visible', timeout: 8000 });
+  await page.waitForTimeout(300);
+}
+
 await page.goto(BASE, { waitUntil: 'networkidle' });
 await page.waitForSelector('input[autocomplete="username"], input[name="username"]', { timeout: 20000 });
 await page.fill('input[autocomplete="username"], input[name="username"]', admin.account);
@@ -257,24 +279,31 @@ await page.screenshot({ path: path.join(SHOT, 'suppressed.png') });
 // ---------------------------------------------------------------- U1：用户自己登记的「识别成 → 应该是」
 console.log('\n[U1 · 登记常见误写]');
 const beforeU1 = transcribeBodies.length;
-const toggle = page.locator('.vtp__toggle');
-check('语音可用时出现登记入口（收起态只占一行）', (await toggle.count()) > 0, `count=${await toggle.count()}`);
+await openVocabulary();
+check('入口已迁到 设置 → 个性化（面板在 .settings-voice 里，不再压在输入条下）',
+  (await page.locator('.settings-voice .vtp').count()) > 0,
+  `count=${await page.locator('.settings-voice .vtp').count()}`);
+check('嵌入态不再自己叠一层折叠头（避免"设置里又有个收起"）',
+  (await page.locator('.settings-voice .vtp__toggle').count()) === 0, '');
+check('顶部有一句作用解释，且说清两份词的差别',
+  /一份确定改写识别结果/.test((await page.locator('.settings-voice .vtp__intro').innerText().catch(() => '')).replace(/\s+/g, ' ')), '');
 check('没登记时请求体一个 termPairs 字段都不带（与改造前逐字一致）',
   transcribeBodies.slice(0, beforeU1).every((b) => b['termPairs'] === undefined),
   JSON.stringify(transcribeBodies.slice(0, beforeU1).map((b) => Object.keys(b))));
 
-await toggle.click();
-await page.waitForTimeout(250);
 await page.fill('#vtp-from', USER_FROM);
 await page.fill('#vtp-to', USER_TO);
 await page.getByRole('button', { name: '保存', exact: true }).click();
 await page.waitForTimeout(250);
+await closeVocabulary();
+await openVocabulary();
 const storedRaw = await page.evaluate(() => localStorage.getItem('labops.asr.term-pairs'));
 const stored = (() => { try { return JSON.parse(String(storedRaw)) as unknown; } catch { return null; } })();
 check('登记存在本机浏览器（服务端不落盘、不影响别人）',
   Array.isArray(stored) && (stored[0] as { to?: string })?.to === USER_TO, String(storedRaw));
 check('列表里能看到并管理刚登记的那条', (await page.locator('.vtp__list li').count()) === 1, String(await page.locator('.vtp__list').innerText().catch(() => '')));
 
+await closeVocabulary();
 await page.locator('#cmd').fill('');
 await holdToTalk(900);
 const u1Body = transcribeBodies.at(-1) ?? {};
@@ -294,10 +323,13 @@ await page.fill('#vtp-to', '枪头');
 await page.getByRole('button', { name: '保存', exact: true }).click();
 await page.waitForTimeout(200);
 const shortNotice = (await page.locator('.vtp__body > .vtp__notice').innerText().catch(() => '')).trim();
-check('单字登记被当场拦下并说明原因（不写进"输入无效"这种废话）', /至少 2 个字/.test(shortNotice), shortNotice);
+check('单字登记被当场拦下，并且新字段名出现在提示里', /错误词/.test(shortNotice) && /至少 2 个字/.test(shortNotice), shortNotice);
 check('拦下之后没有多出脏数据', (await page.locator('.vtp__list li').count()) === 1, String(await page.locator('.vtp__list li').count()));
 
 // 叫停只该停"自动"：用户自己写下的规则不该被一个临时开关顺带否决
+await closeVocabulary();
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
 await page.locator('.vcb__btn--ghost').click();
 await page.waitForTimeout(300);
 await page.locator('#cmd').fill('');
@@ -312,6 +344,7 @@ check('界面说法与行为一致：已停止自动调整，但仍按你登记�
 
 // 收回：删掉登记后必须回到"不带词对"的形态，否则用户没法真正反悔（面板此时仍是展开的）
 await page.locator('.vtp__list .vtp__del').first().click();
+await closeVocabulary();
 await page.waitForTimeout(250);
 await page.locator('#cmd').fill('');
 await holdToTalk(900);
@@ -331,6 +364,7 @@ if ((await resume2.count()) > 0) {
   await page.waitForTimeout(300);
 }
 const KW = '稳压器';
+await openVocabulary();
 await page.fill('#vtp-word', KW);
 await page.press('#vtp-word', 'Enter');
 await page.waitForTimeout(250);
@@ -338,12 +372,14 @@ const kwStored = await page.evaluate(() => localStorage.getItem('labops.asr.keyw
 check('常用词写进本机浏览器（与词对分开存，互不影响）', String(kwStored).includes(KW), String(kwStored));
 check('列表里出现这枚词条', (await page.locator('.vtp__chips li').count()) === 1, String(await page.locator('.vtp__chips').innerText().catch(() => '')));
 
+await closeVocabulary();
 await page.locator('#cmd').fill('');
 await holdToTalk(900);
 const kwBody = transcribeBodies.at(-1) ?? {};
+await openVocabulary();
 check('下一次请求把常用词带上（extraTerms）',
   JSON.stringify(kwBody['extraTerms']) === JSON.stringify([KW]), JSON.stringify(kwBody['extraTerms']));
-const statusOff = (await page.locator('.vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+const statusOff = (await page.locator('.settings-voice .vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
 check('偏置关着时不许说成"已生效"：状态行明确写未发给模型',
   /未发给模型/.test(statusOff) && !/已把常用词/.test(statusOff), statusOff);
 
@@ -357,9 +393,11 @@ check('拦下后列表没被塞进脏数据', (await page.locator('.vtp__chips l
 
 // 把服务端"开关打开"（模拟 .env 改 ASR_CONTEXT_ENABLED=1），界面说法必须跟着变
 stubContextEnabled = true;
+await closeVocabulary();
 await page.locator('#cmd').fill('');
 await holdToTalk(900);
-const statusOn = (await page.locator('.vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+await openVocabulary();
+const statusOn = (await page.locator('.settings-voice .vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
 check('开关打开后状态行改口：已随请求发出，并给出字数/词数',
   /已把常用词连同内置词表发给模型/.test(statusOn) && /当前协议没有热词通道/.test(statusOn), statusOn);
 const barOn = (await page.locator('.vcb').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
@@ -368,27 +406,36 @@ check('常用词只进偏置、不改写文本：改动清单仍是词典那两�
 await page.screenshot({ path: path.join(SHOT, 'keywords-on.png') });
 
 // 叫停：偏置属于"系统在影响这句话怎么被听出来"，叫停就得一起停，并且要说清停的是它
+await closeVocabulary();
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
 await page.locator('.vcb__btn--ghost').click();
 await page.waitForTimeout(300);
 await page.locator('#cmd').fill('');
 await holdToTalk(900);
+await openVocabulary();
 const supBody = transcribeBodies.at(-1) ?? {};
-const statusSup = (await page.locator('.vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+const statusSup = (await page.locator('.settings-voice .vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
 check('叫停后请求带上 skipTermCorrect，状态行说"这次没有发给模型"（不谎报）',
   supBody['skipTermCorrect'] === true && /没有发给模型/.test(statusSup), statusSup);
 await page.locator('.vcb__btn--ghost').click(); // 恢复，给后面的删除步骤一个干净起点
 await page.waitForTimeout(300);
+await closeVocabulary();
 
 // 收回：删掉常用词后不该再往请求里塞字段
+await openVocabulary();
 await page.locator('.vtp__chip-del').first().click();
 await page.waitForTimeout(250);
+await closeVocabulary();
 await page.locator('#cmd').fill('');
 await holdToTalk(900);
+await openVocabulary();
 check('删除后请求不再带 extraTerms（可逆，且当场生效）',
   transcribeBodies.at(-1)?.['extraTerms'] === undefined, JSON.stringify(transcribeBodies.at(-1)?.['extraTerms']));
-const statusEmpty = (await page.locator('.vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+const statusEmpty = (await page.locator('.settings-voice .vtp__status').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
 check('列表空了，状态行也不再声称发过', /还没有登记常用词/.test(statusEmpty), statusEmpty);
 stubContextEnabled = false;
+await closeVocabulary();
 
 // ---------------------------------------------------------------- U3：词汇体检与导出
 console.log('\n[U3 · 体检我的词汇 / 导出待并入条目]');
@@ -433,8 +480,9 @@ await page.route('**/api/agent/asr-lexicon-check', async (route: Route) => {
   });
 });
 
+await openVocabulary();
 const checkBtn = page.getByRole('button', { name: '体检我的词汇', exact: true });
-check('体检入口存在', (await checkBtn.count()) > 0, `count=${await checkBtn.count()}`);
+check('体检入口在设置-个性化里', (await page.locator('.settings-voice').getByRole('button', { name: '体检我的词汇' }).count()) > 0, `count=${await checkBtn.count()}`);
 check('什么都没登记时体检按钮是禁用态（不给空体检）', await checkBtn.isDisabled().catch(() => false), '');
 
 // 先登记两样东西：一个可能与内置重复的常用词、一个撞保护词的词对
@@ -445,6 +493,10 @@ await page.fill('#vtp-to', '报修');
 await page.getByRole('button', { name: '保存', exact: true }).click();
 await page.waitForTimeout(250);
 check('登记之后体检按钮转为可用', !(await checkBtn.isDisabled().catch(() => true)), '');
+await closeVocabulary();
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
+await openVocabulary();
 
 await checkBtn.click();
 await page.waitForTimeout(500);
@@ -501,6 +553,10 @@ check('失败之后不保留上一次的候选（避免旧结论冒充现状）'
 checkStatus = 200;
 
 // 删掉登记后按钮回到禁用态（可逆性在 U3 这条链上同样成立）
+await closeVocabulary();
+await page.locator('#cmd').fill('');
+await holdToTalk(900);
+await openVocabulary();
 await page.getByRole('button', { name: '清除全部常用词', exact: true }).click();
 await page.getByRole('button', { name: '确认清除全部常用词？', exact: true }).click();
 await page.waitForTimeout(300);
@@ -629,24 +685,26 @@ if (mmicCount > 0) {
     }
   }
   // 词汇体检：同一份组件、同一个端点，移动端不该另写一套
-  const mToggle = mpage.locator('.vtp__toggle');
-  if ((await mToggle.count()) > 0) {
-    await mToggle.click();
-    await mpage.waitForTimeout(250);
+  // 移动端同样从 设置 → 个性化 进入：证明这是一处实现两端共用，而不是各写一遍
+  await mpage.goto(`${BASE}/mobile.html?view=settings&category=personalization`, { waitUntil: 'networkidle' });
+  await mpage.waitForTimeout(1500);
+  const mPanel = mpage.locator('.settings-voice');
+  if ((await mPanel.count()) > 0) {
     await mpage.fill('#vtp-word', '门禁电源板');
     await mpage.press('#vtp-word', 'Enter');
     await mpage.waitForTimeout(250);
-    const mCheck = mpage.getByRole('button', { name: '体检我的词汇', exact: true });
-    check('移动端同样有体检入口且登记后可用', (await mCheck.count()) > 0 && !(await mCheck.isDisabled().catch(() => true)), `count=${await mCheck.count()}`);
+    const mCheck = mPanel.getByRole('button', { name: '体检我的词汇', exact: true });
+    check('移动端在设置-个性化里有同一份热词面板，登记后可体检',
+      (await mCheck.count()) > 0 && !(await mCheck.isDisabled().catch(() => true)), `count=${await mCheck.count()}`);
     await mCheck.click();
     await mpage.waitForTimeout(500);
-    const mReport = (await mpage.locator('.vtp__report').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
+    const mReport = (await mPanel.locator('.vtp__report').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
     check('移动端渲染同一份服务端结论（不是各写一遍的近似版）',
       /内置 148 条（指纹 1131ddb19f00）/.test(mReport) && /事前偏置 关/.test(mReport), mReport);
     await mpage.screenshot({ path: path.join(SHOT, 'mobile-lexicon-check.png') });
   } else {
-    check('移动端同样有体检入口且登记后可用', false, '没找到 .vtp__toggle');
-    check('移动端渲染同一份服务端结论（不是各写一遍的近似版）', false, '上一步就没找到入口');
+    check('移动端在设置-个性化里有同一份热词面板，登记后可体检', false, '没找到 .settings-voice');
+    check('移动端渲染同一份服务端结论（不是各写一遍的近似版）', false, '上一步就没找到面板');
   }
   check('移动端无页面错误', merrors.length === 0, merrors.slice(0, 2).join(' | ') || '0 条');
 }

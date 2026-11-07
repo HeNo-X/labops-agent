@@ -110,8 +110,9 @@ function eventTime(row: VisionEvent): string {
 
 function show(): void {
   open.value = true;
-  if (vision.configured.value) vision.start();
-  else void vision.refresh();
+  // 无条件启动轮询：未配置密钥时 status 也会如实返回 configured=false（带接入指引），
+  // 服务端补配密钥重启后，轮询自动发现 configured 翻转，画面卡与数据无需刷新页面
+  vision.start();
 }
 
 function close(): void {
@@ -126,7 +127,7 @@ function onTarget(event: Event): void {
 }
 
 watch(open, (isOpen) => {
-  if (isOpen && vision.configured.value) vision.start();
+  if (isOpen) vision.start();
   if (!isOpen) vision.stop();
 });
 

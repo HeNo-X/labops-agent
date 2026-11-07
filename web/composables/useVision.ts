@@ -164,7 +164,12 @@ export function useVision(pollMs = 15_000) {
     stop();
     void refresh();
     void probeLive();
-    timer = window.setInterval(() => void refresh(), pollMs);
+    // 探活必须随轮询持续重跑：只探一次的话，抽屉先开、Vision 会话后启动时
+    // liveAvailable 会永远停在 false，画面卡再也不出现（2026-11-07 实测踩过）
+    timer = window.setInterval(() => {
+      void refresh();
+      void probeLive();
+    }, pollMs);
   }
 
   /** 人工核查回流：误报/确认标注（批C）。成功后本地事件立即更新，等下轮轮询对齐服务端 */

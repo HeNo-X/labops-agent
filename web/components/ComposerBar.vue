@@ -18,6 +18,7 @@ import { useVoiceInput } from '../composables/useVoiceInput';
 import { useHoldToTalk } from '../composables/useHoldToTalk';
 import { useVoiceCorrection } from '../composables/useVoiceCorrection';
 import VoiceCorrectionBar from './VoiceCorrectionBar.vue';
+import VoiceTermPanel from './VoiceTermPanel.vue';
 
 const props = withDefaults(
   defineProps<{
@@ -223,6 +224,13 @@ function onKeydown(event: KeyboardEvent): void {
     </template>
 
     <p v-if="voiceHint" :class="isMobile ? 'mobile-voice-hint' : 'bar__voice-hint'" role="alert">{{ voiceHint }}</p>
+
+    <!-- 语音可用时才给登记入口：键盘输入的人不需要"这个词被识别成了什么" -->
+    <VoiceTermPanel
+      v-if="voice.supported.value"
+      :bias="voice.lastBias.value"
+      :protocol="voice.lastProtocol.value"
+    />
 
     <VoiceCorrectionBar
       v-if="showCorrections"

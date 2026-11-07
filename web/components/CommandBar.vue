@@ -12,15 +12,10 @@ import {t as tr} from "../i18n";
  *    运行中输入的那句进入待发送（单条、按会话隔离），本轮结束后由父组件决定
  *    自动发出还是填回草稿。示例 chips 在运行中仍禁用。
  */
-import { computed, nextTick, ref } from 'vue';
+import { computed } from 'vue';
 import { useRunStore } from '../stores/run';
-import { useVoiceInput } from '../composables/useVoiceInput';
-import { useHoldToTalk } from '../composables/useHoldToTalk';
-import { useVoiceCorrection } from '../composables/useVoiceCorrection';
-import VoiceCorrectionBar from './VoiceCorrectionBar.vue';
-import VoiceTermPanel from './VoiceTermPanel.vue';
 import StatusTag from './StatusTag.vue';
-import UiIcon from './UiIcon.vue';
+import ComposerBar from './ComposerBar.vue';
 
 // ⚠️ Boolean prop 必须显式给默认值：Vue 对未传入的 Boolean 类型 prop 会直接置为
 // false（而不是 undefined），不写 withDefaults 会让 `examples?: boolean` 的
@@ -97,62 +92,9 @@ function useExample(q: string): void {
   if (busy.value) return;
   // 示例只帮你想问题：填进输入框待确认，不替他直接发出去
   text.value = q;
-  void nextTick(() => inputEl.value?.focus());
 }
 
 // ---- 语音输入：与移动端 MobileConversation 同一 composable、同一套错误码文案 ----
-const voice = useVoiceInput();
-const voiceHint = computed(() => {
-  const code = voice.errorCode.value;
-  if (!code || code === 'aborted') return '';
-  const messages: Partial<Record<string, string>> = {
-    unsupported: tr('当前浏览器不支持录音'),
-    insecure: tr('语音输入需要 HTTPS 或 localhost 环境'),
-    denied: tr('麦克风权限被拒绝，请在浏览器地址栏允许后重试'),
-    no_device: tr('未检测到可用麦克风'),
-    busy: tr('已有录音在进行'),
-    network: tr('网络异常，转写失败'),
-    not_configured: tr('语音识别未配置：请在服务端 .env 设置 ASR_API_KEY'),
-    rate_limited: tr('语音转写已达每小时配额，请稍后再试'),
-    upstream: tr('识别服务暂不可用，请稍后重试'),
-    empty: tr('没有听清，请靠近一点再说一次'),
-    unknown: tr('语音识别失败，请重试')
-  };
-  return messages[code] || '';
-});
-
-// 长按说话：按下开始录音，松手结束并回填。交互逻辑在 useHoldToTalk（PC/移动端共用一份）。
-const voiceFix = useVoiceCorrection(voice, text);
-/**
- * PC 端也走微信式：点麦克风先切「语音模式」（输入框变整行长条、条上直接写「按住说话」），
- * 而不是让用户对着一个麦克风图标猜要不要长按。
- * 录音仍复用 useHoldToTalk —— 与移动端同一份交互实现。
- */
-const voiceMode = ref(false);
-const inputEl = ref<HTMLTextAreaElement | null>(null);
-const hold = useHoldToTalk({
-  voice,
-  onText: (recognized: string) => {
-    voiceFix.applyText(recognized);
-    voiceMode.value = false;
-    void nextTick(() => inputEl.value?.focus());
-  }
-});
-function enterVoice(): void {
-  if (busy.value || voice.working.value) return;
-  voiceMode.value = true;
-}
-function exitVoice(): void {
-  voiceMode.value = false;
-  void nextTick(() => inputEl.value?.focus());
-}
-
-function onKeydown(e: KeyboardEvent): void {
-  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-    e.preventDefault();
-    submit();
-  }
-}
 // F27：不再在任务结束时抢焦点 —— 用户可能正在读历史或操作其他控件
 </script>
 
@@ -173,112 +115,19 @@ function onKeydown(e: KeyboardEvent): void {
       </button>
     </div>
 
-    <div
-      v-if="voice.working.value"
-      class="bar__voice"
-      role="status"
-      aria-live="polite"
-    >
-      <span class="bar__voice-dot" aria-hidden="true"></span>
-      <b>{{ tr(voice.status.value === 'transcribing' ? '识别中…' : voice.status.value === 'requesting' ? '等待麦克风…' : '正在聆听') }}</b>
-      <span class="bar__voice-time">{{ Math.floor(voice.seconds.value) }}s / 60s</span>
-    </div>
-
-    <div class="bar__row">
-      <label class="sr-only" for="cmd">{{tr("输入你的实验室问题")}}</label>
-      <!--
-        长按说话：按住录音、松手结束并回填。
-        录音期间按钮**不能隐藏**（否则用户没有可松开的地方，话就白说了）；
-        用 working 高亮表达状态，并在聆听条里给「松手结束」的提示。
-      -->
-      <button
-        v-if="voice.supported.value && !voiceMode"
-        type="button"
-        class="bar__mic"
-        :class="{ 'is-active': voice.working.value }"
-        :disabled="busy"
-        :aria-label="tr('语音输入')"
-        :title="tr('语音输入')"
-        @click="enterVoice"
-      >
-        <UiIcon name="mic" />
-      </button>
-      <button
-        v-else-if="voice.supported.value && voiceMode"
-        type="button"
-        class="bar__mic"
-        :disabled="busy"
-        :aria-label="tr('切换到键盘输入')"
-        :title="tr('切换到键盘输入')"
-        @click="exitVoice"
-      >
-        <UiIcon name="keyboard" />
-      </button>
-      <button
-        v-if="voiceMode"
-        type="button"
-        class="bar__speak"
-        :class="{ 'is-active': voice.status.value === 'recording', 'is-cancel': hold.sliding.value }"
-        :style="hold.sliding.value ? { borderColor: '#e5484d', color: '#e5484d', background: 'rgba(229,72,77,0.14)', borderStyle: 'solid' } : undefined"
-        :disabled="busy"
-        :aria-label="tr('按住说话')"
-        v-on="hold.handlers"
-      >
-        <UiIcon name="mic" />
-        <span class="bar__speak-text">{{
-          tr(hold.sliding.value ? '松开取消' : voice.status.value === 'recording' ? '松开结束' : '按住说话')
-        }}</span>
-      </button>
-      <textarea
-        v-else
-        id="cmd"
-        ref="inputEl"
-        v-model="text"
-        class="bar__input"
-        :rows="isHero ? 2 : 1"
-        :placeholder="busy ? tr('本轮还在执行，可先写下要补的一句（本轮结束后发送）') : props.placeholder ?? '输入实验室问题或要办理的事项…'"
-        :disabled="voice.working.value"
-        @keydown="onKeydown"
-      />
-      <button v-if="!busy && !voiceMode" type="button" class="bar__btn" :disabled="!canSubmit" @click="submit">
-        {{tr(props.submitLabel ?? '发送')}}
-      </button>
-      <template v-else>
-        <!-- 继续发送：只在"运行中且用户已经输入内容"时出现，点了才入队 -->
-        <button
-          v-if="!voiceMode && text.trim()"
-          type="button"
-          class="bar__btn bar__btn--queue"
-          :title="tr('加入待执行队列，本轮结束后按序自动发送')"
-          @click="submit"
-        >
-          {{tr('继续发送')}}
-        </button>
-        <!-- 运行中：停止占据发送按钮的位置（同一列、同一尺寸），结束后自动换回发送 -->
-        <!-- 语音模式不显示停止：长按结束就回输入框，这里没有可停的东西 -->
-        <button v-if="!voiceMode" type="button" class="bar__btn bar__btn--stop" @click="emit('cancel')">{{tr("停止")}}</button>
-      </template>
-    </div>
-
-    <!-- 录音遮罩：按住说话期间把主内容区压暗，中央给出明确指引（上滑可取消） -->
-    <Teleport to="body">
-      <div
-        v-if="voice.status.value === 'recording' || hold.sliding.value"
-        class="voice-mask"
-        :class="{ 'is-cancel': hold.sliding.value }"
-        role="status"
-        aria-live="polite"
-      >
-        <div class="voice-mask__card">
-          <span class="voice-mask__wave" aria-hidden="true"></span>
-          <b class="voice-mask__title">{{ tr(hold.sliding.value ? '松开取消' : '正在聆听') }}</b>
-          <span class="voice-mask__hint">{{
-            tr(hold.sliding.value ? (hold.pointerKind.value === 'mouse' ? '鼠标已上移，松开即放弃这段录音' : '手指已上移，松手即放弃这段录音') : '上滑可取消 · 松开结束并转成文字')
-          }}</span>
-          <span class="voice-mask__time">{{ Math.floor(voice.seconds.value) }}s / 60s</span>
-        </div>
-      </div>
-    </Teleport>
+    <ComposerBar
+      v-model:draft="text"
+      :variant="isHero ? 'hero' : 'dock'"
+      input-id="cmd"
+      :busy="busy"
+      :rows="isHero ? 2 : 1"
+      :placeholder="props.placeholder ?? '输入实验室问题或要办理的事项…'"
+      :submit-label="props.submitLabel ?? '发送'"
+      show-corrections
+      @submit="submit"
+      @stop="emit('cancel')"
+      @queue="(q) => emit('queue', q)"
+    />
 
     <!-- 待执行队列：最多 3 条，本轮结束后按序自动执行；可单条立即发送或删除 -->
     <div v-if="props.queued.length" class="bar__queue" role="status">
@@ -308,24 +157,6 @@ function onKeydown(e: KeyboardEvent): void {
     </div>
 
     <p v-if="props.notice" class="bar__notice" role="status">{{ tr(props.notice) }}</p>
-
-    <p v-if="voiceHint" class="bar__voice-hint" role="alert">{{ voiceHint }}</p>
-
-    <VoiceCorrectionBar
-      :corrections="voice.lastCorrections.value"
-      :original-text="voiceFix.originalText.value"
-      :suppressed="voiceFix.suppressed.value"
-      @restore="voiceFix.restore"
-      @suppress="voiceFix.suppress"
-      @unsuppress="voiceFix.unsuppress"
-    />
-
-    <!-- 语音可用时才给登记入口：键盘输入的人不需要"这个词被识别成了什么" -->
-    <VoiceTermPanel
-      v-if="voice.supported.value"
-      :bias="voice.lastBias.value"
-      :protocol="voice.lastProtocol.value"
-    />
 
     <div v-if="busy" class="bar__hint">
       <StatusTag

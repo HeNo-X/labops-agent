@@ -275,7 +275,9 @@ async function openCamera(): Promise<void> {
 .builtin__primary {
   background: var(--primary) !important;
   border-color: var(--primary) !important;
-  color: #fff !important;
+  /* 深色模式 --primary 翻转为近白：文字必须用对比色令牌（硬编码 #fff 会白底白字，
+     违反 tokens.css『按钮文字一律用 --primary-contrast』规约——2026-11-07 实测踩坑） */
+  color: var(--primary-contrast) !important;
   font-weight: 600;
 }
 .builtin__hint {

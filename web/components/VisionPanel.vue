@@ -318,6 +318,9 @@ onUnmounted(() => {
   padding: 18px;
   background: var(--surface);
   color: var(--text);
+  /* 深色模式 --surface(#141414) 与 --bg(#0a0a0a)+遮罩区分度不足：描边+浮层阴影双保险 */
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
   border-radius: 10px;
   box-sizing: border-box;
   display: grid;

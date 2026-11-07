@@ -524,6 +524,8 @@ useVisibleRefresh(
   padding: 22px;
   background: var(--surface);
   color: var(--text);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
   border-radius: 10px;
   box-sizing: border-box;
   display: grid;

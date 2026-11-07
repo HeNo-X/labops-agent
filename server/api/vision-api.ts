@@ -227,7 +227,9 @@ async function handleLiveProbe(res: ServerResponse): Promise<void> {
 }
 
 async function handleFeed(res: ServerResponse): Promise<void> {
-  const upstream = await fetchLiveFeed(4000);
+  // 超时 10s：live/start 后模型预热期（约 2s）内生成器不产帧、Werkzeug 不发响应头，
+  // 4s 超时会在预热窗口内 502（2026-11-07 实测）——放宽到 10s 等过预热
+  const upstream = await fetchLiveFeed(10000);
   if (!upstream || !upstream.ok || !upstream.body) {
     if (upstream) await upstream.body?.cancel().catch(() => undefined);
     reply(res, 502, { error: 'vision_feed_unreachable', message: '未探测到实验室内网视觉服务：画面留在实验室（边缘推理），云端只有结论 JSON' });

@@ -55,7 +55,16 @@ async function latest(){nearBottom.value=true;newMessages.value=false;await next
 watch(()=>session.currentMessages.map(m=>m.text+m.status).join('|'),async()=>{if(nearBottom.value)await latest();else newMessages.value=true;});
 async function send(){const text=draft.value;if(!text.trim()||busy.value)return;nearBottom.value=true;void props.controller.submit(text,mode.value);}
 function describe(result:RoundEffects|undefined){if(!result)return [];return [...result.notes,...result.reverted.map(r=>'已回退沙盒对象 '+r.objectId),...result.rejectedPlans.map(id=>'已作废待确认方案 '+id),...result.supersededProposals.map(id=>'已作废待确认提案 '+id),...result.cancelledTasks.map(id=>'已取消任务 '+id),...result.notReverted.map(r=>'未回退 '+r.objectId+'：'+r.reason),...result.blocked.map(r=>'原系统已提交，需人工处理：'+r.planId+' '+r.objects.map(o=>o.id).join('、'))];}
-async function remove(round:Round){if(busy.value||!round.userMessage)return;const ok=await feedback.confirmSheet({title:tr('删除本轮提问与回答？'),message:tr('作废未确认方案；已提交业务不会撤销。'),confirmLabel:tr('删除'),cancelLabel:tr('取消'),destructive:true});if(!ok)return;roundBusy.value=true;const result=await session.deleteRound(props.conversationId,round.userMessage.id);roundBusy.value=false;if(result.ok){effects.value=describe(result.effects);feedback.toast(tr('已删除本轮'));}else error.value=result.message||'删除未成功';}
+async function remove(round:Round){if(busy.value||!round.userMessage)return;const ok=await feedback.confirmSheet({title:tr('删除本轮提问与回答？'),message:tr('作废未确认方案；已提交业务不会撤销。'),confirmLabel:tr('删除'),cancelLabel:tr('取消'),destructive:true});if(!ok)return;roundBusy.value=true;const result=await session.deleteRound(props.conversationId,round.userMessage.id);roundBusy.value=false;if(result.ok){
+  effects.value=describe(result.effects);
+  // 删空即删会话：已无任何轮次时自动删除，回到开始页（currentId 置空后 isDraft 生效）
+  if(!session.currentRounds.length){
+    try{await session.removeConversation(props.conversationId);}catch{ /* 会话已不在则忽略 */ }
+    feedback.toast(tr('该会话已无消息，已自动删除'));
+    return;
+  }
+  feedback.toast(tr('已删除本轮'));
+}else error.value=result.message||'删除未成功';}
 /**
  * 该轮是否牵涉业务办理（口径同 App.roundTouchesBusiness）：只看这一轮有没有产出
  * 业务单/原系统方案，不看结果 state（确认执行不会回写，避免把已执行轮误判为无业务）。

@@ -201,12 +201,13 @@ async function toggleJob(job: AutomationJob): Promise<void> {
   await automation.toggle(job);
 }
 
-// 历史记录沉底：运行中 → 暂停 → 已完成 → 已归档（区内稳定，不打散原有顺序）
-const sortedJobs = computed(() => {
-  const rank = (j: AutomationJob): number =>
-    j.status === 'archived' ? 4 : j.displayStatus === 'completed' ? 3 : j.status === 'active' ? 1 : 2;
-  return [...automation.jobs.value].sort((a, b) => rank(a) - rank(b));
-});
+// 历史记录独立分区：运行中/暂停留在主列表；已完成/已归档沉到页面底部「历史记录」
+const liveJobs = computed(() =>
+  automation.jobs.value.filter((j) => j.status !== 'archived' && j.displayStatus !== 'completed')
+);
+const historyJobs = computed(() =>
+  automation.jobs.value.filter((j) => j.status === 'archived' || j.displayStatus === 'completed')
+);
 
 const delConfirm = ref<AutomationJob | null>(null);
 async function onDelete(job: AutomationJob): Promise<void> {
@@ -424,7 +425,7 @@ useVisibleRefresh(
           </div>
           <div class="auto-list">
             <AutomationTaskCard
-              v-for="job in sortedJobs"
+              v-for="job in liveJobs"
               :key="job.id"
               :job="job"
               :templates="automation.templates.value"
@@ -467,6 +468,25 @@ useVisibleRefresh(
                 <span class="auto-tpl-card__hint">{{ tr(kindHint(String(kind))) }}</span>
                 <span class="auto-tpl-card__sched">{{ tr(meta.schedule) }}</span>
               </button>
+            </div>
+          </div>
+
+          <!-- 历史记录：已完成/已归档，独立分区沉底（不与运行中任务混排） -->
+          <div v-if="historyJobs.length" class="auto-tpl-section auto-history">
+            <h3 class="auto-tpl-section__title">{{ tr('历史记录') }}</h3>
+            <p class="auto-field__hint">{{ tr('已完成或已归档的任务保留在这里，可删除记录；不影响运行中的任务。') }}</p>
+            <div class="auto-list">
+              <AutomationTaskCard
+                v-for="job in historyJobs"
+                :key="job.id"
+                :job="job"
+                :templates="automation.templates.value"
+                :busy="busy"
+                :readonly="readonly"
+                @open="openDetail(job)"
+                @toggle="toggleJob(job)"
+                @delete="onDelete(job)"
+              />
             </div>
           </div>
 
@@ -864,6 +884,7 @@ useVisibleRefresh(
 .auto-empty-card .auto-empty__try { margin: 6px 0 0; }
 /* 模板网格：PC 两列、窄屏单列 */
 .auto-tpl-section { margin-top: 26px; }
+.auto-history{opacity:0.88}
 .auto-tpl-section__title { margin: 0 0 10px; font-size: calc(var(--ui-font-size) * 1.0); color: var(--text-muted); font-weight: 600; }
 .auto-tpl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .auto-tpl-card {

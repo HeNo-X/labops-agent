@@ -90,6 +90,10 @@ function confirmAutonomy(): void {
   spec.value.autonomous = true;
   autonomyAsk.value = false;
 }
+// 进入自定义指令模板时，三个额外动作默认全勾（用户可逐个取消）
+watch(isAgentTemplate, (v) => { // immediate：startCreateWith 直接带 kind 打开时也要吃到默认勾选
+  if (v && !Array.isArray(spec.value.agentTools)) spec.value.agentTools = DRAFT_TOOLS.map((t) => t.name);
+}, { immediate: true });
 function toggleTool(name: string): void {
   const set = new Set(agentTools.value);
   if (set.has(name)) set.delete(name);

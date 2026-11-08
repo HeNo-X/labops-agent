@@ -712,6 +712,13 @@ function onDeleteRound(r: Round): void {
   if (!window.confirm(`删除第 ${index} 轮？该轮提问与回答都会移除；已执行的业务写入不会因此回退（需要回退请用「回档」）。`)) return;
   void (async () => {
     const res = await session.deleteRound(id, r.userMessage!.id);
+    // 删空即删会话：该会话已无任何轮次时自动删除并回到新会话界面
+    if (res.ok && session.currentId === id && rounds.value.length === 0) {
+      try { await session.removeConversation(id); } catch { /* 会话已不在列表则忽略 */ }
+      session.startDraft();
+      roundNotice.value = { tone: 'ok', lines: ['该会话已无消息，已自动删除并回到新会话。'] };
+      return;
+    }
     roundNotice.value = res.ok
       ? { tone: 'ok', lines: [`已删除第 ${index} 轮（移除 ${res.removedCount ?? 0} 条消息）。`, ...effectsLines(res.effects)] }
       : { tone: 'danger', lines: [res.message ?? '删除失败'] };

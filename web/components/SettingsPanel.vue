@@ -65,12 +65,14 @@ async function loadHealth() {
     healthBusy.value = false;
   }
 }
-function modeLabel(mode:string){return tr(mode==='chat'?'聊天':'工作');}
-function healthState(c:{model:string;consecutiveFailures:number;coolingDown:boolean;retryInMs:number}):string{
-  if(c.coolingDown)return tr('冷却中，约 ')+Math.ceil(c.retryInMs/1000)+tr(' 秒后重试');
-  if(c.consecutiveFailures)return tr('已失败 ')+c.consecutiveFailures+tr(' 次');
-  return tr('正常');
-}
+// 汇总口径：某模式下任一模型未被熔断冷却即视为「连接正常」；Agent 状态 = 本健康端点可达
+const modeOk = (mode: 'chat' | 'task'): boolean | null => {
+  const list = health.value?.circuitByMode?.[mode];
+  if (!list) return null; // 无数据：如实显示「未知」
+  return list.some((c) => !c.coolingDown);
+};
+const healthLine = (label: string, ok: boolean | null): string =>
+  label + '：' + (ok === null ? tr('暂无数据') : ok ? tr('AI模型连接正常') : tr('AI模型连接不正常'));
 const runtime=()=>window.LabClient;
 const environment=ref({...(runtime()?.environment?.()||{mainApiBase:'',agentApiBase:'',mainPublicBase:''})});
 const diagnostics=ref(''),environmentMessage=ref(''),environmentBusy=ref(false);
@@ -135,7 +137,7 @@ refreshUpdateState();
 <button class="settings-reset" @click="resetPreferences">{{tr('恢复默认设置')}}</button></template>
 <template v-else-if="category==='general'"><h2>{{tr('常规')}}</h2>
 <details open class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('语言与入口')}}</h3></span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><div class="settings-card"><label class="settings-row" for="pref-language"><span>{{tr('语言')}}</span><select id="pref-language" :value="preferences.language" @change="change('language',$event)"><option value="auto">{{tr('跟随系统')}}</option><option value="zh-CN">{{tr("简体中文")}}</option><option value="en">English</option></select></label><label class="settings-row" for="pref-mode"><span>{{tr('默认会话模式')}}</span><select id="pref-mode" :value="preferences.defaultMode" @change="change('defaultMode',$event)"><option value="task">{{tr('工作会话')}}</option><option value="chat">{{tr('聊天会话')}}</option></select></label><label class="settings-row" for="pref-start"><span>{{tr('手机默认入口')}}</span><select id="pref-start" :value="preferences.mobileStart" @change="change('mobileStart',$event)"><option value="assistant">{{tr('会话')}}</option><option value="home">{{tr('工作台')}}</option></select></label></div><p class="settings-hint">{{tr('历史记录与业务资料保留原文。')}}</p></div></details>
-<details open class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr("模型链与熔断状态")}}</h3></span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><p class="settings-hint">{{tr("连续失败的上游模型会被暂时跳过并在冷却后自动恢复；这里显示的是服务端实时判定，不是配置清单。")}}</p><div class="settings-card settings-model-health"><button :disabled="healthBusy" @click="loadHealth">{{tr(healthBusy?"读取中…":"刷新诊断")}}</button><p v-if="healthError" class="settings-hint" role="alert">{{healthError}}</p><div v-if="health" class="settings-health"><div v-for="(list,mode) in health.circuitByMode" :key="String(mode)" class="settings-health-row"><b>{{modeLabel(String(mode))}}</b><span v-for="c in list" :key="c.model" class="settings-health-cell" :class="{'is-cooling':c.coolingDown}">{{c.model}} · {{healthState(c)}}</span></div><p class="settings-hint">{{tr("本轮实际生效模型显示在每条回答的来源徽章上；未配置 Key 的模式会明确标注为规则引擎，不冒充大模型。")}}</p></div></div></div></details>
+<details open class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr("模型链与熔断状态")}}</h3></span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><p class="settings-hint">{{tr("连续失败的上游模型会被暂时跳过并在冷却后自动恢复；这里按模式汇总显示服务端实时判定，不是配置清单。")}}</p><div class="settings-card settings-model-health"><button :disabled="healthBusy" @click="loadHealth">{{tr(healthBusy?"读取中…":"刷新诊断")}}</button><p v-if="healthError" class="settings-hint" role="alert">{{healthError}}</p><div v-if="health" class="settings-health settings-health--summary"><p>{{healthLine(tr('会话模式'),modeOk('chat'))}}</p><p>{{healthLine(tr('工作模式'),modeOk('task'))}}</p><p>{{tr('Agent状态')}}：{{healthError?tr('异常'):tr('正常')}}</p></div><p class="settings-hint">{{tr("按模式汇总当前 AI 模型链连接状态：某条模型被暂时跳过（熔断冷却）不影响整体可用性，只要仍有模型可用即显示正常。实际生效模型见每条回答的来源徽章；未配置 Key 的模式会如实标注为规则引擎，不冒充大模型。")}}</p></div></div></details>
 <details v-if="installed" open class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('版本更新')}}</h3></span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><div class="settings-card settings-update"><p class="settings-hint">{{updateState}}</p><div class="settings-advanced-actions"><button :disabled="updateBusy" @click="checkUpdate">{{tr('检查更新')}}</button><button v-if="updateRelease" :disabled="updateBusy" @click="downloadUpdate">{{tr('下载更新')}}</button><button v-if="updateReady" :disabled="updateBusy" @click="installUpdate">{{tr('安装新版本')}}</button></div><p v-if="updateMessage" class="settings-hint" role="status">{{updateMessage}}</p></div></div></details>
 <details v-if="!installed" open class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('界面版本')}}</h3></span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><div class="settings-card settings-edition"><button :disabled="run.inputLocked" @click="emit('edition')"><UiIcon name="panel"/>{{tr(mobile?'使用桌面版':'使用手机版')}}</button><p v-if="run.inputLocked" class="settings-hint">{{tr('生成结束后可切换版本。')}}</p></div></div></details></template>
 <template v-else-if="category==='work'"><h2>{{tr('工作')}}</h2>

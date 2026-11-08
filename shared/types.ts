@@ -198,7 +198,7 @@ export interface ToolStartedPayload {
 }
 
 /** 结构化结果的类别。前端据此选择渲染器，不再假设所有工具都返回课表 */
-export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation' | 'checkin_status' | 'checkin_summary' | 'vision_field' | 'task_plan';
+export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation' | 'checkin_status' | 'checkin_summary' | 'vision_field' | 'task_plan' | 'term_schedule' | 'term_schedule_applied';
 
 export interface ToolResultPayload {
   step: number;
@@ -213,7 +213,7 @@ export interface ToolResultPayload {
   /** 结果类别，决定前端用哪个渲染器 */
   resultKind?: ToolResultKind;
   /** 结构化结果，前端只接受这一份（绝不插入模型返回的任意 HTML） */
-  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult | EvidenceObservationResult | CheckinStatusResult | CheckinSummaryResult | VisionFieldResult | { steps: TaskPlanStep[]; updatedAt: string };
+  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult | EvidenceObservationResult | CheckinStatusResult | CheckinSummaryResult | VisionFieldResult | { steps: TaskPlanStep[]; updatedAt: string } | Record<string, unknown>;
   error?: { code: string; message: string };
 }
 

@@ -1,5 +1,7 @@
 import { isBusinessConnected, effectiveRole } from '../business/bridge.ts';
 import { runKnowledge } from './knowledge.ts';
+import { APPLY_TERM_SCHEDULE_SPEC, applyTermSchedule } from './apply-term-schedule.ts';
+import { QUERY_TERM_SCHEDULE_SPEC, runQueryTermSchedule } from './query-term-schedule.ts';
 import { runAnalyzeEvidenceImage } from './analyze-evidence-image.ts';
 import { executeTaskPlan } from './task-plan.ts';
 import { prepareSchedule, queryDuty, queryBusiness, prepareWorkflow, queryIncident, prepareIncident,queryScheduled,prepareScheduled } from './business.ts';
@@ -63,7 +65,7 @@ export interface RegisteredTool {
    * 展示用效果标注（不发给模型）：read=只读查询；draft=生成办理单草稿（不执行业务）。
    * 真正的权限边界在服务端 policy/executor，不由这个标记决定（任务书 §11.2）。
    */
-  effect: 'read' | 'draft';
+  effect: 'read' | 'draft' | 'write';
 }
 
 /**
@@ -99,6 +101,8 @@ export type ToolExecution =
   | { ok: true; resultKind: 'checkin_summary'; result: CheckinSummaryResult; summary: string }
   | { ok: true; resultKind: 'vision_field'; result: VisionFieldResult; summary: string }
   | { ok: true; resultKind: 'task_plan'; result: { steps: import('../../shared/types.ts').TaskPlanStep[]; updatedAt: string }; summary: string }
+  | { ok: true; resultKind: 'term_schedule_applied'; result: import('./apply-term-schedule.ts').ApplyTermScheduleResult; summary: string }
+  | { ok: true; resultKind: 'term_schedule'; result: Record<string, unknown>; summary: string }
   | { ok: false; code: string; message: string; suggestions: string[]; summary: string };
 
 // ===========================================================================
@@ -548,6 +552,43 @@ export const REGISTRY: RegisteredTool[] = [
   { spec: QUERY_FREE_ROOMS_SPEC, execute: executeQueryFreeRooms, effect: 'read' },
   { spec: QUERY_CHECKIN_STATUS_SPEC, execute: queryCheckinStatus, effect: 'read' },
   { spec: QUERY_CHECKIN_SUMMARY_SPEC, execute: queryCheckinSummary, effect: 'read' },
+  // 学期安排 / 周值班模板：读走 GET，写走 POST（主系统唯一写入进程，权限由其判定）
+  {
+    spec: QUERY_TERM_SCHEDULE_SPEC as unknown as ToolSpec,
+    // runQueryTermSchedule 返回的是裸结果（不是 ToolExecution），这里包一层；
+    // 它此前一直没注册进 REGISTRY，导致读侧是死代码（2026-11-08 修正）
+    execute: async (a, ctx) => {
+      try {
+        const result = await runQueryTermSchedule(a as unknown as Parameters<typeof runQueryTermSchedule>[0], ctx.signal);
+        const raw = result as unknown as Record<string, unknown>;
+        const term = (raw['termSchedule'] as Record<string, unknown> | undefined) ?? {};
+        const roster = (raw['volunteerSchedule'] as Record<string, unknown> | undefined) ?? {};
+        const nS = Array.isArray(term['sessions']) ? term['sessions'].length : 0;
+        const nV = Array.isArray((roster as Record<string, unknown>)['days']) ? ((roster as Record<string, unknown>)['days'] as unknown[]).length : 0;
+        return {
+          ok: true,
+          resultKind: 'term_schedule',
+          result: raw,
+          summary: `学期安排 ${term['enabled'] ? `${nS} 条课时` : '未导入'}；周值班模板 ${roster['enabled'] ? `已导入（${nV} 天）` : '未导入'}`
+        };
+      } catch (err) {
+        const e = err as { code?: string; status?: number; message?: string };
+        return {
+          ok: false,
+          code: e.code || 'business_unavailable',
+          message: e.message || '主系统不可用',
+          suggestions: [],
+          summary: '未取得学期安排/值班模板（未连接主系统或上游不可用），不作猜测'
+        };
+      }
+    },
+    effect: 'read'
+  },
+  {
+    spec: APPLY_TERM_SCHEDULE_SPEC as unknown as ToolSpec,
+    execute: (a, ctx) => applyTermSchedule(a, ctx.signal),
+    effect: 'write'
+  },
   { spec: PREPARE_ISSUE_SPEC, execute: runPrepareIssueTicket, effect: 'draft' },
   { spec: PREPARE_CLOSURE_SPEC, execute: runPrepareRoomClosure, effect: 'draft' },
   { spec: PREPARE_ROOM_STATUS_SPEC, execute: runPrepareRoomStatus, effect: 'draft' },

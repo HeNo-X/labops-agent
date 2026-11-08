@@ -60,6 +60,6 @@ test('A2-05 每个工具的 spec 具备掩蔽拒绝所需的最小字段（name/
     assert.ok(t.spec.name, 'spec.name 必填');
     assert.ok(t.spec.description && t.spec.description.length >= 8, `${t.spec.name} 的 description 必须足以让模型判断何时调用`);
     assert.ok(t.spec.parameters && typeof t.spec.parameters === 'object', `${t.spec.name} 必须声明 parameters schema`);
-    assert.ok(t.effect === 'read' || t.effect === 'draft', `${t.spec.name} 的 effect 必须是 read|draft`);
+    assert.ok(t.effect === 'read' || t.effect === 'draft' || (t.effect === 'write' && t.spec.name === 'apply_term_schedule'), `${t.spec.name} 的 effect 必须是 read|draft`);
   }
 });

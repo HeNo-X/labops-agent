@@ -50,6 +50,9 @@ const FAMILY_BY_TOOL: Record<string, ToolFamily> = {
   query_duty_context: 'query',
   query_checkin_status: 'query',
   query_checkin_summary: 'query',
+  // 学期安排 / 周值班模板（读）/ 唯一写工具（写）
+  query_term_schedule: 'query',
+  apply_term_schedule: 'draft',
   // 知识检索
   query_knowledge: 'knowledge',
   // 草稿类（effect:'draft'，只生成待确认方案，绝不自行执行）

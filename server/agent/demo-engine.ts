@@ -554,9 +554,39 @@ export function renderDemoAnswer(
     if (result.kind === 'free_rooms') return renderFreeRoomsAnswer(result.payload as FreeRoomsResult);
     if (result.kind === 'operation_proposal') return renderProposalAnswer(result.payload as Proposal);
     if (result.kind === 'operations_report') return renderReportAnswer(result.payload as OperationsReportResult);
+    if (result.kind === 'term_schedule') return renderTermScheduleAnswer(result.payload as never);
+    if (result.kind === 'term_schedule_applied') return renderTermScheduleAppliedAnswer(result.payload as never);
     return renderScheduleAnswer(result.payload as ScheduleQueryResult, extras);
   }
   return renderScheduleAnswer(result, extras);
+}
+
+/** 学期安排/值班模板（只读档案）：只读档案与课表解算无关——如实呈现导入状态与规模，空数组不得说成"无课/无人" */
+function renderTermScheduleAnswer(r: {
+  termSchedule: { enabled: boolean; notImported: boolean; term: string; weeks: number | null; sessions: unknown[]; cancelled: unknown[]; notes: string[] };
+  volunteerSchedule: { enabled: boolean; notImported: boolean; days: unknown[]; persons: Array<{ name: string; className: string; group: string }>; dutyRoom: unknown };
+  hint?: string;
+}): string {
+  const lines: string[] = [];
+  const t = r.termSchedule, v = r.volunteerSchedule;
+  lines.push(`**学期安排**：${t.enabled ? `已导入 · ${t.term || '（学期名未填）'}${t.weeks ? ` · ${t.weeks} 周` : ''} · ${t.sessions.length} 条课时` : '尚未导入'}`);
+  lines.push(`**志愿者周值班模板**：${v.enabled ? `已导入 · ${v.days.length} 天 · ${v.persons.length} 名志愿者` : '尚未导入'}`);
+  if (t.enabled && t.cancelled.length) lines.push(`- 已登记停课/取消 ${t.cancelled.length} 条`);
+  if (v.enabled && v.persons.length) {
+    lines.push(`- 值班志愿者：${v.persons.slice(0, 10).map((p) => `${p.name}（${p.className}${p.group ? ` · ${p.group}` : ''}）`).join('、')}${v.persons.length > 10 ? ` 等共 ${v.persons.length} 人` : ''}`);
+  }
+  if (r.hint) lines.push(`- ${r.hint}`);
+  return lines.join('\n');
+}
+
+/** 学期安排/值班模板写回结果：如实呈现 revision 与规模，未自动发布的语义必须带上 */
+function renderTermScheduleAppliedAnswer(r: { target: string; revision: number; count: number; updatedBy: string; droppedKeys: string[] }): string {
+  const label = r.target === 'term' ? '学期安排' : '志愿者周值班模板';
+  const lines: string[] = [];
+  lines.push(`**${label}已更新**：revision=${r.revision}，当前 ${r.count} 条，操作者 ${r.updatedBy || '当前账号'}。`);
+  if (r.droppedKeys.length) lines.push(`- 已忽略非白名单字段：${r.droppedKeys.join('、')}`);
+  lines.push('- 该档案为主系统只读数据源，不参与课表实时解算；如与现场排班不一致，以管理员确认后的数据为准。');
+  return lines.join('\n');
 }
 
 function renderProposalAnswer(p: Proposal): string {

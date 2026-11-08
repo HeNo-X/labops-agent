@@ -780,7 +780,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
                 ? '这个工具不存在。你只能使用系统声明的工具。请改用可用工具，或直接向用户说明做不到。'
                 : exec.code === 'bad_audience'
                   ? '接收对象写法无效。原系统只接受 all / role(student|volunteer) / class(className) / user(userId)，不要用沙盒的 class_ids / role_scope。若用户没有明确说明收件人，**不要猜**：把可选形式列给用户并请他确认。'
-                  : exec.code === 'lab_not_found' || exec.suggestions.length
+                  : exec.code === 'lab_not_found' || Boolean(exec.suggestions?.length)
                     ? '这个房间号系统里没有。请从 suggestions 里挑一个最接近的重新调用，若都不合适就直接告诉用户没有这个房间并列出可选项。'
                     : '请修正参数后重试一次；若仍失败，直接告诉用户查不到。'
           })

@@ -14,6 +14,20 @@ const CATEGORIES=['personalization','general','account'];
 const allowed=[...CATEGORIES,'advanced',...(!mobile?['work']:[])];
 const category=ref(allowed.includes(props.category||'')?(props.category as string):'personalization');
 const business=useBusinessStore(),run=useRunStore();
+// B3：快捷入口——按常用度排序，点击即在会话里预填请求文本
+const quickStarts=[
+  {label:'机房开门 / 关门',text:'帮我看看 E310 现在开着吗'},
+  {label:'查今天课表',text:'今天有哪些课'},
+  {label:'查空闲机房',text:'哪些实验室现在空着'},
+  {label:'查当前人数 / 签到',text:'E310 现在有多少人'},
+  {label:'巡查 / 值班登记',text:'我要做值班交接'},
+  {label:'报修 / 登记故障',text:'E310 投影仪没有信号，帮我报修'},
+  {label:'工单处理',text:'查一下我的工单进度'},
+  {label:'调课',text:'帮我准备调课方案'},
+  {label:'发通知',text:'帮我发一条通知'},
+  {label:'运营日报',text:'生成今天的运营日报'}
+];
+function quickStart(text:string):void{session.saveDraft('__new',text);session.startDraft();emit('back');}
 const categories=[{id:'personalization',label:'个性化',icon:'palette'},{id:'general',label:'常规',icon:'settings'},...(!mobile?[{id:'work',label:'工作',icon:'work'}]:[]),...(installed?[{id:'advanced',label:'高级设置',icon:'panel'}]:[]),{id:'account',label:'账户',icon:'user'}];
 const accents=[{id:'neutral',label:'中性',color:'#525252'},{id:'blue',label:'蓝色',color:'#1d4ed8'},{id:'green',label:'绿色',color:'#166534'},{id:'purple',label:'紫色',color:'#6d28d9'},{id:'amber',label:'琥珀',color:'#92400e'}];
 function change(key:keyof Preferences,event:Event,kind:'string'|'number'|'boolean'='string'){const el=event.target as HTMLInputElement;updatePreferences({[key]:kind==='number'?Number(el.value):kind==='boolean'?el.checked:el.value} as Partial<Preferences>);}
@@ -117,8 +131,9 @@ refreshUpdateState();
 <details v-if="installed" class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('版本更新')}}</span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><div class="settings-card settings-update"><p class="settings-hint">{{updateState}}</p><div class="settings-advanced-actions"><button :disabled="updateBusy" @click="checkUpdate">{{tr('检查更新')}}</button><button v-if="updateRelease" :disabled="updateBusy" @click="downloadUpdate">{{tr('下载更新')}}</button><button v-if="updateReady" :disabled="updateBusy" @click="installUpdate">{{tr('安装新版本')}}</button></div><p v-if="updateMessage" class="settings-hint" role="status">{{updateMessage}}</p></div></div></details>
 <details v-if="!installed" class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('界面版本')}}</span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><div class="settings-card settings-edition"><button :disabled="run.inputLocked" @click="emit('edition')"><UiIcon name="panel"/>{{tr(mobile?'使用桌面版':'使用手机版')}}</button><p v-if="run.inputLocked" class="settings-hint">{{tr('生成结束后可切换版本。')}}</p></div></div></details></template>
 <template v-else-if="category==='work'"><h2>{{tr('工作')}}</h2>
-<details class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('我的工作')}}</span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><p class="settings-hint">{{tr('原系统任务与工作队列：待确认方案、待接收交接、待处理工单与资源数据健康。')}}</p><div class="settings-card settings-work-embed"><NativeWorkPanel v-if="business.connected" :embedded="true" :readonly="!taskMode" /></div></div></details>
-<details v-if="business.connected&&taskMode&&business.profile?.identity==='admin'" class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('登记故障事件')}}</span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><p class="settings-hint">{{tr('登记故障事实并分析教学影响；联合方案仍需本人确认后执行。')}}</p><div class="settings-card settings-work-embed"><NativeIncidentCard :scope-key="business.scopeKey" /></div></div></details>
+<section class="settings-group"><h3>{{tr('快捷发起')}}</h3><p class="settings-hint">{{tr('点击后在会话里发起，确认后执行。')}}</p><div class="settings-card"><div class="settings-quick-grid"><button v-for="s in quickStarts" :key="s.label" type="button" class="settings-quick-btn" :disabled="!business.connected" @click="quickStart(s.text)">{{tr(s.label)}}</button></div></div></section>
+<details class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('待办队列')}}</span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><p class="settings-hint">{{tr('原系统任务与工作队列：待确认方案、待接收交接、待处理工单与资源数据健康。')}}</p><div class="settings-card settings-work-embed"><NativeWorkPanel v-if="business.connected" :embedded="true" :readonly="!taskMode" /></div></div></details>
+<details v-if="business.connected&&taskMode&&business.profile?.identity==='admin'" class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('登记机房故障')}}</span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><p class="settings-hint">{{tr('登记故障事实并分析教学影响；联合方案仍需本人确认后执行。')}}</p><div class="settings-card settings-work-embed"><NativeIncidentCard :scope-key="business.scopeKey" /></div></div></details>
 <details v-if="business.connected" class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('证据与资料')}}</span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><p class="settings-hint">{{tr('工单与房间的证据照片附件；管理员可导入厂家设备资料。')}}</p><div class="settings-card settings-work-embed"><EvidencePanel :inline="true" :embed="true" :readonly="!taskMode" /></div></div></details>
 <section v-if="!business.connected" class="settings-group"><h3>{{tr('业务工作')}}</span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><p class="settings-hint">{{tr('连接主系统账号后可办理业务工作。')}}</p></div></details></template>
 <template v-else-if="category==='advanced'"><h2>{{tr('高级设置')}}</h2><details  class="settings-group"><summary class="settings-group__toggle"><span><h3>{{tr('服务器地址')}}</span><UiIcon name="chevron" :size="14" class="settings-group__chev"/></summary><div class="settings-group__body"><p class="settings-hint">{{tr('服务器地址由管理员提供。更换服务器会退出当前账号并清理本机业务缓存，需重新登录。')}}</p><div class="settings-card settings-server"><label class="settings-field" for="adv-main"><span>{{tr('主系统 API')}}</span><input id="adv-main" type="url" v-model.trim="environment.mainApiBase" autocomplete="off" spellcheck="false" inputmode="url"></label><label class="settings-field" for="adv-agent"><span>{{tr('LabOps API')}}</span><input id="adv-agent" type="url" v-model.trim="environment.agentApiBase" autocomplete="off" spellcheck="false" inputmode="url"></label><label class="settings-field" for="adv-public"><span>{{tr('签到分享地址')}}</span><input id="adv-public" type="url" v-model.trim="environment.mainPublicBase" autocomplete="off" spellcheck="false" inputmode="url"></label><div class="settings-advanced-actions"><button class="settings-apply" :disabled="environmentBusy" @click="saveEnvironment">{{tr('保存并重新登录')}}</button><button :disabled="environmentBusy" @click="checkConnection">{{tr('检查连接')}}</button></div><pre v-if="diagnostics" class="settings-diagnostics" role="status">{{diagnostics}}</pre><p v-if="environmentMessage" class="settings-hint" role="status">{{environmentMessage}}</p></div></div></details></template>
@@ -232,13 +247,14 @@ refreshUpdateState();
 @media(max-width:700px){.settings-panel{grid-template-columns:minmax(0,1fr);gap:12px}.settings-panel:not(.settings-panel--fullscreen) .settings-side{display:contents}.settings-categories{flex-direction:row;display:grid;grid-template-columns:repeat(auto-fit,minmax(72px,1fr));gap:5px}.settings-categories button{justify-content:center;padding:8px 4px;flex-wrap:wrap}.settings-categories svg{width:16px;flex-shrink:0}.settings-content h2{margin-bottom:8px}.settings-account-links a small{font-size:.85em}.settings-row{align-items:flex-start}.settings-row>span{padding-top:10px}.settings-panel--fullscreen{height:100%;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);gap:0}.settings-panel--fullscreen .settings-side{border-right:0;border-bottom:1px solid var(--border);padding:10px 12px;overflow:visible}.settings-panel--fullscreen .settings-content{padding:16px 14px 40px}}
 </style>
 <style scoped>
+.settings-work-embed h3{font-size:calc(var(--ui-font-size) * 0.92308);font-weight:600;color:var(--text-muted);margin:0 0 6px}
 /* 工作-内嵌业务面板：融入 settings-card（去弹窗遮罩/居中，适配设置页宽度） */
 .settings-work-embed{padding:0;background:transparent}
 .settings-work-embed .native-work-panel--embedded{border:0;border-radius:0;background:transparent}
 .settings-work-embed .native-work-queues{flex-wrap:wrap;gap:8px}
 .settings-work-embed .native-form{grid-template-columns:repeat(2,minmax(0,1fr))}
 .settings-work-embed .evidence-inline{border:0;padding:0}
-.settings-work-embed .native-card{border-left:4px solid var(--primary)}
+.settings-work-embed .native-card{border-left:1px solid var(--border-strong)}
 </style>
 <style scoped>
 /* 批次2：分区组折叠——summary 行 + chevron 旋转 + body 内距 */

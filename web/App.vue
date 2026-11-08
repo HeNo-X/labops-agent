@@ -732,20 +732,37 @@ function onDeleteRound(r: Round): void {
  */
 function showRollbackNotice(userMessageId: string, result: RoundActionResult): void {
   const index = rounds.value.findIndex((r) => r.userMessage?.id === userMessageId) + 1;
+  // 回档会先清空消息再走到这里，常常查不到原索引（-1+1=0）——此时不再报轮次
+  const where = index > 0 ? `已回档到第 ${index} 轮发起前` : '已回档';
   roundNotice.value = {
     tone: 'ok',
-    lines: [`已回档到第 ${index} 轮发起前（移除 ${result.removedCount ?? 0} 条消息）。`, ...effectsLines(result.effects)]
+    lines: [`${where}（移除 ${result.removedCount ?? 0} 条消息）。`, ...effectsLines(result.effects)]
   };
 }
 
-async function afterRoundEdit(payload: { userMessageId: string; text: string; result: RoundActionResult }): Promise<void> {
-  showRollbackNotice(payload.userMessageId, payload.result);
+async function afterRoundEdit(payload: { userMessageId: string; text: string; revertEffects: boolean }): Promise<void> {
+  // 回档在父层执行（子组件点击即 emit，不能等它被卸载）
+  const id = session.currentId;
+  if (!id) return;
+  const res = await session.rollbackRound(id, payload.userMessageId, payload.revertEffects);
+  if (!res.ok) {
+    roundNotice.value = { tone: 'danger', lines: [res.message ?? '回档失败，内容未变化'] };
+    return;
+  }
+  showRollbackNotice(payload.userMessageId, res);
   void loadTasks();
   await onSubmit(payload.text);
 }
 
-function afterRoundRewind(payload: { userMessageId: string; result: RoundActionResult }): void {
-  showRollbackNotice(payload.userMessageId, payload.result);
+async function afterRoundRewind(payload: { userMessageId: string; revertEffects: boolean }): Promise<void> {
+  const id = session.currentId;
+  if (!id) return;
+  const res = await session.rollbackRound(id, payload.userMessageId, payload.revertEffects);
+  if (!res.ok) {
+    roundNotice.value = { tone: 'danger', lines: [res.message ?? '回档失败，内容未变化'] };
+    return;
+  }
+  showRollbackNotice(payload.userMessageId, res);
   void loadTasks();
 }
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import {t as tr} from "../i18n";
-import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue';import {clientFetch} from '../client';import {actorHeaders} from '../actor';import {useSessionStore,type RoundActionResult,type RoundEffects,type Round} from '../stores/session';import {useRunStore} from '../stores/run';import type {useConversationController} from '../composables/useConversationController';import ChatMessage from '../components/ChatMessage.vue';import RoundToolbar from '../components/RoundToolbar.vue';import {useVisibleRefresh} from '../composables/useVisibleRefresh';
+import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue';import {clientFetch} from '../client';import {actorHeaders} from '../actor';import {useSessionStore,type RoundEffects,type Round} from '../stores/session';import {useRunStore} from '../stores/run';import type {useConversationController} from '../composables/useConversationController';import ChatMessage from '../components/ChatMessage.vue';import RoundToolbar from '../components/RoundToolbar.vue';import {useVisibleRefresh} from '../composables/useVisibleRefresh';
 import {useBusinessStore} from '../stores/business';import AsyncState from './AsyncState.vue';import {useFeedback} from './feedback';
 import ComposerBar from '../components/ComposerBar.vue';
 const props=defineProps<{conversationId:string;controller:ReturnType<typeof useConversationController>}>(),session=useSessionStore(),run=useRunStore(),feedback=useFeedback(),draft=ref(''),scroller=ref<HTMLElement>(),nearBottom=ref(true),newMessages=ref(false),error=ref(''),effects=ref<string[]>([]),roundBusy=ref(false);
@@ -80,15 +80,24 @@ function touchesBusiness(round:Round):boolean{
   }));
 }
 /** 内联「修改」：回档已在 ChatMessage 成功，展示回退结果后以 task 模式重发新内容 */
-async function afterRoundEdit(payload:{text:string;result:RoundActionResult}):Promise<void>{
-  effects.value=describe(payload.result.effects);
+async function afterRoundEdit(payload:{userMessageId:string;text:string;revertEffects:boolean}):Promise<void>{
+  // 回档在视图层执行（子组件点击即 emit，不能等它被卸载）
+  roundBusy.value=true;
+  const result=await session.rollbackRound(props.conversationId,payload.userMessageId,payload.revertEffects);
+  roundBusy.value=false;
+  if(!result.ok){error.value=result.message||'回档失败，内容未变化';return;}
+  effects.value=describe(result.effects);
   error.value='';
   draft.value=payload.text;
   await props.controller.submit(payload.text,'task');
 }
 /** 内联「回档」：仅展示回退结果，不重发 */
-function afterRoundRewind(payload:{result:RoundActionResult}):void{
-  effects.value=describe(payload.result.effects);
+async function afterRoundRewind(payload:{userMessageId:string;revertEffects:boolean}):Promise<void>{
+  roundBusy.value=true;
+  const result=await session.rollbackRound(props.conversationId,payload.userMessageId,payload.revertEffects);
+  roundBusy.value=false;
+  if(!result.ok){error.value=result.message||'回档失败，内容未变化';return;}
+  effects.value=describe(result.effects);
   error.value='';
 }
 watch(()=>run.runStatus,value=>{if(value!=='running')draft.value=session.draftFor(props.conversationId);});

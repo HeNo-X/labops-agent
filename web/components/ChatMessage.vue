@@ -11,7 +11,7 @@ import {t as tr} from "../i18n";
 import type { KnowledgeResult, BusinessPlanResult, TaskPlanStep } from '@shared/types';
 import type { CheckinStatusResult, CheckinSummaryResult } from '@shared/types';
 import { computed, ref } from 'vue';
-import type { ChatMessage, RoundActionResult, ToolCallRecord } from '../stores/session';
+import type { ChatMessage, ToolCallRecord } from '../stores/session';
 import { useRunStore } from '../stores/run';
 import type { ScheduleQueryResult, LabStatusResult, FreeRoomsResult, EngineType } from '@shared/types';
 import type { OperationsReportResult } from '@shared/types';
@@ -46,8 +46,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'retry'): void;
   (e: 'decided'): void;
-  (e: 'round-edit', payload: { userMessageId: string; text: string; revertEffects: boolean; result: RoundActionResult }): void;
-  (e: 'round-rewind', payload: { userMessageId: string; revertEffects: boolean; result: RoundActionResult }): void;
+  (e: 'round-edit', payload: { userMessageId: string; text: string; revertEffects: boolean }): void;
+  (e: 'round-rewind', payload: { userMessageId: string; revertEffects: boolean }): void;
   /** 批次1：删除本轮（父级走既有删除确认） */
   (e: 'round-delete'): void;
 }>();
@@ -206,49 +206,33 @@ async function copyAnswer(): Promise<void> {
 
 /** 内联编辑/回档状态：null=正常显示气泡；否则在气泡位置显示 InlineRoundEditor */
 const editorMode = ref<'edit' | 'rollback' | null>(null);
-const editorBusy = ref(false);
-const editorError = ref('');
+
 
 function startEdit(): void {
   if (props.busy) return;
-  editorError.value = '';
-  editorMode.value = 'edit';
+    editorMode.value = 'edit';
 }
 function startRollback(): void {
   if (props.busy) return;
-  editorError.value = '';
-  editorMode.value = 'rollback';
+    editorMode.value = 'rollback';
 }
 function cancelEditor(): void {
-  if (editorBusy.value) return;
   editorMode.value = null;
-  editorError.value = '';
 }
 /**
- * 两端共用回档执行（session.rollbackRound）：失败时编辑框保持打开并就地显示错误；
- * 成功后再 emit 让 App / Mobile 各自处理重发、刷新与结果横幅。
+ * 点击瞬间就把请求原样上抛（回档编排由父层完成）。
+ * ⚠️ 不能在这里 await session.rollbackRound 再 emit：回档会清空消息列表并卸载本组件，
+ * 卸载后 emit 会丢——「修改并重新发起」表现为只删不重发（2026-11-08 实测根因）。
  */
-async function onEditorSubmit(payload: { text: string; revertEffects: boolean }): Promise<void> {
+function onEditorSubmit(payload: { text: string; revertEffects: boolean }): void {
   const mode = editorMode.value;
-  if (!mode || editorBusy.value) return;
-  const cid = session.currentId;
-  if (!cid) return;
-  editorBusy.value = true;
-  editorError.value = '';
-  try {
-    const res = await session.rollbackRound(cid, props.msg.id, payload.revertEffects);
-    if (!res.ok) {
-      editorError.value = res.message ?? '回档失败';
-      return;
-    }
-    editorMode.value = null;
-    if (mode === 'edit') {
-      emit('round-edit', { userMessageId: props.msg.id, text: payload.text, revertEffects: payload.revertEffects, result: res });
-    } else {
-      emit('round-rewind', { userMessageId: props.msg.id, revertEffects: payload.revertEffects, result: res });
-    }
-  } finally {
-    editorBusy.value = false;
+  if (!mode) return;
+  if (mode === 'edit' && !payload.text.trim()) return;
+  editorMode.value = null;
+  if (mode === 'edit') {
+    emit('round-edit', { userMessageId: props.msg.id, text: payload.text, revertEffects: payload.revertEffects });
+  } else {
+    emit('round-rewind', { userMessageId: props.msg.id, revertEffects: payload.revertEffects });
   }
 }
 
@@ -289,8 +273,8 @@ const engineTitle = computed(() => {
         <InlineRoundEditor
           :mode="editorMode"
           :initial-text="msg.text"
-          :busy="editorBusy"
-          :error="editorError"
+          :busy="props.busy"
+          :error="''"
           :business-writes="Boolean(businessWrites)"
           @cancel="cancelEditor"
           @submit="onEditorSubmit"

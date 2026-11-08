@@ -34,7 +34,7 @@ function nowOf(iso: string): ServerNow {
 }
 
 function intentOf(): Intent {
-  return { date: null, dateInvalid: null, periodKey: null, periodKeys: null, labName: null, notes: [] };
+  return { date: null, dateInvalid: null, periodKey: null, periodKeys: null, labName: null, className: null, notes: [] };
 }
 
 /** 与 run.ts:runAgnesEngine 相同的组装顺序（A1 后的形态） */

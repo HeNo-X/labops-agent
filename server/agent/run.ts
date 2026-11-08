@@ -176,6 +176,16 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   }
   // N08：追问默认继承上一问的**任务类型**（"那 E312 呢"保持状态查询，不跳回课表）
   if (sess?.labName || sess?.date) intent.lastTask = sess.lastTask ?? intent.lastTask;
+  // 口语追问常省略房间号前缀（「那 312 呢」）。resolveLabName 只能给出裸数字，
+  // 这里按已授权房间做**唯一匹配**补全（312 → E312）；有歧义就不动，宁缺勿错。
+  if (intent.labName && /^\d{3,4}$/.test(intent.labName)) {
+    const bare = intent.labName;
+    const hits = availableRoomNames(ds).filter((n) => normalizeLabName(n).endsWith(bare));
+    if (hits.length === 1) {
+      intent.labName = hits[0];
+      intent.notes.push(`「${bare}」按唯一匹配补全为 ${hits[0]}`);
+    }
+  }
   if (sess && !roomlessIntent && !intent.dateInvalid) {
     if (!intent.labName && sess.labName) {
       intent.labName = sess.labName;

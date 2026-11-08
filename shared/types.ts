@@ -622,6 +622,7 @@ export interface ScheduleQueryResult {
   reason:
     | 'ok'
     | 'lab_not_found'
+    | 'class_not_found'
     | 'no_class_that_day'
     | 'no_class_in_that_period'
     | 'lab_not_active'

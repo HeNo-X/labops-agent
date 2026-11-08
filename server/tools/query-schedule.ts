@@ -74,6 +74,8 @@ export function runQuerySchedule(
   // 2026-11-08：允许**按班级**查（"智能本2501班的课表"）——用户脑子里最先想到的往往
   // 是"我这个班"，不是房间号。二者必须给一个，都没给才拒绝。
   const rawClassName = typeof args.className === 'string' ? args.className.trim() : '';
+  // 去掉用户常带的"班/级"后缀，避免"智能本2501班"匹配不到"智能本2501"
+  const classKey = rawClassName.replace(/[班级]$/, '');
   if (!rawLabName && !rawClassName) {
     throw new ToolArgumentError(
       'missing_selector',
@@ -85,7 +87,8 @@ export function runQuerySchedule(
   // ---------- 2. 找房间（普通实验室 + 开放实验室都认）----------
   // A7：裸数字房间号（"310今天有课吗"）按后缀解析——唯一命中自动收敛并在 notes
   // 如实标注，多个命中如实报歧义（可选项给全），零个走下方 lab_not_found 结果。
-  let lab: LabRow | null = rawLabName ? (findLab(ds, rawLabName) ?? findOpenLab(ds, rawLabName)) : null;
+  // 班级优先：同时给了房间号时以班级为准（用户问"我们班的课"，房间只是顺口带上）
+  let lab: LabRow | null = classKey ? null : rawLabName ? (findLab(ds, rawLabName) ?? findOpenLab(ds, rawLabName)) : null;
   let bareResolved = false;
   if (rawLabName && !lab) {
     const bare = findLabsByNameSuffix(ds, rawLabName);
@@ -114,8 +117,6 @@ export function runQuerySchedule(
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
   // A7：裸数字自动解析必须让用户看见（工具消息 reminder 要求 notes 原样转达）
   if (bareResolved && lab) notes.push(`房间号「${rawLabName}」未带字母前缀，已按 ${lab.name} 理解`);
-  // 班级口径：去掉用户常带的"班/级"后缀再比对，避免"智能本2501班"匹配不到"智能本2501"
-  const classKey = rawClassName.replace(/[班级]$/, '');
   const classOf = (row: TimetableRow): string[] => (row.classNames.length ? row.classNames : row.className ? [row.className] : []);
   if (classKey) notes.push(`按班级「${classKey}」查询：同一时段多个教室的课会一起列出`);
 
@@ -152,6 +153,23 @@ export function runQuerySchedule(
     notes,
     provenance
   };
+
+  // ---------- 2.5 班级不存在：明确说没有这个班，并给出可选班级（绝不答成"当天没课"）----------
+  if (classKey) {
+    const allClasses = new Set<string>();
+    for (const row of ds.timetable) for (const n of (row.classNames.length ? row.classNames : row.className ? [row.className] : [])) allClasses.add(n);
+    const bare = /^\d+$/.test(classKey);
+    const exists = [...allClasses].some((n) => {
+      const name = n.replace(/[班级]$/, '');
+      return bare ? name.endsWith(classKey) : name === classKey;
+    });
+    if (!exists) {
+      const options = [...allClasses].sort((x, y) => x.localeCompare(y, 'zh-Hans-CN')).slice(0, 30);
+      base.suggestions = options;
+      base.notes.push(`系统里没有班级「${classKey}」；可选班级共 ${allClasses.size} 个，例如：${options.slice(0, 8).join('、')}`);
+      return { ...base, lessons: [], byPeriod: emptyByPeriod(), reason: 'class_not_found' };
+    }
+  }
 
   // ---------- 3. 房间不存在：明确说没有，并给出可选房号（不编造）----------
   if (!lab && rawLabName) {

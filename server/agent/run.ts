@@ -188,7 +188,10 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
       intent.notes.push(`「${bare}」按唯一匹配补全为 ${hits[0]}`);
     }
   }
-  if (sess && !roomlessIntent && !intent.dateInvalid) {
+  // 按班级问课表时**绝不继承房间号**：否则「查智能本2501班的课」会被做成
+  // 「查 E310 的课」，答出来的是别的班的课（2026-11-08 线上就是这个错法）。
+  const classIntent = Boolean(intent.className);
+  if (sess && !roomlessIntent && !classIntent && !intent.dateInvalid) {
     if (!intent.labName && sess.labName) {
       intent.labName = sess.labName;
       intent.notes.push(`未识别到房间号，沿用上一问的 ${sess.labName}`);

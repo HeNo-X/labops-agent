@@ -605,6 +605,11 @@ function renderScheduleAnswer(
   if (result.reason === 'lab_not_found') {
     return `**查不到课表：系统里没有收录这个房间号。**\n\n可选的房间号：${result.suggestions.join('、') || '（当前未收录任何房间）'}。`;
   }
+  // 班级不存在：必须说"没有这个班"，不能说"当天没有排课"（后者会被理解成"班存在但没课"）
+  if (result.reason === 'class_not_found') {
+    const options = result.suggestions.slice(0, 10).join('、') || '（当前未收录任何班级）';
+    return `**查不到课表：系统里没有这个班级。**\n\n可选的班级：${options}。请确认班级名称，或把房间号/日期告诉我，我按房间查。`;
+  }
   if (result.lessons.length === 0) {
     // F09：timetable_empty 是数据问题，不能先给"没有课"的确定结论
     if (result.reason === 'timetable_empty') {

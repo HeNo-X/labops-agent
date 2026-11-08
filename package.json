@@ -1,6 +1,6 @@
 {
   "name": "labops-agent",
-  "version": "1.0.5.1",
+  "version": "1.0.5.2",
   "private": true,
   "type": "module",
   "description": "个性化设置、会话首屏与移动导航优化的实验室Agent",

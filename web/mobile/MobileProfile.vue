@@ -43,7 +43,7 @@ function go(view:Target['view']){emit('navigate',{view} as Target);}
     <p>{{tr('离线时保留当前输入；恢复后刷新会话或同一方案编号。保存失败时先保留回答，不会自动重发或重复办理。')}}</p>
     <p>{{tr('聊天会话只查询；正式办理请新建工作会话或进入实验室工作台。删除对话不撤销已提交业务。')}}</p>
   </details>
-  <p class="m-profile-version">LabOps 1.0.5.0 · Asia/Shanghai</p>
+  <p class="m-profile-version">LabOps 1.0.5.2 · Asia/Shanghai</p>
 </section>
 
 <button class="mobile-danger m-profile-logout" @click="emit('logout')">{{tr('退出登录')}}</button>

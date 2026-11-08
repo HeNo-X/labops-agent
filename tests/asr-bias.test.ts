@@ -20,7 +20,7 @@ const captured: Captured[] = [];
 const ORIGINAL_FETCH = globalThis.fetch;
 /** 音频要过 validateAudioPayload：≥800 字节、MIME 在允许清单里 */
 const AUDIO = Buffer.alloc(1200, 7).toString('base64');
-const FAKE_KEY = 'sk-test-fake-key-never-real';
+const FAKE_KEY = 'test-fake-key-never-real-42';
 
 function stubFetch(handler: (index: number) => { status: number; body: unknown }): void {
   captured.length = 0;

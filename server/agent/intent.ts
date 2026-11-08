@@ -194,6 +194,52 @@ export function resolvePeriodRange(text: string): PeriodKey[] | null {
   return null;
 }
 
+
+// ===========================================================================
+//  输入归一化（2026-11-08）：容忍全角、大小写、OCR 混淆与高频错别字
+// ===========================================================================
+/**
+ * 用户是"说话/打字"的，不是"填表单"的。这里只做**高置信、可逆**的修正：
+ *   · 全角转半角、字母统一大写（Ｅ３１２ → E312）
+ *   · 房间号数字段里的字形混淆（O→0、I/l→1、S→5、B→8）：E31O → E310
+ *   · 高频错别字（实验事/实验市/实验窒 → 实验室）
+ * 低置信或会改变语义的一律不动（例如把"教室"当错字），宁可不修也不猜。
+ * 每次修正都记进 notes，回答里可以如实说"我把 X 理解成了 Y"。
+ */
+const TYPO_MAP: Array<[RegExp, string, string]> = [
+  [/实验事/g, '实验室', '实验事→实验室'],
+  [/实验市/g, '实验室', '实验市→实验室'],
+  [/实验窒/g, '实验室', '实验窒→实验室'],
+  [/实验实/g, '实验室', '实验实→实验室']
+];
+
+export function normalizeQuery(raw: string): { text: string; fixes: string[] } {
+  const fixes: string[] = [];
+  let t = String(raw ?? '');
+
+  // ① 全角 → 半角（含全角数字/字母/标点）
+  const half = t.replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/\u3000/g, ' ');
+  if (half !== t) { fixes.push('全角转半角'); t = half; }
+
+  // ② 房间号：字母前缀后数字段的字形混淆
+  t = t.replace(/([A-Za-z]{1,3})\s?-?\s?([0-9OoIlSsBb]{3,4})(?![0-9])/g, (_all, prefix: string, digits: string) => {
+    const fixed = digits
+      .replace(/[Oo]/g, '0')
+      .replace(/[Il]/g, '1')
+      .replace(/[Ss]/g, '5')
+      .replace(/[Bb]/g, '8');
+    if (fixed !== digits) { fixes.push(`房间号字形修正：${prefix}${digits}→${prefix}${fixed}`); }
+    return `${prefix.toUpperCase()}${fixed}`;
+  });
+
+  // ③ 高频错别字
+  for (const [re, to, label] of TYPO_MAP) {
+    if (re.test(t)) { t = t.replace(re, to); fixes.push(label); }
+    re.lastIndex = 0;
+  }
+  return { text: t, fixes };
+}
+
 // ===========================================================================
 //  房间号
 // ===========================================================================
@@ -233,8 +279,10 @@ export function resolveAllLabNames(text: string): string[] {
 // ===========================================================================
 
 export function parseIntent(text: string, now: ServerNow): Intent {
+  const normalized = normalizeQuery(text);
+  text = normalized.text;
   text=text.replace(/(?:fact-|plan-|business-plan-)?[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/gi,' ');
-  const notes: string[] = [];
+  const notes: string[] = [...normalized.fixes.map((f) => `已自动修正：${f}`)];
   const rawDate = resolveDate(text, now);
   const dateInvalid = rawDate && 'invalid' in rawDate ? rawDate : null;
   const date = rawDate && !('invalid' in rawDate) ? rawDate : null;

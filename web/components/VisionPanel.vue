@@ -457,22 +457,22 @@ onUnmounted(() => {
 .vision-live img {
   width: 100%;
   aspect-ratio: 16 / 9;
-  max-height: 46dvh;
-  object-fit: cover;
+  /* contain + 容器比例与源一致（Vision 摄像头 1280×720 = 16:9）：
+     画面完整显示无裁切、无黑边；内容超高时抽屉自然滚动 */
+  object-fit: contain;
   background: #000;
   border-radius: 8px;
 }
-/* 内场画面与设备内置摄像头画面统一为同尺寸（16:9 + 高度上限）：
+/* 内场画面与设备内置摄像头画面统一为同尺寸同比例（16:9）：
    内场从 320px 上限放大，内置从 4:3 全宽（≈1080px 高，94dvh 装不下）缩小——
    仅 PC 抽屉内 :deep 覆盖，不影响移动端（移动端屏幕窄无溢出问题） */
 .vision-panel :deep(.builtin__stage) {
   aspect-ratio: 16 / 9;
-  max-height: 46dvh;
 }
 .vision-panel :deep(.builtin__stage video) {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 .vision-live__note {
   margin: 6px 0 0;

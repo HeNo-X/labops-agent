@@ -316,7 +316,7 @@ const hasParams=computed(()=>['roomId','className','thresholdHours','maxMissedHo
 .spec-btn--primary {
   border-color: var(--primary, #1668dc);
   background: var(--primary, #1668dc);
-  color: #fff;
+  color: var(--primary-contrast);
 }
 .spec-btn:disabled {
   opacity: 0.6;

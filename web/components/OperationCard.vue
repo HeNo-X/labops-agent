@@ -111,6 +111,8 @@ function kindLabel(kind: Proposal['payloadKind']): string {
       return '站内通知';
     case 'closure':
       return '临时停用';
+    case 'room_status':
+      return '开门/关门';
     case 'duty_session':
       return '值班操作';
   }
@@ -138,6 +140,22 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
   }
   return [];
 });
+
+/**
+ * 已执行（成功）后的卡片走主流 Agent 的精简流：默认只给状态 + 标题 + 关键对象，
+ * 环境/版本/动作/未接入/回执等技术细节折叠进 <details>，需要审计时再展开。
+ * 待确认（决策面）保持完整信息不变。
+ */
+const isExecuted = computed<boolean>(() => state.value.state === 'executed' || Boolean(receipt.value));
+
+/** 回执时间转成本地「年-月-日 时:分」标准格式，不直接展示原始 ISO/UTC 串 */
+function formatCommittedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 </script>
 
 <template>
@@ -149,14 +167,16 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
         :label="STATE_META[state.state]?.label ?? state.state"
       />
       <b class="opcard__title">{{ state.title }}</b>
-      <span class="opcard__kind">{{ kindLabel(state.payloadKind) }} · v{{ state.version }}</span>
-      <span class="opcard__env" :title="tr('执行环境由服务端决定，界面只如实展示')">{{tr("沙盒演示")}}</span>
+      <template v-if="!isExecuted">
+        <span class="opcard__kind">{{ kindLabel(state.payloadKind) }} · v{{ state.version }}</span>
+        <span class="opcard__env" :title="tr('执行环境由服务端决定，界面只如实展示')">{{tr("沙盒演示")}}</span>
+      </template>
     </header>
 
     <p class="opcard__summary">{{ state.summary }}</p>
 
-    <!-- 将执行的动作 -->
-    <ul class="opcard__effects">
+    <!-- 将执行的动作（待确认时可见；已执行后移入技术详情，避免与关键对象重复） -->
+    <ul v-if="!isExecuted" class="opcard__effects">
       <li v-for="(e, i) in state.effects" :key="i">
         <span class="opcard__effectlabel">{{ e.label }}</span>
         <span v-if="e.before" class="opcard__diff">{{ e.before }} → {{ e.after }}</span>
@@ -183,6 +203,10 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
         <li v-for="(s, i) in ((state.payloadView as Record<string, unknown>)['affectedSamples'] as string[])" :key="i">{{ s }}</li>
       </ul>
     </div>
+    <div v-else-if="state.payloadKind === 'room_status'" class="opcard__fields">
+      <div class="opcard__row"><span>{{tr("房间")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['roomId'] }}</b></div>
+      <div class="opcard__row"><span>{{tr("状态")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['statusLabel'] }}</b></div>
+    </div>
     <div v-else-if="state.payloadKind === 'duty_session'" class="opcard__fields">
       <div v-if="String((state.payloadView as Record<string, unknown>)['mode']) === 'start'" class="opcard__row">
         <span>{{tr("开始值班")}}</span><b>{{ (state.payloadView as Record<string, unknown>)['roomId'] }}</b>
@@ -200,7 +224,7 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
       </template>
     </div>
 
-    <ul v-if="state.missingDependencies.length" class="opcard__deps">
+    <ul v-if="!isExecuted && state.missingDependencies.length" class="opcard__deps">
       <li v-for="(d, i) in state.missingDependencies" :key="i">{{tr("未接入 ·")}} {{ d }}</li>
     </ul>
 
@@ -208,16 +232,37 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
       {{ state.cannotExecuteReason }}
     </p>
 
-    <!-- 回执 -->
-    <div v-if="receipt" class="opcard__receipt" role="status">
-      <h4 class="opcard__rh">{{tr("业务回执（以此为准，聊天文字不是凭据）")}}</h4>
-      <div class="opcard__row"><span>{{tr("业务单号")}}</span><b class="opcard__mono">{{ receipt.operationId }}</b></div>
-      <div class="opcard__row"><span>{{tr("状态")}}</span><b>{{tr("已生效 ·")}} {{tr(receipt.executionEnvironment === 'sandbox' ? '沙盒' : receipt.executionEnvironment)}}</b></div>
-      <div class="opcard__row"><span>{{tr("对象")}}</span><b class="opcard__mono">{{ receipt.objects.map((o) => `${o.kind}:${o.id}`).join('，') }}</b></div>
-      <div class="opcard__row"><span>{{tr("时间")}}</span><b>{{ receipt.committedAt }}</b></div>
-      <div class="opcard__row"><span>{{tr("执行身份")}}</span><b>{{ receipt.actor.label }}（{{ receipt.actor.role }}）</b></div>
-      <p v-if="receipt.deliveryNote" class="opcard__rnote">{{ receipt.deliveryNote }}</p>
-    </div>
+    <!-- 已执行：技术细节默认折叠（主流 Agent 精简流），需要审计时再展开 -->
+    <details v-if="isExecuted" class="opcard__details">
+      <summary class="opcard__details-summary">{{ tr('技术详情（执行环境、动作与回执）') }}</summary>
+      <div class="opcard__details-body">
+        <div class="opcard__meta-tags">
+          <span class="opcard__kind">{{ kindLabel(state.payloadKind) }} · v{{ state.version }}</span>
+          <span class="opcard__env" :title="tr('执行环境由服务端决定，界面只如实展示')">{{ tr('沙盒演示') }}</span>
+        </div>
+
+        <ul v-if="state.effects.length" class="opcard__effects">
+          <li v-for="(e, i) in state.effects" :key="i">
+            <span class="opcard__effectlabel">{{ e.label }}</span>
+            <span v-if="e.before" class="opcard__diff">{{ e.before }} → {{ e.after }}</span>
+            <span v-else class="opcard__diff">{{ e.after }}</span>
+          </li>
+        </ul>
+
+        <ul v-if="state.missingDependencies.length" class="opcard__deps">
+          <li v-for="(d, i) in state.missingDependencies" :key="i">{{ tr("未接入 ·") }} {{ d }}</li>
+        </ul>
+
+        <!-- 回执 -->
+        <div v-if="receipt" class="opcard__receipt" role="status">
+          <h4 class="opcard__rh">{{tr("业务回执（以此为准，聊天文字不是凭据）")}}</h4>
+          <div class="opcard__row"><span>{{tr("状态")}}</span><b>{{tr("已生效 ·")}} {{tr(receipt.executionEnvironment === 'sandbox' ? '沙盒' : receipt.executionEnvironment)}}</b></div>
+          <div class="opcard__row"><span>{{tr("时间")}}</span><b>{{ formatCommittedAt(receipt.committedAt) }}</b></div>
+          <div class="opcard__row"><span>{{tr("执行身份")}}</span><b>{{ receipt.actor.label }}（{{ receipt.actor.role }}）</b></div>
+          <p v-if="receipt.deliveryNote" class="opcard__rnote">{{ receipt.deliveryNote }}</p>
+        </div>
+      </div>
+    </details>
 
     <p v-if="error" class="opcard__err" role="alert">{{ error }}</p>
 
@@ -370,6 +415,38 @@ const checklist = computed<Array<{ key: string; label: string; state: string }>>
   margin: 0;
   font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--danger);
+}
+.opcard__details {
+  margin: 0;
+}
+.opcard__details-summary {
+  cursor: pointer;
+  user-select: none;
+  font-size: calc(var(--ui-font-size) * 0.84615);
+  color: var(--text-faint);
+  list-style: none;
+}
+.opcard__details-summary::-webkit-details-marker { display: none; }
+.opcard__details-summary::before {
+  content: '▸ ';
+  color: var(--primary);
+}
+.opcard__details[open] .opcard__details-summary::before { content: '▾ '; }
+.opcard__details-summary:hover { color: var(--text-muted); }
+.opcard__details-summary:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+.opcard__details-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.opcard__meta-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
 }
 .opcard__receipt {
   background: var(--surface-3);

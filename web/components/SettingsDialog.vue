@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import {computed} from 'vue';import {useModal} from '../composables/useModal';import SettingsPanel from './SettingsPanel.vue';import UiIcon from './UiIcon.vue';import {t as tr} from '../i18n';
-const props=defineProps<{open:boolean}>(),emit=defineEmits<{close:[];edition:[];logout:[]}>();
+import {computed} from 'vue';import {useModal} from '../composables/useModal';import SettingsPanel from './SettingsPanel.vue';import {t as tr} from '../i18n';
+const props=withDefaults(defineProps<{open:boolean;taskMode?:boolean}>(),{taskMode:true}),emit=defineEmits<{close:[];edition:[];logout:[]}>();
 const visible=computed({get:()=>props.open,set:value=>{if(!value)emit('close');}});useModal(visible,'.settings-dialog');
+function launch(action:string){emit('close');window.dispatchEvent(new CustomEvent('labops-target',{detail:{action}}));}
 </script>
-<template><Teleport to="body"><div v-if="open" class="settings-mask" @click.self="emit('close')"><section class="settings-dialog" role="dialog" aria-modal="true" :aria-label="tr('设置')"><header><h1>{{tr('设置')}}</h1><button :aria-label="tr('关闭设置')" @click="emit('close')"><UiIcon name="close"/></button></header><SettingsPanel @edition="emit('edition')" @logout="emit('logout')"/></section></div></Teleport></template>
-<style scoped>.settings-mask{position:fixed;inset:0;background:#0006;z-index:120;display:grid;place-items:center;padding:16px}.settings-dialog{background:var(--surface);color:var(--text);width:min(720px,100%);max-height:calc(100dvh - 32px);overflow:auto;border:1px solid var(--border);border-radius:12px;padding:20px}.settings-dialog>header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}.settings-dialog h1{font-size:calc(var(--ui-font-size)*1.25);margin:0}.settings-dialog>header button{display:grid;place-items:center;width:44px;height:44px;border:0;background:var(--surface-2);color:var(--text);border-radius:6px;cursor:pointer}</style>
+<template><Teleport to="body"><div v-if="open" class="settings-mask"><section class="settings-dialog" role="dialog" aria-modal="true" :aria-label="tr('设置')"><SettingsPanel :show-back="true" :task-mode="taskMode" @back="emit('close')" @edition="emit('edition')" @logout="emit('logout')" @launch="launch"/></section></div></Teleport></template>
+<style scoped>.settings-mask{position:fixed;inset:0;background:var(--surface);z-index:120}.settings-dialog{background:var(--surface);color:var(--text);width:100%;height:100dvh;overflow:hidden}</style>

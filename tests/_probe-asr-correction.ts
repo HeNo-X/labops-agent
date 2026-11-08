@@ -440,135 +440,6 @@ check('列表空了，状态行也不再声称发过', /还没有登记常用词
 stubContextEnabled = false;
 await closeVocabulary();
 
-// ---------------------------------------------------------------- U3：词汇体检与导出
-console.log('\n[U3 · 体检我的词汇 / 导出待并入条目]');
-// 体检端点的桩：结论必须**由请求里的词算出来**，否则这里验的就只是"页面渲染了一段写死的字"
-const checkBodies: Array<Record<string, unknown>> = [];
-let checkStatus = 200;
-await page.route('**/api/agent/asr-lexicon-check', async (route: Route) => {
-  const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
-  checkBodies.push(body);
-  if (checkStatus !== 200) {
-    await route.fulfill({ status: checkStatus, contentType: 'application/json', body: JSON.stringify({ error: 'glossary_unavailable', message: '内置术语表读不出来，体检无法进行：术语表 JSON 解析失败' }) });
-    return;
-  }
-  const keywords = Array.isArray(body['keywords']) ? (body['keywords'] as string[]) : [];
-  const pairs = Array.isArray(body['pairs']) ? (body['pairs'] as Array<{ from: string; to: string }>) : [];
-  await route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      ok: true,
-      builtIn: { terms: 148, fingerprint: '1131ddb19f00', protect: 9, ambiguousKeys: 0, byDomain: { equipment: 78, user: 0 } },
-      effective: { protocol: 'chat_audio', contextEnabled: false, contextMaxChars: 1200, hotwordsEnabled: true, hotwordsMax: 500, termCorrectEnabled: true, contextTerms: 8, contextChars: 26, omittedFromBudget: 140 },
-      keywords: keywords.map((word) => ({
-        word,
-        verdict: word === '投影仪' ? 'already-in-builtin' : 'bias-off',
-        hotwordFits: true,
-        why: word === '投影仪' ? '内置术语表本来就有这个词' : '服务端事前偏置当前是关的（ASR_CONTEXT_ENABLED=0）'
-      })),
-      pairs: pairs.map((p) => ({
-        from: p.from,
-        to: p.to,
-        verdict: p.from === '保修' ? 'collides-with-protect' : 'active',
-        why: p.from === '保修' ? '「保修」在常用词保护名单里' : '生效：识别结果里出现该写法时逐处替换'
-      })),
-      merge: {
-        // 桩只负责给形状：候选条目由服务端算（推不出读音的词在服务端那边进 needPinyin，
-        // 这里同时给一个，用来验界面把"能合的"和"缺读音的"分开展示）
-        candidates: keywords.map((w) => ({ canonical: w, syll: ['men', 'jin'], aliases: [], weight: 4, domain: 'user', blockAfter: [] })),
-        needPinyin: ['门禁电源开关面板']
-      }
-    })
-  });
-});
-
-await openVocabulary();
-const checkBtn = page.getByRole('button', { name: '体检我的词汇', exact: true });
-check('体检入口在设置-个性化里', (await page.locator('.settings-voice').getByRole('button', { name: '体检我的词汇' }).count()) > 0, `count=${await checkBtn.count()}`);
-check('什么都没登记时体检按钮是禁用态（不给空体检）', await checkBtn.isDisabled().catch(() => false), '');
-
-// 先登记两样东西：一个可能与内置重复的常用词、一个撞保护词的词对
-await page.fill('#vtp-word', '投影仪');
-await page.press('#vtp-word', 'Enter');
-await page.fill('#vtp-from', '保修');
-await page.fill('#vtp-to', '报修');
-await page.getByRole('button', { name: '保存', exact: true }).click();
-await page.waitForTimeout(250);
-check('登记之后体检按钮转为可用', !(await checkBtn.isDisabled().catch(() => true)), '');
-await closeVocabulary();
-await page.locator('#cmd').fill('');
-await holdToTalk(900);
-await openVocabulary();
-
-await checkBtn.click();
-await page.waitForTimeout(500);
-const sentCheck = checkBodies.at(-1) ?? {};
-check('体检请求把我登记的两类词汇都带上（结论才有依据）',
-  JSON.stringify(sentCheck['keywords']) === JSON.stringify(['投影仪']) &&
-    JSON.stringify(sentCheck['pairs']) === JSON.stringify([{ from: '保修', to: '报修' }]),
-  JSON.stringify(sentCheck));
-const verdicts = (await page.locator('.vtp__verdicts').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim());
-const joined = verdicts.join(' | ');
-const reportLine = (await page.locator('.vtp__report').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
-check('概况行跟着服务端返回走（内置条数与指纹不是前端编的）',
-  /内置 148 条（指纹 1131ddb19f00）/.test(reportLine) && /事前偏置 关/.test(reportLine), reportLine);
-check('逐条结论渲染出来，并且用的是服务端给的判词',
-  /投影仪[\s\S]*内置已有/.test(joined) && /保修[\s\S]*撞常用词/.test(joined), joined);
-await page.screenshot({ path: path.join(SHOT, 'lexicon-check.png') });
-
-await page.getByRole('button', { name: '导出待并入条目', exact: true }).click();
-await page.waitForTimeout(300);
-const exportedRaw = await page.locator('#vtp-export').inputValue();
-let parsedExport: { note?: string; terms?: Array<{ canonical: string; domain: string }> } = {};
-try {
-  parsedExport = JSON.parse(exportedRaw) as { note?: string; terms?: Array<{ canonical: string; domain: string }> };
-} catch {
-  /* 下面那条检查会把它报成失败 */
-}
-check('导出的是能解析的候选 JSON，条目形状与内置表一致（domain=user）',
-  Array.isArray(parsedExport.terms) && parsedExport.terms.length === 1
-    && parsedExport.terms[0]!.canonical === '投影仪' && parsedExport.terms[0]!.domain === 'user',
-  exportedRaw.slice(0, 200));
-check('导出内容自带"先跑 check:asr-lexicon"的说明（不让人以为是成品）',
-  typeof parsedExport.note === 'string' && parsedExport.note.includes('check:asr-lexicon'), String(parsedExport.note));
-const needPinyinLine = (await page.locator('.vtp__needpinyin').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
-check('缺读音的词单独列出来，不进导出的 JSON',
-  needPinyinLine.includes('门禁电源开关面板') && !exportedRaw.includes('门禁电源开关面板'), `${needPinyinLine} ｜ export=${exportedRaw.slice(0, 60)}`);
-
-// 过期结论必须作废：加一个新词后旧报告不能继续挂在屏幕上
-await page.fill('#vtp-word', '门禁电源板');
-await page.press('#vtp-word', 'Enter');
-await page.waitForTimeout(300);
-check('词汇一变，上一份体检结论与导出内容立即作废',
-  (await page.locator('.vtp__verdicts').count()) === 0 && (await page.locator('#vtp-export').count()) === 0,
-  `verdicts=${await page.locator('.vtp__verdicts').count()} export=${await page.locator('#vtp-export').count()}`);
-
-// 服务端读不出内置表时（503），要把原因显示出来，不能显示一份"看起来正常"的空报告
-checkStatus = 503;
-await checkBtn.click();
-await page.waitForTimeout(500);
-const failNotice = (await page.locator('.vtp__section').last().locator('.vtp__notice').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
-check('体检失败时显示服务端给的原因，而不是静默或假成功',
-  /术语表读不出来|解析失败/.test(failNotice), failNotice);
-check('失败之后不保留上一次的候选（避免旧结论冒充现状）',
-  (await page.locator('.vtp__verdicts').count()) === 0, '');
-checkStatus = 200;
-
-// 删掉登记后按钮回到禁用态（可逆性在 U3 这条链上同样成立）
-await closeVocabulary();
-await page.locator('#cmd').fill('');
-await holdToTalk(900);
-await openVocabulary();
-await page.getByRole('button', { name: '清除全部常用词', exact: true }).click();
-await page.getByRole('button', { name: '确认清除全部常用词？', exact: true }).click();
-await page.waitForTimeout(300);
-await page.getByRole('button', { name: '清除全部', exact: true }).click();
-await page.getByRole('button', { name: '确认清除全部？', exact: true }).click();
-await page.waitForTimeout(300);
-check('清空两类登记后体检按钮重新禁用（不留"有词但看不见"的中间态）',
-  await checkBtn.isDisabled().catch(() => false), `disabled=${await checkBtn.isDisabled().catch(() => 'n/a')}`);
-
 const realErrors = errors.filter((e) => !/503 \(Service Unavailable\)|favicon/.test(e));
 check('无 console 错误', realErrors.length === 0, realErrors.slice(0, 3).join(' | ') || '0 条');
 
@@ -593,22 +464,6 @@ await mctx.route('**/api/agent/transcribe', async (route: Route) => {
       text: skipped ? MISWRITTEN : CORRECTED,
       ...(skipped ? { termCorrectSkipped: true } : { originalText: MISWRITTEN, corrections: [{ from: '一叶枪', to: '移液枪', kind: 'term', at: 6 }] }),
       model: 'stub-asr', protocol: 'chat_audio', elapsedMs: 120
-    })
-  });
-});
-// 移动端共用同一个 VoiceTermPanel：这里只验"体检这条路在手机上也接上了"，
-// 结论渲染的细节由 PC 那段负责，不重复堆断言
-await mctx.route('**/api/agent/asr-lexicon-check', async (route: Route) => {
-  await route.fulfill({
-    status: 200,
-    contentType: 'application/json',
-    body: JSON.stringify({
-      ok: true,
-      builtIn: { terms: 148, fingerprint: '1131ddb19f00', protect: 9, ambiguousKeys: 0 },
-      effective: { protocol: 'chat_audio', contextEnabled: false, contextMaxChars: 1200, hotwordsEnabled: true, hotwordsMax: 500, termCorrectEnabled: true, contextTerms: 8, contextChars: 26, omittedFromBudget: 140 },
-      keywords: [{ word: '门禁电源板', verdict: 'bias-off', hotwordFits: true, why: '服务端事前偏置当前是关的（ASR_CONTEXT_ENABLED=0）' }],
-      pairs: [],
-      merge: { candidates: [{ canonical: '门禁电源板', syll: ['men', 'jin', 'dian', 'yuan', 'ban'], aliases: [], weight: 4, domain: 'user', blockAfter: [] }], needPinyin: [] }
     })
   });
 });
@@ -687,8 +542,7 @@ if (mmicCount > 0) {
       check('移动端「还原原文」同样生效', false, '没找到还原按钮');
     }
   }
-  // 词汇体检：同一份组件、同一个端点，移动端不该另写一套
-  // 移动端同样从 设置 → 个性化 进入：证明这是一处实现两端共用，而不是各写一遍
+  // 热词面板：同一份组件两端共用，移动端也要能从 设置 → 个性化 进入并登记常用词
   await mpage.goto(`${BASE}/mobile.html?view=settings&category=personalization`, { waitUntil: 'networkidle' });
   await mpage.waitForTimeout(1500);
   const mPanel = mpage.locator('.settings-voice');
@@ -696,18 +550,12 @@ if (mmicCount > 0) {
     await mpage.fill('#vtp-word', '门禁电源板');
     await mpage.press('#vtp-word', 'Enter');
     await mpage.waitForTimeout(250);
-    const mCheck = mPanel.getByRole('button', { name: '体检我的词汇', exact: true });
-    check('移动端在设置-个性化里有同一份热词面板，登记后可体检',
-      (await mCheck.count()) > 0 && !(await mCheck.isDisabled().catch(() => true)), `count=${await mCheck.count()}`);
-    await mCheck.click();
-    await mpage.waitForTimeout(500);
-    const mReport = (await mPanel.locator('.vtp__report').innerText().catch(() => '')).replace(/\s+/g, ' ').trim();
-    check('移动端渲染同一份服务端结论（不是各写一遍的近似版）',
-      /内置 148 条（指纹 1131ddb19f00）/.test(mReport) && /事前偏置 关/.test(mReport), mReport);
-    await mpage.screenshot({ path: path.join(SHOT, 'mobile-lexicon-check.png') });
+    const mChips = await mPanel.locator('.vtp__chips').innerText().catch(() => '');
+    check('移动端在设置-个性化里有同一份热词面板，登记常用词生效',
+      mChips.includes('门禁电源板'), mChips.slice(0, 80));
+    await mpage.screenshot({ path: path.join(SHOT, 'mobile-voice-terms.png') });
   } else {
-    check('移动端在设置-个性化里有同一份热词面板，登记后可体检', false, '没找到 .settings-voice');
-    check('移动端渲染同一份服务端结论（不是各写一遍的近似版）', false, '上一步就没找到面板');
+    check('移动端在设置-个性化里有同一份热词面板，登记常用词生效', false, '没找到 .settings-voice');
   }
   check('移动端无页面错误', merrors.length === 0, merrors.slice(0, 2).join(' | ') || '0 条');
 }

@@ -350,6 +350,18 @@ function planOpsDemo(q: string, intent: Intent, ds: Dataset): DemoPlan | null {
     };
   }
 
+  // ---- F02b 开门/关门（即时开放状态，区别于长周期停用）----
+  if (intent.labName && /(开门|关门|打开|关闭|关着|开着)/.test(q)) {
+    const closed = /(关门|关闭|把门关上|关着)/.test(q);
+    return {
+      tool: 'prepare_room_status',
+      callTool: true,
+      args: { roomId: intent.labName, status: closed ? 'closed' : 'active' },
+      directReply: null,
+      needsDisclosure: opsDisclosure()
+    };
+  }
+
   // ---- F02 临时停用 ----
   if (intent.labName && /(停用|封闭|暂停开放|暂停使用)/.test(q)) {
     if (!intent.date) {

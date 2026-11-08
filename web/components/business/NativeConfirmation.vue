@@ -27,7 +27,7 @@ async function confirmAndCommit(){
 <style scoped>
 /* PC-4 确认分级：写操作主按钮（teal 实心，与卡片左侧色条同族），
    拒绝=红描边次按钮（可撤销方向），回查=quiet。 */
-.btn-primary-write{background:#126e76;border:1px solid #0d585e;font-weight:600}
+.btn-primary-write{background:var(--primary);border:1px solid var(--primary);font-weight:600}
 .btn-reject{background:transparent;border:1px solid var(--danger,#b91c1c);color:var(--danger,#b91c1c)}
 .btn-reject:hover:not(:disabled){background:rgba(185,28,28,.08)}
 </style>

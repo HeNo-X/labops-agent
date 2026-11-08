@@ -27,7 +27,7 @@ test('U02 同一主系统账号自动识别角色并直连实时业务，不需�
  const rows=getDb().prepare('SELECT credential FROM native_auth_sessions').all() as {credential:string}[];assert.ok(rows.length&&rows.every(r=>r.credential.startsWith('enc:v1:')));
 });
 test('U03/A07 共享聊天从主系统写入，Agent读取同一正文和元数据',async()=>{
- const source=await main(),c=await source('/api/ai/conversations',{mode:'chat'});assert.equal(c.status,200);const run=await source('/api/ai/conversations/'+c.data.id+'/messages',{message:fixture.date+' 日报',clientRequestId:crypto.randomUUID()});assert.equal(run.status,200);const answer=run.data.events.find((e:any)=>e.type==='run_completed').payload.answer;for(const field of ['当日教学活动','当天正式班次','当天检查记录','当天创建工单','当天站内通知','未关闭工单','查询时间','编号'])assert.ok(answer.includes(field),field);
+ const source=await main(),c=await source('/api/ai/conversations',{mode:'chat'});assert.equal(c.status,200);const run=await source('/api/ai/conversations/'+c.data.id+'/messages',{message:fixture.date+' 日报',clientRequestId:crypto.randomUUID()});assert.equal(run.status,200);const answer=run.data.events.find((e:any)=>e.type==='run_completed').payload.answer;for(const field of ['当日教学活动','当天正式班次','当天检查记录','当天创建工单','当天站内通知','未关闭工单','编号'])assert.ok(answer.includes(field),field);
  const admin=await login(),history=await admin.call('/api/conversations/'+c.data.id);assert.equal(history.status,200);assert.equal(history.data.messages.at(-1).text,answer);assert.equal(history.data.messages.at(-1).meta.responseMode,'chat');assert.ok(history.data.messages.at(-1).meta.queriedAt);assert.ok(history.data.messages.at(-1).meta.scope);
  // ⚠️ 2026-10-05：学生身份使用处**注释保留**（学生已不能登录 LabOps）。恢复见 U02 顶部说明。
  // const student=await login('student');assert.equal((await student.call('/api/conversations/'+c.data.id)).status,404);

@@ -16,15 +16,29 @@ function apply(){
  // F1：状态栏 theme-color 随主题同步（与 manifest 背景色一致：安装态外壳 + 浏览器顶栏）
  const themeMeta=document.querySelector('meta[name="theme-color"]');
  if(themeMeta)themeMeta.setAttribute('content',dark?'#202020':'#fafafa');
- root.style.setProperty('--ui-font-size',(mobile?p.mobileFont:p.desktopFont)+'px');root.style.setProperty('--reply-font-size',(mobile?p.mobileReply:p.desktopReply)+'px');
+ const font=mobile?p.mobileFont:p.desktopFont;
+ root.style.setProperty('--ui-font-size',font+'px');root.style.setProperty('--reply-font-size',(font+1)+'px');
  const fields=['--primary','--primary-hover','--primary-weak','--primary-border','--primary-contrast','--focus'];
  if(p.accent==='neutral'){for(const name of fields)root.style.removeProperty(name);}
  else{const c=palettes[p.accent];const values=dark?[c[4],c[5],'#222',c[4],c[6],c[4]]:[c[0],c[1],c[2],c[3],'#ffffff',c[0]];fields.forEach((name,i)=>root.style.setProperty(name,values[i]!));}
 }
+function migrateLegacyFont(p:Preferences,key:string){
+ if(!key)return p;
+ try{
+  const flag=key+':font15';
+  if(localStorage.getItem(flag))return p;
+  if(p.mobileFont<=9){
+   p.mobileFont=15;
+   localStorage.setItem(key,JSON.stringify(p));
+  }
+  localStorage.setItem(flag,'1');
+ }catch{}
+ return p;
+}
 export function initializePreferences(profile:{username:string;identity:string}|null){
  const next=preferenceOwner(profile);if(next===owner&&key)return;
  owner=next;key=next?'labops.preferences.v1:'+next:'';preferenceError.value='';
- try{preferences.value=key?parsePreferences(localStorage.getItem(key),localStorage.getItem('labops.theme')):{...DEFAULTS};}catch{preferences.value={...DEFAULTS};preferenceError.value='偏好暂时无法保存，当前调整仍可使用。';}
+ try{preferences.value=key?migrateLegacyFont(parsePreferences(localStorage.getItem(key),localStorage.getItem('labops.theme')),key):{...DEFAULTS};}catch{preferences.value={...DEFAULTS};preferenceError.value='偏好暂时无法保存，当前调整仍可使用。';}
  apply();
 }
 export function updatePreferences(value:Partial<Preferences>){

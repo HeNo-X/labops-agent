@@ -33,6 +33,7 @@ import {
   execDutyStart,
   execIssueCreate,
   execNotificationPublish,
+  execRoomStatus,
   GatewayError,
   requestHashOf
 } from './gateway.ts';
@@ -43,6 +44,7 @@ const ACTION_CAPABILITIES: Record<string, Capability[]> = {
   'issue.create': ['issue:create:self'],
   'notification.publish': ['notice:publish'],
   'room_closure.create': ['availability:write'],
+  'room_status.update': ['availability:write'],
   'duty_session.start': ['duty:write'],
   'duty_session.handover': ['duty:write']
 };
@@ -182,6 +184,9 @@ function decideInTransaction(input: DecisionInput): DecisionOutcome {
         break;
       case 'duty_session.handover':
         objects = execDutyHandover(payload as never, input.actor, operationId);
+        break;
+      case 'room_status.update':
+        objects = execRoomStatus(payload as never, input.actor, operationId);
         break;
       default:
         return { ok: false, code: 'bad_request', message: `未知的动作类型：${proposal.actionType}` };

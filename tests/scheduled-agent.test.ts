@@ -122,6 +122,12 @@ test('执行方式与工具白名单的入参边界', () => {
     ['prepare_notification'],
     '白名单要去重'
   );
+  // 签到接入批次3：agent 模式下显式列出签到只读工具，主系统侧格式校验放行（名字合法性由 service-agent 运行时按 task 工具集校验）
+  assert.deepEqual(
+    normalize({ ...base, execMode: 'agent', agentTools: ['query_checkin_status', 'query_checkin_summary'] }, actor, users, state).agentTools,
+    ['query_checkin_status', 'query_checkin_summary'],
+    '签到只读工具可作为到点轮白名单'
+  );
 });
 
 test('到点调用 Agent 并把结论投递给接收人', async () => {

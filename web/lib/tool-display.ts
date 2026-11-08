@@ -38,7 +38,7 @@ export function clampText(s: string, n: number): { text: string; truncated: bool
   return { text: chars.slice(0, n).join(''), truncated: true };
 }
 
-/** 工具 → 展示族。唯一事实源是 server/tools/registry.ts 的 toolNames()（19 个，含 A5 计划）。 */
+/** 工具 → 展示族。唯一事实源是 server/tools/registry.ts 的 toolNames()（23 个：12 read + 10 draft + 1 任务计划）。 */
 const FAMILY_BY_TOOL: Record<string, ToolFamily> = {
   // 查询类（只读，结构化结果由结果卡承担）
   query_schedule: 'query',
@@ -49,6 +49,7 @@ const FAMILY_BY_TOOL: Record<string, ToolFamily> = {
   query_scheduled_jobs: 'query',
   query_duty_context: 'query',
   query_checkin_status: 'query',
+  query_checkin_summary: 'query',
   // 知识检索
   query_knowledge: 'knowledge',
   // 草稿类（effect:'draft'，只生成待确认方案，绝不自行执行）
@@ -58,6 +59,7 @@ const FAMILY_BY_TOOL: Record<string, ToolFamily> = {
   prepare_schedule_adjustment: 'draft',
   prepare_issue_ticket: 'draft',
   prepare_room_closure: 'draft',
+  prepare_room_status: 'draft',
   prepare_notification: 'draft',
   prepare_duty_session: 'draft',
   // 视觉观察（完整内容由 EvidenceObservationCard 承担）

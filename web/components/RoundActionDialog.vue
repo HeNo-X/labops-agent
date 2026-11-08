@@ -197,7 +197,7 @@ function confirm(): void {
 .dlg__btn--danger {
   border-color: var(--danger);
   background: var(--danger);
-  color: #fff;
+  color: var(--danger-contrast);
 }
 .dlg__btn--danger:hover:not(:disabled) {
   filter: brightness(1.06);

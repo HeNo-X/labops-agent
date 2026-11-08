@@ -15,10 +15,13 @@ export function renderBusinessFacts(r:BusinessResult):string{
  else if(r.view==='incidents'){for(const v of limit(r.incidents|| (r.incident?[r.incident]:[])))lines.push(`• 事件 ${v.id}｜${v.roomName}｜${v.date}｜${v.description}｜${v.status}｜工单 ${v.issueIds.join('、')||'无'}｜停用 ${v.closureIds.join('、')||'无'}｜通知 ${v.noticeIds.join('、')||'无'}`);if(!lines.length)lines.push('当前身份没有可见故障事件。');}
  else if(r.tasks){for(const t of limit(r.tasks.tasks))lines.push(`• 任务 ${t.id}｜${t.kind}｜${t.status}｜版本 ${t.revision}｜更新 ${t.updatedAt}`);if(!lines.length)lines.push('当前身份没有持久业务任务。');}
  else if(r.resourceHealth){const health=r.resourceHealth as {summary?:unknown;missing?:unknown;items?:unknown[]};lines.push('资源健康结果：'+JSON.stringify(health.summary||health.missing||health.items||r.resourceHealth));}
+ else if(r.view==='checkin'&&r.plan){const p=r.plan.payload;lines.push('管理员代录方案（待本人确认）：');
+  lines.push(`• 给 ${p.targetUsername||'未指定'}${p.className?'（'+p.className+'）':''} 补录 ${p.date||'未指定'} ${periods[p.periodKey||'']||p.periodKey||'未指定'} ${p.labName||p.labId||'未指定'}《${p.courseName||'未录入'}》的签到`);
+  lines.push(`• 代录原因：${p.reason||'（缺失——主系统会拒绝无原因的代录）'}`);
+  lines.push('提交后记录将标记 agent-manual 并写入审计（代录人与原因），时间以服务器为准；缺口请先现场核实，Agent 不代替现场事实。');}
  else lines.push(r.summary);
  if(r.summary.includes('执行部分请切换'))lines.push('执行部分请切换任务模式并人工确认，本轮未准备或提交业务。');
  if(r.plan)lines.push('方案 '+r.plan.id+' 尚待本人确认，业务未提交。');
  const groups=c?[c.timetable,c.shifts,c.handovers,c.handoverItems||[],c.issues,c.notifications,c.closures]:[r.incidents||[],r.tasks?.tasks||[]];if(groups.some(rows=>rows.length>30))lines.push('正文各组最多显示前 30 条，请缩小查询范围查看其余记录。');
- if(!r.summary.includes('请切换任务模式'))lines.push(`来源：${r.source}；查询时间：${r.report?.queriedAt||r.queriedAt||'未提供'}；范围：${r.report?.scope.label|| (c?c.actor.username+' / '+c.actor.identity+(c.actor.className?' / '+c.actor.className:''):'当前账号授权范围')}；数据版本：${r.report?.reportRevision||r.sourceRevision||c?.revision||'未提供'}。`);
  return lines.join('\n');
 }

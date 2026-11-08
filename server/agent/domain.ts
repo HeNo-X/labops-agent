@@ -1,5 +1,5 @@
 export type DomainDecision='query'|'redirect'|'capabilities'|'clarify';
-const BUSINESS=/实验室|实验安排|课表|排课|课程|调课|停课|教室|房间|空闲|签到|签退|钥匙|借还|设备|报修|维修|投影|巡检|检查清单|值班|班次|交接|工单|停用|恢复开放|故障|通知|日报|运营|定时|提醒|自动化|资料|规程|手册|制度|操作说明|怎么用|登录|登陆|账号|权限|主系统|在室|人数|占用|无人|空堂|口径|统计方式|怎么统计|怎么算|数据来源|数据版本|脱敏|快照|实时数据|证据|照片|附件|铭牌|LabOps|lab(?:oratory)?|timetable|schedule|handover|inspection|repair|work\s*order|room\s*(status|availability)/i;
+const BUSINESS=/实验室|机房|上机|实验安排|课表|排课|课程|课|调课|停课|教室|房间|空闲|签到|签退|钥匙|借还|设备|报修|维修|投影|电脑|网络|巡检|检查清单|值班|班次|交接|工单|停用|恢复开放|故障|通知|日报|运营|定时|提醒|自动化|资料|规程|手册|制度|操作说明|怎么用|登录|登陆|账号|权限|主系统|在室|人数|占用|无人|空堂|口径|统计方式|怎么统计|怎么算|数据来源|数据版本|脱敏|快照|实时数据|证据|照片|附件|铭牌|LabOps|lab(?:oratory)?|timetable|schedule|handover|inspection|repair|work\s*order|room\s*(status|availability)/i;
 const EXTERNAL=/天气|股票行情|推荐股票|炒股|旅游攻略|菜谱|做饭|星座|(?:写|编|讲|来).{0,8}(?:一首诗|诗歌|小说|笑话|代码|程序)|讲个笑话|帮我.{0,6}解题|解数学题|政治新闻|(?:法国|美国|英国|日本).{0,6}首都|\b(?:weather|horoscope|recipe|stock\s*price|capital\s+of)\b|\b(?:write|tell).{0,20}\b(?:poem|joke|novel|code)\b/i;
 const GREETING=/^(?:你好|您好|嗨|hi|hello|哈喽|谢谢|多谢|感谢|辛苦了?|收到|明白|了解了|好的?|嗯+|ok)[！!。.~，,～\s]*$/i;
 const CAPABILITY=/^(?:你|这个助手|LabOps)?(?:是干什么的|能做什么|可以做什么|有什么功能|有什么用|怎么用|帮助|help|what can you do)[？?！!。.\s]*$/i;
@@ -12,7 +12,7 @@ const FOLLOWUP=/^(?:选|确认|执行|准备|提交|取消|拒绝|同意|不要|
  *  （2026-10-31 用户实测"310有人吗"被判成超范围）。
  */
 const BARE_ROOM=/(?<!\d)\d{3}(?!\d)/;
-const ROOM_STATUS_Q=/有人|空吗|空着|在吗|开放|开着|状态|什么情况|啥情况|几个人|多少人|在室|容量|钥匙|下一?节|占用/;
+const ROOM_STATUS_Q=/有人|人多|空吗|空着|在吗|开放|开着|状态|什么情况|啥情况|几个人|多少人|在室|容量|钥匙|下一?节|占用/;
 export function classifyLabRequest(question:string,hasContext=false):DomainDecision{
  const q=question.trim();
  if(GREETING.test(q)||CAPABILITY.test(q))return 'capabilities';

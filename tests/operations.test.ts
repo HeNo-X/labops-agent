@@ -343,6 +343,69 @@ test('F06 值班：start → handover 闭环；无会话时 handover 明确报�
   }
 });
 
+test('F02b 开门/关门：确认后登记 room_status，重复登记在同一记录上递增 revision', async () => {
+  // 关门
+  const close = await executeTool('prepare_room_status', { roomId: 'E310', status: 'closed' }, ctx(ADMIN));
+  assert.equal(close.ok, true, close.ok ? '' : (close as { message: string }).message);
+  const cp = (close as { result: { proposalId: string; version: number } }).result;
+  const closed = decideOnProposal({
+    proposalId: cp.proposalId,
+    proposalVersion: cp.version,
+    decision: 'confirm',
+    clientRequestId: 'req-rstat-1',
+    actor: ADMIN
+  });
+  assert.equal(closed.ok, true);
+  if (closed.ok && closed.decision === 'confirm') {
+    assert.equal(closed.receipt.objects[0]!.kind, 'room_status');
+    const recId = closed.receipt.objects[0]!.id;
+    assert.equal(db.getBizRoomStatus('E310')!.status, 'closed');
+    assert.equal(db.getBizRoomStatus('E310')!.revision, 1);
+
+    // 再开门：同一房间、同一记录，revision 递增
+    const open = await executeTool('prepare_room_status', { roomId: 'E310', status: 'active' }, ctx(ADMIN));
+    const op = (open as { result: { proposalId: string; version: number } }).result;
+    const opened = decideOnProposal({
+      proposalId: op.proposalId,
+      proposalVersion: op.version,
+      decision: 'confirm',
+      clientRequestId: 'req-rstat-2',
+      actor: ADMIN
+    });
+    assert.equal(opened.ok, true);
+    if (opened.ok && opened.decision === 'confirm') {
+      assert.equal(opened.receipt.objects[0]!.id, recId, '同一房间必须复用同一记录');
+      const cur = db.getBizRoomStatus('E310')!;
+      assert.equal(cur.status, 'active');
+      assert.equal(cur.revision, 2);
+    }
+  }
+});
+
+test('F02b 开门/关门负向：非法 status → bad_status；学生确认 → forbidden', async () => {
+  const bad = await executeTool('prepare_room_status', { roomId: 'E310', status: 'inactive' }, ctx(ADMIN));
+  assert.equal(bad.ok, false);
+  if (!bad.ok) assert.equal(bad.code, 'bad_status');
+
+  const noRoom = await executeTool('prepare_room_status', { roomId: 'E999', status: 'closed' }, ctx(ADMIN));
+  assert.equal(noRoom.ok, false);
+  if (!noRoom.ok) assert.equal(noRoom.code, 'lab_not_found');
+
+  const r = await executeTool('prepare_room_status', { roomId: 'E310', status: 'closed' }, ctx(STUDENT));
+  assert.equal(r.ok, true);
+  const p = (r as { result: { proposalId: string; version: number; canExecute: boolean } }).result;
+  assert.equal(p.canExecute, false, '学生没有 availability:write，提案应标记不可执行');
+  const outcome = decideOnProposal({
+    proposalId: p.proposalId,
+    proposalVersion: p.version,
+    decision: 'confirm',
+    clientRequestId: 'req-rstat-stu',
+    actor: STUDENT
+  });
+  assert.equal(outcome.ok, false);
+  if (!outcome.ok) assert.equal(outcome.code, 'forbidden');
+});
+
 test('F10 日报：直接产出报告（非提案），缺数据源指标为 unknown 而非 0', async () => {
   const r = await executeTool('create_operations_report', {}, ctx(ADMIN));
   assert.equal(r.ok, true);
@@ -360,7 +423,7 @@ test('能力协商：capabilities 描述沙盒环境与当前身份', async () =
   const caps = typeRegistry.toolNames();
   assert.ok(caps.includes('prepare_issue_ticket'));
   assert.ok(caps.includes('create_operations_report'));
-  assert.equal(caps.length,21,'11 个只读（含 analyze_evidence_image 视觉初判、query_checkin_status、query_vision_status 现场事实）+ 9 个准备/草稿（8 个 prepare_* + create_operations_report）+ 1 个任务计划（A5 maintain_task_plan，工作记录非业务工具）');
+  assert.equal(caps.length,23,'12 个只读（含 analyze_evidence_image 视觉初判、query_checkin_status 本人签到状态、query_checkin_summary 签到汇总（仅管理员）、query_vision_status 现场事实）+ 10 个准备/草稿（9 个 prepare_* 含开门/关门 prepare_room_status + create_operations_report）+ 1 个任务计划（A5 maintain_task_plan，工作记录非业务工具）');
   assert.ok(caps.includes('analyze_evidence_image'),'视觉初判必须是只读能力，不得带草稿效果');
   const visionTool = typeRegistry.REGISTRY.find((t) => t.spec.name === 'analyze_evidence_image');
   assert.equal(visionTool?.effect, 'read', '看图不得产生提案或任何业务写入');

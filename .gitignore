@@ -32,6 +32,9 @@ server/credentials/
 *.key
 .evaluation/
 
+# 视觉边缘上报事件流水（运行时数据，不入库；快照只存内存不落盘）
+server/data/vision/
+
 .review-shots*/
 
 # 本地备份（合并期 .pre-cloudapi.bak 等）

@@ -1,7 +1,7 @@
 // Generated from Pages/lib/labops-targets.js; npm run sync:rules
 const api=(()=>{
  'use strict';
- const VIEWS={home:[],assistant:['section'],sessions:['section'],settings:['category'],conversation:['conversationId'],rooms:[],room:['roomId','action'],automation:[],job:['jobId'],task:['taskId'],messages:[],notice:['noticeId'],profile:[],evidence:['roomId','issueId']};
+ const VIEWS={home:[],assistant:['section'],sessions:['section'],settings:['category'],conversation:['conversationId'],rooms:[],room:['roomId','action'],automation:[],job:['jobId'],task:['taskId'],messages:[],notice:['noticeId'],profile:[],evidence:['roomId','issueId'],vision:[]};
  function normalize(raw){
   if(raw==null)return {view:'home'};
   if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('跳转目标无效');

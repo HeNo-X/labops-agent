@@ -396,6 +396,48 @@ export async function runPrepareRoomClosure(args: Record<string, unknown>, ctx: 
 }
 
 // ===========================================================================
+//  F02b prepare_room_status —— 开门/关门（即时门禁/开放状态，区别于长周期停用）
+// ===========================================================================
+
+export async function runPrepareRoomStatus(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolExecution> {
+  try {
+    const roomId = resolveRoom(ctx, strArg(args, 'roomId', { required: true }));
+    const status = strArg(args, 'status', { required: true })!;
+    if (status !== 'active' && status !== 'closed') {
+      throw new OpsToolError('bad_status', 'status 必须是 active（开门）/ closed（关门）');
+    }
+    const label = status === 'active' ? '开门' : '关门';
+    return persistAndReturn({
+      ctx,
+      kind: 'room_status',
+      goal: `${label} ${roomId}`,
+      actionType: 'room_status.update',
+      payload: { roomId, status },
+      payloadKind: 'room_status',
+      payloadView: { roomId, status, statusLabel: label },
+      title: `${label} · ${roomId}`,
+      summary:
+        `登记 ${roomId} 为${label}状态（覆盖层，不改房间档案）；这是人员登记的开放状态，不是门禁传感器读数。`,
+      effects: [
+        {
+          label: `${label}（${roomId}）`,
+          objectType: 'room_status',
+          objectId: null,
+          before: null,
+          after: label
+        }
+      ],
+      missingDependencies: ['生产业务接口未接入：开门/关门仅在沙盒生效，老系统页面不会感知'],
+      caps: ['availability:write'],
+      evidence: evidenceOf(ctx, `房间号白名单来自${ctx.dataset.sourceLabel}`)
+    });
+  } catch (err) {
+    if (err instanceof OpsToolError) return fail(err);
+    return fail(new OpsToolError('tool_internal_error', `准备开门/关门单失败：${err instanceof Error ? err.message : String(err)}`));
+  }
+}
+
+// ===========================================================================
 //  F03 prepare_notification —— 定向通知（站内）
 // ===========================================================================
 

@@ -20,7 +20,6 @@ const width = computed(() => Math.min(200, Math.max(88, props.actions.length * 6
 
 function down(e: PointerEvent): void {
   if (e.pointerType === 'mouse' && e.button !== 0) return;
-  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
   drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, horizontal: null };
   animating.value = false;
 }
@@ -35,12 +34,15 @@ function move(e: PointerEvent): void {
   }
   suppressClick = true;
   const base = open.value ? -width.value : 0;
+  // 同弹层拖拽：捕获延迟到首次横向显著位移，点按（无位移）不捕获、不吞 click
+  (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
   offset.value = Math.min(0, Math.max(-width.value, base + mx));
 }
 function up(e: PointerEvent): void {
   if (!drag || e.pointerId !== drag.id) return;
   drag = null;
   animating.value = true;
+  // 快甩即开：位移过半或末段速度达标（与抽屉/边缘手势同一阈值语义）
   const shouldOpen = offset.value < -width.value / 2;
   open.value = shouldOpen;
   offset.value = shouldOpen ? -width.value : 0;
@@ -72,7 +74,7 @@ function act(a: { run: () => void }): void {
 </script>
 
 <template>
-  <div class="swipe-row">
+  <div class="swipe-row" :class="{ 'is-open': open }">
     <div class="swipe-row__actions" :aria-hidden="!open">
       <button v-for="a in actions" :key="a.label" type="button" :class="{ 'swipe-row__danger': a.danger }" @click="act(a)">{{ tr(a.label) }}</button>
     </div>
@@ -105,6 +107,10 @@ function act(a: { run: () => void }): void {
   padding: 3px 0;
   align-items: stretch;
 }
+/* 展开态：操作钮提升到主行之上——消除绘制层级竞态导致的"点不到" */
+.swipe-row.is-open .swipe-row__actions {
+  z-index: 2;
+}
 .swipe-row__actions button {
   width: 56px;
   min-height: 100%;
@@ -116,7 +122,7 @@ function act(a: { run: () => void }): void {
 }
 .swipe-row__danger {
   background: var(--danger) !important;
-  color: #fff !important;
+  color: var(--danger-contrast) !important;
 }
 .swipe-row__main {
   position: relative;

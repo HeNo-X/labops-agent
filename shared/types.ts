@@ -198,7 +198,7 @@ export interface ToolStartedPayload {
 }
 
 /** 结构化结果的类别。前端据此选择渲染器，不再假设所有工具都返回课表 */
-export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation' | 'checkin_status' | 'vision_field' | 'task_plan';
+export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation' | 'checkin_status' | 'checkin_summary' | 'vision_field' | 'task_plan';
 
 export interface ToolResultPayload {
   step: number;
@@ -213,7 +213,7 @@ export interface ToolResultPayload {
   /** 结果类别，决定前端用哪个渲染器 */
   resultKind?: ToolResultKind;
   /** 结构化结果，前端只接受这一份（绝不插入模型返回的任意 HTML） */
-  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult | EvidenceObservationResult | CheckinStatusResult | VisionFieldResult | { steps: TaskPlanStep[]; updatedAt: string };
+  result?: ScheduleQueryResult | LabStatusResult | FreeRoomsResult | Proposal | OperationsReportResult | KnowledgeResult | BusinessPlanResult | EvidenceObservationResult | CheckinStatusResult | CheckinSummaryResult | VisionFieldResult | { steps: TaskPlanStep[]; updatedAt: string };
   error?: { code: string; message: string };
 }
 
@@ -429,6 +429,76 @@ export interface VisionFieldResult {
   labs: VisionFieldLab[];
   /** 每房间一行的可读明细（与工具 summary 同源），渲染直接逐行转达 */
   detailLines: string[];
+}
+
+// ---------- query_checkin_summary ----------
+
+export interface CheckinSummaryArgs {
+  /** YYYY-MM-DD，缺省 = 服务端当天（上海时区） */
+  date?: string;
+  /** 可选：只看某个实验室（房间 id） */
+  labId?: string;
+  /** 可选：只看某个节次（am1/am2/pm1/pm2/eve_ab/eve_cd） */
+  periodKey?: string;
+}
+
+/** 单节课的签到汇总（仅管理员；应到按名册人数或班级档案人数） */
+export interface CheckinSummarySession {
+  timetableId: string;
+  periodKey: string;
+  periodLabel: string | null;
+  start: string | null;
+  end: string | null;
+  courseId: string | null;
+  courseName: string | null;
+  teacher: string | null;
+  labId: string | null;
+  labName: string | null;
+  classNames: string[];
+  /** 应到人数；班级人数完全未知时为 null */
+  expected: number | null;
+  /** 是否有已登记名册（决定 absentUsernames 是否可得） */
+  rosterKnown: boolean;
+  /** 已签到人数（同人同节唯一，服务端 409 保证） */
+  checkedIn: number;
+  /** 未签到学号（账号）名单，**不含姓名**；未登记名册时为 null。名单可能少于账面缺口（非名册签到/名册不全），以 note 说明 */
+  absentUsernames: string[] | null;
+  /** 账面缺口 = max(应到−实到, 0)，与名册无关；应到未知（expected=null）时为 null */
+  absentCount: number | null;
+  checkedOut: number;
+  /** 补签到条数（进程内存标记，重启后的历史记录不计） */
+  late: number;
+  /** 扫错实验室条数 */
+  mismatch: number;
+  /** 定位失败条数（仅留痕标记） */
+  locationFailed: number;
+  note: string | null;
+}
+
+export interface CheckinSummaryTotals {
+  sessions: number;
+  expected: number;
+  checkedIn: number;
+  absent: number;
+  checkedOut: number;
+  late: number;
+  mismatch: number;
+  locationFailed: number;
+  /** 应到无法确定的课节数 */
+  unknownExpected: number;
+}
+
+export interface CheckinSummaryResult {
+  actor: { username: string; identity: string; className: string };
+  date: string;
+  timezone: 'Asia/Shanghai';
+  scope: { labId: string | null; periodKey: string | null };
+  sessions: CheckinSummarySession[];
+  totals: CheckinSummaryTotals;
+  note: string | null;
+  provenance: { source: 'authorized_api'; queriedAt: string; sourceRevision: string };
+  /** 固定口径：缺口需现场核实，请勿代替学生签到；名单为学号不含姓名 */
+  boundaryNote: string;
 }
 
 // ---------- query_free_rooms ----------

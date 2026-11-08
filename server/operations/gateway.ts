@@ -23,7 +23,8 @@ import {
   handOverBizDutySession,
   getBizDutySession,
   insertOpsAudit,
-  insertOpsOutbox
+  insertOpsOutbox,
+  upsertBizRoomStatus
 } from '../persistence/db.ts';
 
 /** 网关执行失败：执行器转成结构化错误，不冒充成功 */
@@ -70,6 +71,12 @@ export interface DutyHandoverPayload {
   sessionId: string;
   checklist: Array<{ key: string; label: string; state: 'done' | 'abnormal' | 'unchecked' }>;
   note: string;
+}
+
+export interface RoomStatusPayload {
+  roomId: string;
+  /** active=开门；closed=关门 */
+  status: 'active' | 'closed';
 }
 
 function sha256(s: string): string {
@@ -209,6 +216,16 @@ export function execDutyHandover(payload: DutyHandoverPayload, actor: SandboxAct
       sessionId: payload.sessionId,
       unchecked: payload.checklist.filter((c) => c.state !== 'done').length
     });
+    return [ref];
+  });
+}
+
+/** 开门/关门：登记房间门禁/开放状态（覆盖层，不改房间档案），写入即审计 */
+export function execRoomStatus(payload: RoomStatusPayload, actor: SandboxActor, operationId: string): ObjectRef[] {
+  return runInTransaction(() => {
+    const saved = upsertBizRoomStatus({ roomId: payload.roomId, status: payload.status, actor });
+    const ref: ObjectRef = { kind: 'room_status', id: saved.id, revision: saved.revision };
+    auditOne(actor, 'room_status.update', ref, operationId, { roomId: payload.roomId, status: payload.status });
     return [ref];
   });
 }

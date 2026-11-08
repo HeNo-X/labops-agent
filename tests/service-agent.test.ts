@@ -15,6 +15,10 @@ process.env.LABOPS_AUTH_MODE = 'demo';
 process.env.LABOPS_SERVICE_SECRET = 'test-service-secret';
 process.env.AGNES_API_KEY = '';
 process.env.DASHSCOPE_API_KEY = '';
+// 本文件可直接 node --test 运行：必须与 run-tests.mjs 同口径切断磁盘 .env，
+// 否则备用链（BigModel/星火）会在 chat 模式真调付费模型（测试不得调用付费模型）。
+process.env.LABOPS_SKIP_ENV_FILE = '1';
+for (const k of ['AGNES_API_KEY', 'DASHSCOPE_API_KEY', 'VISION_API_KEY']) delete process.env[k];
 
 import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
@@ -100,6 +104,19 @@ test('白名单是运行时硬拦：没列出的工具连调都调不动', async
   assert.equal((denied as { code: string }).code, 'tool_not_allowed');
 });
 
+test('签到接入批次3：定时轮默认只读集自带签到工具，agentTools 勾选也合法', () => {
+  const chatTools = toolsForMode('chat').map((t) => t.name);
+  assert.ok(chatTools.includes('query_checkin_status'), '本人签到状态必须在默认只读集里（到点轮可直接用）');
+  assert.ok(chatTools.includes('query_checkin_summary'), '签到汇总必须在默认只读集里（admin 到点轮可直接用）');
+  const taskTools = toolsForMode('task').map((t) => t.name);
+  for (const name of ['query_checkin_status', 'query_checkin_summary']) {
+    assert.ok(taskTools.includes(name), `${name} 必须在 task 工具集（service-agent 白名单校验基准）`);
+  }
+  const coerced = __serviceInternals.coerce({ ...VALID, allowedTools: ['query_checkin_status', 'query_checkin_summary', 'query_checkin_summary', ' '] });
+  assert.equal(coerced.ok, true);
+  if (coerced.ok) assert.deepEqual(coerced.value.allowedTools, ['query_checkin_status', 'query_checkin_summary'], '显式列出签到工具合法且去重去空');
+});
+
 test('签名：错签 / 过期 / 重放 三种都拒', async () => {
   const { req, res, out, raw } = fakeExchange(VALID, {});
   Object.assign(req, { headers: { 'content-type': 'application/json', ...signedHeaders(raw, 'deadbeefdeadbeef'), 'x-service-signature': 'f'.repeat(64) } });
@@ -133,4 +150,18 @@ test('正常执行一次；同一 jobRunId 再来直接回缓存（不重跑）'
   const two = JSON.parse(second.out.body) as { replayed: boolean; runId: string };
   assert.equal(two.replayed, true, '第二次必须是缓存命中');
   assert.equal(two.runId, one.runId, '重放要回同一个 runId');
+});
+
+test('签到接入批次3：到点真实跑一轮，签到问法走演示引擎如实回答（未连接不编造）', async () => {
+  const body = { ...VALID, jobRunId: 'run-checkin-0001', prompt: '今天签到情况怎么样' };
+  const first = fakeExchange(body, {});
+  Object.assign(first.req, { headers: { 'content-type': 'application/json', ...signedHeaders(first.raw, 'eeee4444ffff5555') } });
+  await handleServiceAgent(first.req, first.res, '/api/service/agent-run');
+  assert.equal(first.out.status, 200, first.out.body);
+  const one = JSON.parse(first.out.body) as { ok: boolean; answer: string; toolCalls?: Array<{ tool: string; ok: boolean }> };
+  assert.equal(one.ok, true);
+  // 测试工作区未连接主系统：演示引擎兜底必须如实说取不到，绝不编造缺口
+  assert.match(one.answer, /没有连接原系统|取不到签到汇总/);
+  assert.match(one.answer, /请勿代替学生签到/);
+  assert.ok(!/\d{6,}/.test(one.answer.replace(/2026-\d{2}-\d{2}/g, '')), '不得编造学号名单');
 });

@@ -105,7 +105,7 @@ test('statusMeta / isOn / canToggle：12 个状态全覆盖，且不是只靠颜
 test('kindHint：8 个模板都有一句话说明，未知模板有兜底', () => {
   const kinds = [
     'daily_report', 'tomorrow_courses', 'duty_reminder', 'due_followup',
-    'weekly_report', 'resource_risk', 'closure_expiry', 'notice_reminder'
+    'notice_reminder', 'lab_open_reminder', 'session_checkin_reminder', 'patrol_reminder'
   ];
   for (const kind of kinds) {
     const hint = kindHint(kind);

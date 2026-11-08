@@ -25,7 +25,7 @@ async function verify(){
   auth.authenticated.value=auth.mode.value==='demo'?Boolean(sessionStorage.getItem('labops.auth')):Boolean(data.authenticated)&&sessionStorage.getItem('labops.manual-logout')!=='1';
   if(data.profile?.identity==='student')throw new Error('学生账号只能使用主系统共享聊天，不能进入完整 LabOps');
   auth.profile.value=data.profile||null;initializePreferences(auth.authenticated.value?auth.profile.value:null);
-  if(auth.defaultEntry.value)selected={view:preferences.value.mobileStart};
+  if(auth.defaultEntry.value)selected=preferences.value.mobileStart==='assistant'?{view:'assistant'}:{view:'home'};
   if(ticket&&data.target)selected=Targets.normalize(data.target);else if(ticket&&data.conversationId)selected={view:'conversation',conversationId:data.conversationId};
   auth.target.value=selected;
   if(ticket)history.replaceState(history.state,'',location.pathname+'?'+Targets.search(selected));

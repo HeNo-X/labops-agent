@@ -26,6 +26,7 @@ import type {
   SandboxDutySession,
   SandboxIssue,
   SandboxNotification,
+  SandboxRoomStatus,
   ScheduleProvenance,
   TaskRecord,
   TaskStatus
@@ -793,6 +794,15 @@ CREATE TABLE IF NOT EXISTS biz_duty_sessions (
   linkedIssueIds TEXT NOT NULL DEFAULT '[]',
   revision INTEGER NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS biz_room_status (
+  id TEXT PRIMARY KEY,
+  roomId TEXT NOT NULL,
+  status TEXT NOT NULL,
+  createdById TEXT NOT NULL,
+  createdByRole TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1
+);
 `;
 
 function opsId(prefix: string): string {
@@ -1316,6 +1326,40 @@ export function handOverBizDutySession(input: {
     )
     .run(JSON.stringify(input.checklist), input.note, JSON.stringify(input.linkedIssueIds), input.sessionId);
   return getBizDutySession(input.sessionId);
+}
+
+export function getBizRoomStatus(roomId: string): SandboxRoomStatus | null {
+  const row = getDb().prepare(`SELECT * FROM biz_room_status WHERE roomId = ?`).get(roomId) as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    id: String(row['id']),
+    roomId: String(row['roomId']),
+    status: String(row['status']) as SandboxRoomStatus['status'],
+    createdBy: { id: String(row['createdById']), role: String(row['createdByRole']) as SandboxActor['role'], label: String(row['createdByRole']) },
+    updatedAt: String(row['updatedAt']),
+    revision: Number(row['revision'])
+  };
+}
+
+/** 开门/关门状态落库：同一房间一条记录，重复登记在原记录上递增 revision */
+export function upsertBizRoomStatus(input: {
+  roomId: string;
+  status: 'active' | 'closed';
+  actor: SandboxActor;
+}): SandboxRoomStatus {
+  const now = new Date().toISOString();
+  const existing = getBizRoomStatus(input.roomId);
+  if (existing) {
+    getDb()
+      .prepare(`UPDATE biz_room_status SET status = ?, createdById = ?, createdByRole = ?, updatedAt = ?, revision = revision + 1 WHERE id = ?`)
+      .run(input.status, input.actor.id, input.actor.role, now, existing.id);
+    return { ...existing, status: input.status, createdBy: input.actor, updatedAt: now, revision: existing.revision + 1 };
+  }
+  const id = opsId('rstat');
+  getDb()
+    .prepare(`INSERT INTO biz_room_status (id, roomId, status, createdById, createdByRole, updatedAt, revision) VALUES (?, ?, ?, ?, ?, ?, 1)`)
+    .run(id, input.roomId, input.status, input.actor.id, input.actor.role, now);
+  return { id, roomId: input.roomId, status: input.status, createdBy: input.actor, updatedAt: now, revision: 1 };
 }
 
 /** 终态落库：status ∈ completed|failed|cancelled|interrupted */

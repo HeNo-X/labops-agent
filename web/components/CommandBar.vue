@@ -123,7 +123,6 @@ function useExample(q: string): void {
       :rows="isHero ? 2 : 1"
       :placeholder="props.placeholder ?? '输入实验室问题或要办理的事项…'"
       :submit-label="props.submitLabel ?? '发送'"
-      show-corrections
       @submit="submit"
       @stop="emit('cancel')"
       @queue="(q) => emit('queue', q)"
@@ -177,7 +176,9 @@ function useExample(q: string): void {
   </section>
 </template>
 
-<style scoped>
+<style>
+/* 2026-11-07：输入行 DOM 已移入 ComposerBar。scoped 样式带 data-v 属性，
+   子组件元素匹配不到，故本组件样式改为全局；类名均为 bar__* 前缀，不会外泄到别处。 */
 .bar {
   background: var(--surface);
   border: 1px solid var(--border);

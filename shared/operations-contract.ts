@@ -45,7 +45,7 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
 export type ProposalState = 'awaiting_confirmation' | 'executed' | 'rejected' | 'expired' | 'superseded';
 
 /** 业务对象种类（回执 objects[].kind） */
-export type ObjectKind = 'issue' | 'notification' | 'closure' | 'duty_session' | 'report';
+export type ObjectKind = 'issue' | 'notification' | 'closure' | 'duty_session' | 'report' | 'room_status';
 
 /** 沙盒演示身份。role 决定能力集合（§7.2 权限模型的最小版） */
 export type SandboxRole = 'admin' | 'volunteer' | 'student';
@@ -102,7 +102,7 @@ export interface Proposal {
   /** 计划依据的数据来源（与只读结果同一 provenance 结构） */
   evidence: Array<ScheduleProvenance>;
   /** 提案载荷的类型标签，前端据此选择编辑/展示形态 */
-  payloadKind: 'issue' | 'notification' | 'closure' | 'duty_session';
+  payloadKind: 'issue' | 'notification' | 'closure' | 'duty_session' | 'room_status';
   /** 展示用载荷：与 payloadKind 对应的用户可读字段（不含服务端内部字段） */
   payloadView: Record<string, unknown>;
 }
@@ -185,7 +185,7 @@ export type DecisionOutcome =
 export interface TaskRecord {
   taskId: string;
   conversationId: string | null;
-  kind: 'issue' | 'notification' | 'closure' | 'duty_session' | 'report';
+  kind: 'issue' | 'notification' | 'closure' | 'duty_session' | 'report' | 'room_status';
   goal: string;
   status: TaskStatus;
   actor: SandboxActor;
@@ -283,5 +283,16 @@ export interface SandboxDutySession {
   checklist: Array<{ key: string; label: string; state: 'done' | 'abnormal' | 'unchecked' }> | null;
   handoverNote: string | null;
   linkedIssueIds: string[];
+  revision: number;
+}
+
+/** 房间开门/关门状态（人员登记的门禁/开放状态，非门禁传感器；区别于长周期停用） */
+export interface SandboxRoomStatus {
+  id: string;
+  roomId: string;
+  /** active=已开门；closed=已关门 */
+  status: 'active' | 'closed';
+  createdBy: SandboxActor;
+  updatedAt: string;
   revision: number;
 }

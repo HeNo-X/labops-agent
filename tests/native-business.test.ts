@@ -230,7 +230,7 @@ test('操作说明检索带版本与权限、生效期；无命中拒绝补编�
   assert.ok(retrieve('管理员调课约束','student','2026-10-05').every(d=>d.id!=='schedule-adjustment'));
   assert.equal(retrieve('调课','admin','2026-09-01').length,0);assert.equal(retrieve('全国考试报销金额','admin','2026-10-05').length,0);
 });
-after(()=>{nativeDb.db?.close();fs.rmSync(temp,{recursive:true,force:true});});
+after(()=>{try{nativeDb.db?.close();}catch{}try{fs.rmSync(temp,{recursive:true,force:true});}catch(e){console.warn('cleanup skipped: '+(e as {code?:string}).code);}});
 
 test('R05 部分检查可补全，修订历史保留且异常工单不重复，旧版本与并发方案拒绝',()=>{
  const h=harness();const checks=(value:string)=>['power','lights','doors','keys','todo'].map(key=>({key,state:key==='keys'?'done':value}));
@@ -284,4 +284,53 @@ test('0.2.0旧部分交接记录迁移为可补全检查，保留原声明与同
  const current=h.call('/context',undefined,vol).handovers[0];assert.equal(current.revision,1);assert.equal(current.status,'partial');
  const p=h.call('/handover/preview',{shiftId:'shift-fixture',expectedRevision:1,checklist:current.checklist.map((c:any)=>({...c,state:'done'})),note:'补全现场检查'},vol).plan;h.call('/plans/commit',{planId:p.id,version:1},vol);
  assert.equal(h.state.handoverRecords[0].id,'legacy-record');assert.equal(h.state.handoverRecords[0].revisions.length,2);assert.equal(h.state.handoverRecords[0].revisions[0].note,'原版本只有钥匙已确认');
+});
+test('管理员代录签到：预览—确认—幂等回执，记录带 agent-manual 标记与代录人',()=>{
+ const h=harness();h.state.classRoster=[{sno:student.username,className:'Fixture A'}];
+ const base={kind:'checkin.manual',targetUsername:student.username,date:'2026-10-05',periodKey:'pm1',labId:'a',reason:'隔离样例：设备故障无法扫码'};
+ const p=h.call('/workflow/preview',base).plan;assert.equal(p.kind,'checkin.manual');assert.equal(p.payload.timetableId,'t');assert.equal(p.payload.className,'Fixture A');assert.equal(p.state,'awaiting_confirmation');
+ const r=h.call('/plans/commit',{planId:p.id,version:1});assert.equal(r.receipt.objects[0].kind,'checkin_record');
+ const rec=h.state.checkinRecords[0];assert.equal(rec.source,'agent-manual');assert.equal(rec.username,student.username);assert.equal(rec.actorId,admin.username);assert.equal(rec.status,'补签到','课后补录记补签到');assert.equal(rec.timetableId,'t');assert.ok(String(rec.registrationReason).includes('设备故障'));assert.equal(rec.id,'manual-'+p.id.slice(5));
+ const again=h.call('/plans/commit',{planId:p.id,version:1});assert.equal(again.replayed,true);assert.equal(again.receipt.operationId,r.receipt.operationId);assert.equal(h.state.checkinRecords.length,1,'确定性 id+台账双保险，不产生第二条记录');
+ assert.equal(h.call('/checkin-status',undefined,student).lessons[0].status,'signed','提交后本人状态端点立即可见');
+});
+test('代录拦截：非管理员、不存在的账号、在册账号未登名册、缺原因、未来日期、归属不匹配、提交时重复与课表变化、过期',()=>{
+ const h=harness();h.state.classRoster=[{sno:student.username,className:'Fixture A'}];h.state.checkinRecords=[];
+ const base={kind:'checkin.manual',targetUsername:student.username,date:'2026-10-05',periodKey:'pm1',labId:'a',reason:'隔离样例原因'};
+ assert.throws(()=>h.call('/workflow/preview',base,vol),/管理员/);
+ assert.throws(()=>h.call('/workflow/preview',{...base,targetUsername:'8888'}),/目标学生不存在/);
+ h.state.users.push({username:'2023009',identity:'student',className:'Fixture A'});
+ assert.throws(()=>h.call('/workflow/preview',{...base,targetUsername:'2023009'}),/名册/,'在册账号但未登名册：无法确定班级归属');
+ assert.throws(()=>h.call('/workflow/preview',{...base,reason:''}),/原因/);
+ assert.throws(()=>h.call('/workflow/preview',{...base,date:'2026-10-10'}),/未来/);
+ assert.throws(()=>h.call('/workflow/preview',{...base,periodKey:'am1'}),/课程/);
+ const p=h.call('/workflow/preview',base).plan;
+ assert.throws(()=>h.call('/plans/commit',{planId:p.id,version:1},vol),/方案/,'他人方案对 volunteer 不可见（404 先于身份门控）');
+ h.state.checkinRecords.push({id:'dup-1',labId:'a',type:'checkin',username:student.username,periodKey:'pm1',time:'2026-10-05 14:05:00',valid:true});
+ assert.throws(()=>h.call('/plans/commit',{planId:p.id,version:1}),/已有有效签到/);
+ h.state.classRoster.push({sno:'2023009',className:'Fixture A'});
+ const p3=h.call('/workflow/preview',{...base,targetUsername:'2023009',reason:'第二次准备'}).plan;
+ h.state.timetable[0].courseName='Changed Course'; // 课表版本变化
+ assert.throws(()=>h.call('/plans/commit',{planId:p3.id,version:1}),/变化/);
+ const p4=h.call('/workflow/preview',{...base,targetUsername:'2023009',reason:'第三次准备'}).plan;h.state.opsPlans.find((x:any)=>x.id===p4.id).expiresAt='2020-01-01T00:00:00Z';
+ assert.throws(()=>h.call('/plans/commit',{planId:p4.id,version:1}),/过期/);
+});
+test('业务提交的记录增量经 syncBusinessRecords 落 SQLite 并写审计（重启不丢）',()=>{
+ const record={id:'manual-sync-1',labId:'a',type:'checkin',username:student.username,name:'S',periodKey:'pm1',time:'2026-10-05 14:05:00',status:'补签到',source:'agent-manual',actorId:admin.username,registrationReason:'隔离样例原因'};
+ const synced=nativeDb.syncBusinessRecords({checkinRecords:[]},{checkinRecords:[record]});
+ assert.deepEqual(synced,[{key:'checkinRecords',route:'insertCheckin',count:1}]);
+ const again=nativeDb.syncBusinessRecords({checkinRecords:[record]},{checkinRecords:[record]});
+ assert.equal(again.length,0,'同一 id 不重复写入');
+ const {DatabaseSync}=require('node:sqlite');
+ const ro=new DatabaseSync(nativeDb.dbPath,{readOnly:true});
+ try{
+  const row=ro.prepare('SELECT * FROM checkin_records WHERE id=?').get('manual-sync-1') as Record<string,unknown>|undefined;
+  assert.ok(row,'SQLite 权威层必须有该记录');
+  assert.equal(row?.lab_id,'a');
+  assert.equal(row?.username,student.username);
+  const audit=ro.prepare('SELECT * FROM record_audit WHERE id=? AND route=?').get('manual-sync-1','insertCheckin') as Record<string,unknown>|undefined;
+  assert.ok(audit,'审计必须有代录痕迹');
+  assert.equal(audit?.actorId,admin.username,'代录人入审计');
+  assert.equal(audit?.reason,'隔离样例原因','代录原因入审计');
+ }finally{ro.close();}
 });

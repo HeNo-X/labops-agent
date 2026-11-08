@@ -17,28 +17,8 @@
  */
 import { computed, ref } from 'vue';
 import { t as tr } from '../i18n';
-import { clientFetch } from '../client';
 import { useUserTerms } from '../composables/useUserTerms';
 import { lastAsrBias, lastAsrProtocol } from '../composables/useVoiceInput';
-
-/** 服务端体检结论的结构（与 server/api/asr-lexicon-report.ts 一一对应） */
-interface LexiconReport {
-  ok: true;
-  builtIn: { terms: number; fingerprint: string; protect: number; ambiguousKeys: number };
-  effective: {
-    protocol: string;
-    contextEnabled: boolean;
-    contextMaxChars: number;
-    termCorrectEnabled: boolean;
-    contextTerms: number;
-    contextChars: number;
-    omittedFromBudget: number;
-  };
-  keywords: Array<{ word: string; verdict: string; hotwordFits: boolean; why: string }>;
-  pairs: Array<{ from: string; to: string; verdict: string; why: string }>;
-  merge: { candidates: Array<Record<string, unknown>>; needPinyin: string[] };
-}
-
 
 const props = defineProps<{
   /**
@@ -95,14 +75,6 @@ const keywordStatus = computed(() => {
   return parts.join('；') + '。';
 });
 
-/** 词汇一变，上一次体检的结论就过期了：宁可重新点一次，也不给一份"看起来还有效"的旧报告 */
-function invalidateReport(): void {
-  report.value = null;
-  reportError.value = '';
-  exportText.value = '';
-  copyNotice.value = '';
-}
-
 function toggle(): void {
   if (props.embedded) return; // 嵌入态没有折叠头，防键盘触发出一条不存在的交互
   open.value = !open.value;
@@ -116,7 +88,6 @@ function submit(): void {
     from.value = '';
     to.value = '';
     notice.value = '';
-    invalidateReport();
     return;
   }
   // 每条理由都是用户能自己改正的事，直接说清是什么、怎么办，不写成"输入无效"
@@ -132,7 +103,6 @@ function submit(): void {
 function removeAt(at: number): void {
   remove(at);
   notice.value = '';
-  invalidateReport();
 }
 
 function clearAll(): void {
@@ -143,7 +113,6 @@ function clearAll(): void {
   clear();
   confirmClear.value = false;
   notice.value = '';
-  invalidateReport();
 }
 
 function submitWord(): void {
@@ -151,7 +120,6 @@ function submitWord(): void {
   if (result.ok) {
     word.value = '';
     wordNotice.value = '';
-    invalidateReport();
     return;
   }
   wordNotice.value =
@@ -165,7 +133,6 @@ function submitWord(): void {
 function removeWordAt(at: number): void {
   removeKeyword(at);
   wordNotice.value = '';
-  invalidateReport();
 }
 
 function clearWords(): void {
@@ -176,102 +143,6 @@ function clearWords(): void {
   clearKeywords();
   confirmClearWords.value = false;
   wordNotice.value = '';
-  report.value = null;
-}
-
-// ---------------------------------------------------------------- 体检与导出
-const checking = ref(false);
-const report = ref<LexiconReport | null>(null);
-const reportError = ref('');
-const exportText = ref('');
-const copyNotice = ref('');
-
-const keywordVerdictLabel = (v: string): string =>
-  v === 'in-context' ? tr('已进上下文')
-    : v === 'already-in-builtin' ? tr('内置已有')
-      : v === 'dropped-by-budget' ? tr('被预算挤掉')
-        : v === 'bias-off' ? tr('偏置未开')
-          : v;
-
-const pairVerdictLabel = (v: string): string =>
-  v === 'active' ? tr('生效')
-    : v === 'redundant-with-builtin' ? tr('内置已做')
-      : v === 'overrides-builtin-alias' ? tr('覆盖内置')
-        : v === 'collides-with-protect' ? tr('撞常用词')
-          : v === 'rewrites-a-builtin-term' ? tr('改内置正确词')
-            : v;
-
-const reportSummary = computed(() => {
-  const r = report.value;
-  if (!r) return '';
-  return tr(
-    '内置 {terms} 条（指纹 {fp}）｜事前偏置 {bias}｜协议 {protocol}｜事后纠错 {correct}'
-  , {
-    terms: String(r.builtIn.terms),
-    fp: r.builtIn.fingerprint,
-    bias: r.effective.contextEnabled ? tr('开') : tr('关'),
-    protocol: r.effective.protocol,
-    correct: r.effective.termCorrectEnabled ? tr('开') : tr('关')
-  });
-});
-
-/** 体检请求发的是"我登记的词"，服务端拿它对着内置表与配置算结论；它不写任何东西 */
-async function runCheck(): Promise<void> {
-  checking.value = true;
-  reportError.value = '';
-  exportText.value = '';
-  copyNotice.value = '';
-  try {
-    const response = await clientFetch('/api/agent/asr-lexicon-check', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        keywords: keywords.value,
-        pairs: pairs.value
-      })
-    });
-    const data = (await response.json()) as LexiconReport & { error?: string; message?: string };
-    if (!response.ok || data.ok !== true) {
-      // 报告拿不到就明说拿不到，不保留上一次的结论冒充现状
-      report.value = null;
-      reportError.value = data.message ?? tr('体检失败：服务端没有返回结论');
-      return;
-    }
-    report.value = data;
-  } catch {
-    report.value = null;
-    reportError.value = tr('体检失败：请求没发出去（网络或服务未启动）');
-  } finally {
-    checking.value = false;
-  }
-}
-
-/**
- * 导出的是**候选**，不是成品：并入 shared/asr-glossary.json 之前必须过
- * `npm run check:asr-lexicon`。缺拼音的词不进 JSON —— 它们没法自检，混进去
- * 只会在装载时把整张表带崩。
- */
-function buildExport(): void {
-  const r = report.value;
-  if (!r) return;
-  const payload = {
-    note: '面板导出的候选条目。先跑 npm run check:asr-lexicon <本文件> 通过后再并入 shared/asr-glossary.json。',
-    terms: r.merge.candidates
-  };
-  exportText.value = JSON.stringify(payload, null, 2);
-  copyNotice.value = r.merge.needPinyin.length
-    ? tr('另有 {n} 个词推不出读音，列在下面，需人工补拼音后才可并入。', { n: r.merge.needPinyin.length })
-    : '';
-}
-
-async function copyExport(): Promise<void> {
-  copyNotice.value = '';
-  try {
-    await navigator.clipboard.writeText(exportText.value);
-    copyNotice.value = tr('已复制到剪贴板，存成文件后跑 check:asr-lexicon。');
-  } catch {
-    copyNotice.value = tr('浏览器不允许直接复制，请在下面框里全选复制。');
-  }
 }
 </script>
 
@@ -325,7 +196,7 @@ async function copyExport(): Promise<void> {
         <p class="vtp__lead">{{ tr('这类词不改写已经识别出来的字，只是提醒模型该听成什么。收益没在真实录音上量化过，所以服务端事前偏置默认关着：关着时它们不会发给模型，下面的状态行会照实说明发没发。') }}</p>
         <form class="vtp__form" @submit.prevent="submitWord">
           <label class="sr-only" for="vtp-word">{{ tr('常用词') }}</label>
-          <input id="vtp-word" v-model="word" maxlength="24" :placeholder="tr('例：稳压器、门禁电源')" autocomplete="off">
+          <input id="vtp-word" v-model="word" maxlength="24" :placeholder="tr('例：E310、巡查、巡检')" autocomplete="off">
           <button type="submit" class="vtp__save">{{ tr('添加') }}</button>
         </form>
         <p v-if="wordNotice" class="vtp__notice" role="alert">{{ wordNotice }}</p>
@@ -339,53 +210,6 @@ async function copyExport(): Promise<void> {
         <button v-if="keywordCount" type="button" class="vtp__del vtp__del--all" @click="clearWords">
           {{ confirmClearWords ? tr('确认清除全部常用词？') : tr('清除全部常用词') }}
         </button>
-      </div>
-
-      <div class="vtp__section">
-        <p class="vtp__section-title">{{ tr('体检与并入内置表') }}</p>
-        <div class="vtp__row">
-          <button type="button" class="vtp__save" :disabled="checking || (!count && !keywordCount)" @click="runCheck">
-            {{ checking ? tr('体检中…') : tr('体检我的词汇') }}
-          </button>
-          <button v-if="report" type="button" class="vtp__save" @click="buildExport">{{ tr('导出待并入条目') }}</button>
-        </div>
-        <p v-if="reportError" class="vtp__notice" role="alert">{{ reportError }}</p>
-        <p v-else-if="!count && !keywordCount" class="vtp__hint">{{ tr('登记过词汇之后再体检，能看到每条的真实结论。') }}</p>
-
-        <template v-if="report">
-          <p class="vtp__report">{{ reportSummary }}</p>
-          <ul v-if="report.keywords.length" class="vtp__verdicts">
-            <li v-for="k in report.keywords" :key="k.word">
-              <span class="vtp__chip-text">{{ k.word }}</span>
-              <b class="vtp__tag">{{ keywordVerdictLabel(k.verdict) }}</b>
-              <span class="vtp__why">{{ k.why }}</span>
-            </li>
-          </ul>
-          <ul v-if="report.pairs.length" class="vtp__verdicts">
-            <li v-for="p in report.pairs" :key="`${p.from}-${p.to}`">
-              <span class="vtp__chip-text">{{ p.from }} → {{ p.to }}</span>
-              <b class="vtp__tag">{{ pairVerdictLabel(p.verdict) }}</b>
-              <span class="vtp__why">{{ p.why }}</span>
-            </li>
-          </ul>
-          <p class="vtp__hint">
-            {{ tr('可并入内置表 {n} 条；缺读音 {m} 条（缺读音的不会出现在导出里）。', {
-              n: String(report.merge.candidates.length),
-              m: String(report.merge.needPinyin.length)
-            }) }}
-          </p>
-          <p v-if="report.merge.needPinyin.length" class="vtp__needpinyin">{{ report.merge.needPinyin.join('、') }}</p>
-        </template>
-
-        <template v-if="exportText">
-          <label class="sr-only" for="vtp-export">{{ tr('候选条目 JSON') }}</label>
-          <textarea id="vtp-export" class="vtp__export" rows="6" readonly :value="exportText"></textarea>
-          <div class="vtp__row">
-            <button type="button" class="vtp__save" @click="copyExport">{{ tr('复制') }}</button>
-            <span class="vtp__why">{{ tr('存成文件后运行 npm run check:asr-lexicon 文件名，过了再并入。') }}</span>
-          </div>
-          <p v-if="copyNotice" class="vtp__status" role="status">{{ copyNotice }}</p>
-        </template>
       </div>
     </div>
   </div>
@@ -516,88 +340,30 @@ async function copyExport(): Promise<void> {
   font-size: calc(var(--ui-font-size) * 0.92308);
   overflow-wrap: anywhere;
 }
-.vtp__row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-1);
-  margin-top: var(--sp-1);
-}
-.vtp__verdicts {
-  list-style: none;
-  margin: var(--sp-2) 0 0;
-  padding: 0;
-  display: grid;
-  gap: 2px;
-}
-.vtp__verdicts li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-  font-size: calc(var(--ui-font-size) * 0.92308);
-}
-/* 结论用细边框小标签，不用色块：一屏十几条时色块会把"原因"压掉 */
-.vtp__tag {
-  font-size: var(--ui-font-size);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 0 5px;
-  color: var(--text);
-  font-weight: 600;
-  white-space: nowrap;
-}
-.vtp__why {
-  flex: 1 1 160px;
-  min-width: 0;
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-/* 体检区自己的两段结论，用独立类名：共用 .vtp__status/.vtp__foot 会让"第几段"变成选择器题 */
-.vtp__report {
-  margin: var(--sp-2) 0 0;
-  color: var(--text);
-  font-size: calc(var(--ui-font-size) * 0.92308);
-  overflow-wrap: anywhere;
-}
-.vtp__needpinyin {
-  margin: var(--sp-1) 0 0;
-  color: var(--text-muted);
-  font-size: calc(var(--ui-font-size) * 0.92308);
-  overflow-wrap: anywhere;
-}
-.vtp__export {
-  width: 100%;
-  box-sizing: border-box;
-  margin-top: var(--sp-2);
-  font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: calc(var(--ui-font-size) * 0.84615);
-  color: var(--text);
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: var(--sp-1) var(--sp-2);
-  resize: vertical;
-}
 .vtp__form {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: var(--sp-1);
 }
-/* 带字段名的输入框占满自己那一格；没有字段名的（常用词）保持与按钮同行 */
-.vtp__field input {
+/* 两处输入框同一套盒模型（常用词与错误/纠正词外观一致），并为对齐提供固定高度：
+   箭头与保存按钮按输入行底部对齐后，再靠同高盒子在行内垂直居中 */
+.vtp__form input {
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
+  height: 32px;
   font-size: var(--ui-font-size);
   font-family: inherit;
   color: var(--text);
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 3px var(--sp-2);
+  padding: 0 var(--sp-2);
+}
+/* 常用词输入没有字段名包裹，直接作为表单子项占满剩余宽度 */
+.vtp__form > input {
+  flex: 1 1 160px;
 }
 .vtp__form input:focus-visible {
   outline: 2px solid var(--primary);
@@ -610,7 +376,12 @@ async function copyExport(): Promise<void> {
   background: var(--surface-2);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  padding: 3px var(--sp-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 var(--sp-3);
+  box-sizing: border-box;
   cursor: pointer;
 }
 .vtp__save:disabled {
@@ -619,6 +390,13 @@ async function copyExport(): Promise<void> {
 }
 .vtp__arrow {
   color: var(--text-faint);
+}
+/* 只修表单里的箭头：列表里的箭头保持基线对齐 */
+.vtp__form .vtp__arrow {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  line-height: 1;
 }
 .vtp__notice {
   margin: var(--sp-1) 0 0;

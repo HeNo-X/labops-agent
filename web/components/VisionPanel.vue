@@ -100,6 +100,9 @@ function draftIssue(lab: { labId: string; count: number; capacity: number | null
     { lab: lab.labId, reason, n: lab.count, cap: capacity, age: lab.ageSeconds }
   );
   window.dispatchEvent(new CustomEvent('labops-vision-draft', { detail: question }));
+  // 派发后立即关闭抽屉：否则抽屉遮罩盖住主界面，用户看不到命令栏已被填入，
+  // 会以为按钮没生效（2026-11-07 用户实测反馈）
+  close();
 }
 
 /** 事件误报/确认回流（批C）；失败给出行内提示，下一轮轮询还原服务端口径 */

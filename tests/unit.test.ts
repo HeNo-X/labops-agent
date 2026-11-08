@@ -265,10 +265,10 @@ test('房间号归一化：大小写、全角、空格都要认', () => {
   assert.ok(findLab(ds, 'E310'));
 });
 
-test('缺少 labName 时必须抛参数错误（第一阶段不允许全量扫描）', () => {
+test('缺房间且缺班级时必须抛参数错误（第一阶段不允许全量扫描）', () => {
   assert.throws(
     () => runQuerySchedule({ date: '2026-09-30' }, dataset(), NOW),
-    (e: unknown) => e instanceof ToolArgumentError && (e as ToolArgumentError).code === 'missing_lab'
+    (e: unknown) => e instanceof ToolArgumentError && (e as ToolArgumentError).code === 'missing_selector'
   );
 });
 

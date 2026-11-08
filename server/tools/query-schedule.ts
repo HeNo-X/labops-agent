@@ -238,24 +238,6 @@ export function runQuerySchedule(
     }
   }
 
-  // 2026-11-08：同一大节、同一课程、同一教室的多个班级**合并成一条**，
-  // 否则合班课的班级数会把"这条排课"重复成好几行，读起来像排了很多课。
-  const grouped = new Map<string, ScheduleLesson>();
-  for (const lesson of lessons) {
-    const key = `${lesson.periodKey}|${lesson.courseName}|${lesson.labName}`;
-    const cur = grouped.get(key);
-    if (!cur) {
-      grouped.set(key, { ...lesson, classNames: [...lesson.classNames] });
-      continue;
-    }
-    const names = new Set<string>([...cur.classNames, ...lesson.classNames, cur.className, lesson.className].filter(Boolean));
-    cur.classNames = [...names];
-    cur.className = cur.classNames.join('、');
-    cur.merged = cur.classNames.length > 1;
-  }
-  lessons.length = 0;
-  lessons.push(...grouped.values());
-
   lessons.sort((a, b) => {
     const d = (PERIOD_ORDER.get(a.periodKey) ?? 99) - (PERIOD_ORDER.get(b.periodKey) ?? 99);
     if (d !== 0) return d;

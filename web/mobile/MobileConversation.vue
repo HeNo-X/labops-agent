@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import {t as tr} from "../i18n";
-import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue';import {clientFetch} from '../client';import {actorHeaders} from '../actor';import {useHistoryOverlay} from '../composables/useHistoryOverlay';import {useSessionStore,type RoundEffects,type Round} from '../stores/session';import {useRunStore} from '../stores/run';import type {useConversationController} from '../composables/useConversationController';import ChatMessage from '../components/ChatMessage.vue';import RoundToolbar from '../components/RoundToolbar.vue';import RoundActionDialog from '../components/RoundActionDialog.vue';import {useVisibleRefresh} from '../composables/useVisibleRefresh';
+import {computed,nextTick,onMounted,onUnmounted,ref,watch} from 'vue';import {clientFetch} from '../client';import {actorHeaders} from '../actor';import {useSessionStore,type RoundActionResult,type RoundEffects,type Round} from '../stores/session';import {useRunStore} from '../stores/run';import type {useConversationController} from '../composables/useConversationController';import ChatMessage from '../components/ChatMessage.vue';import RoundToolbar from '../components/RoundToolbar.vue';import {useVisibleRefresh} from '../composables/useVisibleRefresh';
 import {useBusinessStore} from '../stores/business';import AsyncState from './AsyncState.vue';import {useFeedback} from './feedback';
 import ComposerBar from '../components/ComposerBar.vue';
-const props=defineProps<{conversationId:string;controller:ReturnType<typeof useConversationController>}>(),session=useSessionStore(),run=useRunStore(),feedback=useFeedback(),draft=ref(''),scroller=ref<HTMLElement>(),nearBottom=ref(true),newMessages=ref(false),error=ref(''),effects=ref<string[]>([]),roundBusy=ref(false),dialog=ref<{kind:'rollback'|'edit';id:string;question:string;index:number}|null>(null);
+const props=defineProps<{conversationId:string;controller:ReturnType<typeof useConversationController>}>(),session=useSessionStore(),run=useRunStore(),feedback=useFeedback(),draft=ref(''),scroller=ref<HTMLElement>(),nearBottom=ref(true),newMessages=ref(false),error=ref(''),effects=ref<string[]>([]),roundBusy=ref(false);
 const business=useBusinessStore();
 /** 无 conversationId = 空会话态（打开即主会话区）：问候语 + 快捷胶囊都在这里 */
 const isDraft=computed(()=>!props.conversationId);
@@ -42,7 +42,6 @@ const mode=computed(()=>session.currentMode()),busy=computed(()=>run.inputLocked
 // 模式随发送时刻生效、历史消息语义不变）；运行中/切换中禁用，失败走既有 error 行。
 const switching=ref(false);
 async function setMode(m:'chat'|'task'):Promise<void>{if(m===mode.value||switching.value||busy.value)return;switching.value=true;try{if(props.conversationId)await session.changeConversationMode(props.conversationId,m);}catch(e){error.value=(e as Error).message;}finally{switching.value=false;}}
-const dialogOpen=computed({get:()=>Boolean(dialog.value),set:value=>{if(!value)dialog.value=null;}});useHistoryOverlay(dialogOpen);
 async function load(){
   if(!props.conversationId){draft.value=session.draftFor('__new');return;}
   if(props.controller.activeConversation.value!==props.conversationId)await session.openConversation(props.conversationId);
@@ -57,21 +56,46 @@ watch(()=>session.currentMessages.map(m=>m.text+m.status).join('|'),async()=>{if
 async function send(){const text=draft.value;if(!text.trim()||busy.value)return;nearBottom.value=true;void props.controller.submit(text,mode.value);}
 function describe(result:RoundEffects|undefined){if(!result)return [];return [...result.notes,...result.reverted.map(r=>'已回退沙盒对象 '+r.objectId),...result.rejectedPlans.map(id=>'已作废待确认方案 '+id),...result.supersededProposals.map(id=>'已作废待确认提案 '+id),...result.cancelledTasks.map(id=>'已取消任务 '+id),...result.notReverted.map(r=>'未回退 '+r.objectId+'：'+r.reason),...result.blocked.map(r=>'原系统已提交，需人工处理：'+r.planId+' '+r.objects.map(o=>o.id).join('、'))];}
 async function remove(round:Round){if(busy.value||!round.userMessage)return;const ok=await feedback.confirmSheet({title:tr('删除本轮提问与回答？'),message:tr('作废未确认方案；已提交业务不会撤销。'),confirmLabel:tr('删除'),cancelLabel:tr('取消'),destructive:true});if(!ok)return;roundBusy.value=true;const result=await session.deleteRound(props.conversationId,round.userMessage.id);roundBusy.value=false;if(result.ok){effects.value=describe(result.effects);feedback.toast(tr('已删除本轮'));}else error.value=result.message||'删除未成功';}
-function openRound(kind:'rollback'|'edit',round:Round,index:number){if(!round.userMessage||busy.value||mode.value!=='task')return;dialog.value={kind,id:round.userMessage.id,question:round.userMessage.text,index:index+1};error.value='';}
-async function confirmRound(input:{text:string;revertEffects:boolean}){if(!dialog.value||roundBusy.value)return;roundBusy.value=true;const selected={...dialog.value},result=await session.rollbackRound(props.conversationId,selected.id,input.revertEffects);roundBusy.value=false;if(!result.ok){error.value=result.message||'回档失败，已保留修改内容';return;}effects.value=describe(result.effects);dialog.value=null;if(selected.kind==='edit'){draft.value=input.text;await props.controller.submit(input.text,'task');}}
+/**
+ * 该轮是否牵涉业务办理（口径同 App.roundTouchesBusiness）：只看这一轮有没有产出
+ * 业务单/原系统方案，不看结果 state（确认执行不会回写，避免把已执行轮误判为无业务）。
+ */
+function touchesBusiness(round:Round):boolean{
+  return round.messages.some(m=>m.role==='assistant'&&m.toolCalls.some(t=>{
+    if(t.resultKind==='operation_proposal')return Boolean(t.result);
+    if(t.resultKind==='business_plan'){
+      const res=t.result as {planId?:string|null;plan?:{state?:string}|null;receipt?:unknown}|null;
+      return Boolean(res)&&Boolean(res!.planId||res!.receipt||res!.plan);
+    }
+    return false;
+  }));
+}
+/** 内联「修改」：回档已在 ChatMessage 成功，展示回退结果后以 task 模式重发新内容 */
+async function afterRoundEdit(payload:{text:string;result:RoundActionResult}):Promise<void>{
+  effects.value=describe(payload.result.effects);
+  error.value='';
+  draft.value=payload.text;
+  await props.controller.submit(payload.text,'task');
+}
+/** 内联「回档」：仅展示回退结果，不重发 */
+function afterRoundRewind(payload:{result:RoundActionResult}):void{
+  effects.value=describe(payload.result.effects);
+  error.value='';
+}
 watch(()=>run.runStatus,value=>{if(value!=='running')draft.value=session.draftFor(props.conversationId);});
 </script>
-<template><div class="mobile-conversation"><div class="mobile-conversation-heading"><span class="m-mode-tag">{{tr(mode==='chat'?'查询与对话（不办理业务）':'可办理的工作对话')}}</span><div v-if="!isDraft" class="m-mode-switch" role="group" :aria-label="tr('会话模式')"><button type="button" class="m-mode-switch__opt" :class="{'is-active':mode==='task'}" :disabled="switching||busy" :aria-pressed="mode==='task'" @click="setMode('task')">{{tr('工作')}}</button><button type="button" class="m-mode-switch__opt" :class="{'is-active':mode==='chat'}" :disabled="switching||busy" :aria-pressed="mode==='chat'" @click="setMode('chat')">{{tr('聊天')}}</button></div></div><div ref="scroller" class="mobile-messages" @scroll.passive="onScroll"><p v-for="(line,i) in effects" :key="i" class="mobile-warning">{{line}}</p><p v-if="error||controller.error.value" role="alert">{{error||controller.error.value}}</p><div v-if="isDraft" class="mobile-empty"><p class="mobile-empty__hi">{{tr(greeting)}}</p><div class="mobile-start-quick"><button v-for="item in suggestions" :key="item.label" type="button" :disabled="busy" @click="fill(item.text)">{{tr(item.label)}}</button></div></div><AsyncState v-else :loading="session.messagesLoading" :error="session.currentMessagesError||''" @retry="session.syncConversation(conversationId)"><p v-if="!session.currentMessages.length" class="mobile-state">{{tr(mode==='chat'?'查询课表、房间状态或钥匙登记。':'查询实验室，或准备报修、交接和调课。')}}</p><article v-for="(round,index) in session.currentRounds" :key="round.key" class="mobile-round"><ChatMessage v-for="message in round.messages" :key="message.id" :msg="message" @retry="draft=round.userMessage?.text||''"/><RoundToolbar :index="index+1" :can-rewind="mode==='task'" :busy="busy||roundBusy" :actionable="Boolean(round.userMessage)" @remove="remove(round)" @rollback="openRound('rollback',round,index)" @edit="openRound('edit',round,index)"/></article></AsyncState></div><div v-if="externalRunId" class="mobile-external-run" role="status"><span>{{tr('另一台设备正在生成这一轮…')}}</span><button type="button" @click="stopExternalRun">{{tr('停止这一轮')}}</button></div><button v-if="newMessages" class="mobile-new-messages" @click="latest">{{tr("有新消息 · 查看")}}</button><ComposerBar
+<template><div class="mobile-conversation"><div class="mobile-conversation-heading"><span class="m-mode-tag">{{tr(mode==='chat'?'查询与对话（不办理业务）':'可办理的工作对话')}}</span><div v-if="!isDraft" class="m-mode-switch" role="group" :aria-label="tr('会话模式')"><button type="button" class="m-mode-switch__opt" :class="{'is-active':mode==='task'}" :disabled="switching||busy" :aria-pressed="mode==='task'" @click="setMode('task')">{{tr('工作')}}</button><button type="button" class="m-mode-switch__opt" :class="{'is-active':mode==='chat'}" :disabled="switching||busy" :aria-pressed="mode==='chat'" @click="setMode('chat')">{{tr('聊天')}}</button></div></div><div ref="scroller" class="mobile-messages" @scroll.passive="onScroll"><p v-for="(line,i) in effects" :key="i" class="mobile-warning">{{line}}</p><p v-if="error||controller.error.value" role="alert">{{error||controller.error.value}}</p><div v-if="isDraft" class="mobile-empty"><p class="mobile-empty__hi">{{tr(greeting)}}</p><div class="mobile-start-quick"><button v-for="item in suggestions" :key="item.label" type="button" :disabled="busy" @click="fill(item.text)">{{tr(item.label)}}</button></div></div><AsyncState v-else :loading="session.messagesLoading" :error="session.currentMessagesError||''" @retry="session.syncConversation(conversationId)"><p v-if="!session.currentMessages.length" class="mobile-state">{{tr(mode==='chat'?'查询课表、房间状态或钥匙登记。':'查询实验室，或准备报修、交接和调课。')}}</p><article v-for="(round,index) in session.currentRounds" :key="round.key" class="mobile-round"><ChatMessage v-for="message in round.messages" :key="message.id" :msg="message" :can-rewind="mode==='task'" :busy="busy||roundBusy" :business-writes="touchesBusiness(round)" :can-delete="Boolean(round.userMessage)" @retry="draft=round.userMessage?.text||''" @round-delete="remove(round)" @round-edit="afterRoundEdit" @round-rewind="afterRoundRewind"/><RoundToolbar :index="index+1"/></article></AsyncState></div><div v-if="externalRunId" class="mobile-external-run" role="status"><span>{{tr('另一台设备正在生成这一轮…')}}</span><button type="button" @click="stopExternalRun">{{tr('停止这一轮')}}</button></div><button v-if="newMessages" class="mobile-new-messages" @click="latest">{{tr("有新消息 · 查看")}}</button><ComposerBar
       v-model:draft="draft"
       variant="mobile"
       input-id="mobile-question"
       :busy="busy"
       :disabled="Boolean(session.currentMessagesError)"
       :placeholder="mode==='chat'?'输入查询问题…':'输入要查询或办理的事项…'"
-      show-corrections
       @submit="send"
       @stop="controller.stop"
-    /><RoundActionDialog :open="Boolean(dialog)" :kind="dialog?.kind||'rollback'" :round-index="dialog?.index||1" :question="dialog?.question||''" :busy="roundBusy" :error="error" :has-business-writes="true" @cancel="dialog=null" @confirm="confirmRound"/></div></template>
+    />
+    <!-- 回档/修改已改为气泡内联（InlineRoundEditor，见 ChatMessage），不再使用居中弹窗 -->
+  </div></template>
 <style scoped>
 /* A10：会话模式开关——与说明标签同行右对齐，紧凑分段（左=工作/右=聊天） */
 .mobile-conversation-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}

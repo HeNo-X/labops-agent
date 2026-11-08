@@ -12,10 +12,14 @@ const paths:Record<string,string>={
  chat:'M4 4h16v12H9l-5 4z M8 8h8 M8 12h5',
  user:'M12 3a4 4 0 1 0 0 8 4 4 0 0 0 0-8 M4 21v-2a8 8 0 0 1 16 0v2',
  star:'m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z',
+ trash:'M4 7h16 M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2 M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13 M10 11v6 M14 11v6',
  more:'M5 12h.1 M12 12h.1 M19 12h.1',chevron:'m9 5 7 7-7 7',compare:'M8 3v18 M16 3v18 M4 6h8 M12 18h8',close:'m6 6 12 12 M18 6 6 18',
  settings:'M9 3h6l1 3 3 1 2 5-2 5-3 1-1 3H9l-1-3-3-1-2-5 2-5 3-1z M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8',
  palette:'M12 3a9 9 0 1 0 0 18h2a2 2 0 0 0 0-4h-1a2 2 0 0 1 0-4h5a3 3 0 0 0 3-3c0-4-4-7-9-7 M7 8h.1 M11 6h.1 M16 7h.1 M5 12h.1',external:'M14 3h7v7 M21 3l-9 9 M10 4H4v16h16v-6',history:'M3 12a9 9 0 1 0 3-7 M3 3v6h6 M12 7v5l3 2',camera:'M4 8h3.2L9 6h6l1.8 2H20v11H4z M12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7',mic:'M12 3a3 3 0 0 1 3 3v5a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3 M5 11a7 7 0 0 0 14 0 M12 18v3',
- keyboard:'M3 7h18v10H3z M7 11h.1 M11 11h.1 M15 11h.1 M8 15h8',bell:'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9 M13.7 21a2 2 0 0 1-3.4 0',eye:'M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7 M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6',eyeOff:'M17.94 17.94A10 10 0 0 1 12 20c-7 0-11-8-11-8a18 18 0 0 1 5.06-5.94 M9.9 4.24A9 9 0 0 1 12 4c7 0 11 8 11 8a18 18 0 0 1-2.16 3.19 M1 1l22 22 M9.9 9.9a3 3 0 0 0 4.2 4.2'
+ keyboard:'M3 7h18v10H3z M7 11h.1 M11 11h.1 M15 11h.1 M8 15h8',bell:'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9 M13.7 21a2 2 0 0 1-3.4 0',eye:'M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7 M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6',eyeOff:'M17.94 17.94A10 10 0 0 1 12 20c-7 0-11-8-11-8a18 18 0 0 1 5.06-5.94 M9.9 4.24A9 9 0 0 1 12 4c7 0 11 8 11 8a18 18 0 0 1-2.16 3.19 M1 1l22 22 M9.9 9.9a3 3 0 0 0 4.2 4.2',
+ copy:'M9 9h10a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1z M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1',
+ edit:'M12 20h9 M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z',
+ rewind:'M3 12a9 9 0 1 0 3-6.7L3 8 M3 3v5h5'
 };
 </script>
 <template><svg :width="size" :height="size" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path :d="paths[name]||paths.lab"/></svg></template>

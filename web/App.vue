@@ -22,7 +22,7 @@ import { usePendingInputStore } from './stores/pending-input';
 import { resolvePendingOnTerminal, resolvePendingOnSwitchAway, mergeDraft } from './lib/pending-input';
 import { fetchRunSnapshot, snapshotMs, messageStatusOf, isConverged } from './lib/run-snapshot';
 import type { RunSnapshot } from '@shared/types';
-import type { ChatMessage as ChatMessageData, Round, RoundEffects } from './stores/session';
+import type { ChatMessage as ChatMessageData, Round, RoundActionResult, RoundEffects } from './stores/session';
 import { useAgentStream } from './composables/useAgentStream';
 import LabMatrix from './components/LabMatrix.vue';
 import AgentSidebar from './components/AgentSidebar.vue';
@@ -35,7 +35,6 @@ import CommandPalette from './components/CommandPalette.vue';
 import { requestSidebarSearchFocus } from './lib/sidebar-focus';
 import ChatMessage from './components/ChatMessage.vue';
 import RoundToolbar from './components/RoundToolbar.vue';
-import RoundActionDialog from './components/RoundActionDialog.vue';
 import {useBusinessStore} from './stores/business';
 import LoginView from './components/LoginView.vue';
 import { actorHeaders, actorRole, setActorRole } from './actor';
@@ -652,16 +651,6 @@ function onPickRoom(q: string): void {
 
 // ---- 轮次操作：删除本轮 / 回档 / 修改（0.6.0）----
 const rounds = computed<Round[]>(() => session.currentRounds);
-const roundDialog = ref<{
-  open: boolean;
-  kind: 'rollback' | 'edit';
-  userMessageId: string;
-  index: number;
-  question: string;
-  business: boolean;
-}>({ open: false, kind: 'rollback', userMessageId: '', index: 0, question: '', business: false });
-const roundDialogBusy = ref(false);
-const roundDialogError = ref('');
 /** 操作结果横幅：回档/删除之后必须让用户看到"到底发生了什么"，而不是只弹一个"成功" */
 const roundNotice = ref<{ tone: 'ok' | 'warn' | 'danger'; lines: string[] } | null>(null);
 
@@ -712,25 +701,6 @@ function effectsLines(effects: RoundEffects | undefined): string[] {
   return lines;
 }
 
-function closeRoundDialog(): void {
-  if (roundDialogBusy.value) return;
-  roundDialog.value = { ...roundDialog.value, open: false };
-  roundDialogError.value = '';
-}
-
-function openRoundDialog(kind: 'rollback' | 'edit', r: Round): void {
-  if (store.inputLocked || !r.userMessage) return;
-  roundDialogError.value = '';
-  roundDialog.value = {
-    open: true,
-    kind,
-    userMessageId: r.userMessage.id,
-    index: rounds.value.indexOf(r) + 1,
-    question: r.userMessage.text,
-    business: roundTouchesBusiness(r)
-  };
-}
-
 function onDeleteRound(r: Round): void {
   const id = session.currentId;
   if (store.inputLocked || !r.userMessage || !id) return;
@@ -746,30 +716,26 @@ function onDeleteRound(r: Round): void {
 }
 
 /**
- * 回档 / 修改的确认入口。两者共用同一次服务端调用，区别只在"要不要把新内容重新发出去"：
- *   · 回档：截断即结束；
- *   · 修改：截断**成功之后**才重发 —— 顺序反了会让旧轮与新轮并存。
+ * 内联回档/修改的回调。回档（session.rollbackRound）已在 ChatMessage 内完成，
+ * 这里只负责结果横幅、刷新任务列表，以及「修改」时在截断成功后重发新内容。
  */
-async function onConfirmRoundDialog(payload: { text: string; revertEffects: boolean }): Promise<void> {
-  const id = session.currentId;
-  if (!id || roundDialogBusy.value) return;
-  const { kind, userMessageId, index } = roundDialog.value;
-  roundDialogBusy.value = true;
-  roundDialogError.value = '';
-  roundNotice.value = null;
-  try {
-    const res = await session.rollbackRound(id, userMessageId, payload.revertEffects);
-    if (!res.ok) {
-      roundDialogError.value = res.message ?? '回档失败';
-      return;
-    }
-    roundDialog.value = { ...roundDialog.value, open: false };
-    roundNotice.value = { tone: 'ok', lines: [`已回档到第 ${index} 轮发起前（移除 ${res.removedCount ?? 0} 条消息）。`, ...effectsLines(res.effects)] };
-    void loadTasks();
-    if (kind === 'edit') await onSubmit(payload.text);
-  } finally {
-    roundDialogBusy.value = false;
-  }
+function showRollbackNotice(userMessageId: string, result: RoundActionResult): void {
+  const index = rounds.value.findIndex((r) => r.userMessage?.id === userMessageId) + 1;
+  roundNotice.value = {
+    tone: 'ok',
+    lines: [`已回档到第 ${index} 轮发起前（移除 ${result.removedCount ?? 0} 条消息）。`, ...effectsLines(result.effects)]
+  };
+}
+
+async function afterRoundEdit(payload: { userMessageId: string; text: string; result: RoundActionResult }): Promise<void> {
+  showRollbackNotice(payload.userMessageId, payload.result);
+  void loadTasks();
+  await onSubmit(payload.text);
+}
+
+function afterRoundRewind(payload: { userMessageId: string; result: RoundActionResult }): void {
+  showRollbackNotice(payload.userMessageId, payload.result);
+  void loadTasks();
 }
 
 </script>
@@ -785,7 +751,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
       @new="onNewChat" @select="id=>{session.openConversation(id);navOpen=false}" @rename="onRename" @remove="onDelete"
       @task="openTask" @rooms="toggleRooms(!roomsOpen)" @actor="switchRole" @close="navOpen=false" @logout="logout"
       @settings="settingsOpen=true" />
-    <SettingsDialog :open="settingsOpen" @close="closeSettings" @logout="settingsOpen=false;logout()" @edition="switchEdition('mobile',session.currentId?{view:'conversation',conversationId:session.currentId}:{view:'assistant'})"/>
+    <SettingsDialog :open="settingsOpen" :task-mode="(session.currentId?convMode:draftMode)!=='chat'" @close="closeSettings" @logout="settingsOpen=false;logout()" @edition="switchEdition('mobile',session.currentId?{view:'conversation',conversationId:session.currentId}:{view:'assistant'})"/>
     <!-- T7：命令面板挂在根级，快捷键入口只有它自己一个 -->
     <CommandPalette :context="commandContext" />
     <div v-if="navOpen" class="nav__mask" @click="navOpen = false"></div>
@@ -861,16 +827,21 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
 
         <div ref="msgsEl" @scroll.passive="trackScroll" class="chat__msgs">
           <div v-for="(r, i) in rounds" :key="r.key" class="round" :data-round="i + 1">
-            <RoundToolbar
-              :index="i + 1"
+            <RoundToolbar :index="i + 1" />
+            <ChatMessage
+              v-for="m in r.messages"
+              :key="m.id"
+              :msg="m"
               :can-rewind="convMode === 'task'"
               :busy="store.inputLocked"
-              :actionable="Boolean(r.userMessage)"
-              @remove="onDeleteRound(r)"
-              @rollback="openRoundDialog('rollback', r)"
-              @edit="openRoundDialog('edit', r)"
+              :business-writes="roundTouchesBusiness(r)"
+              :can-delete="Boolean(r.userMessage)"
+              @retry="onRetry(m)"
+              @decided="loadTasks"
+              @round-delete="onDeleteRound(r)"
+              @round-edit="afterRoundEdit"
+              @round-rewind="afterRoundRewind"
             />
-            <ChatMessage v-for="m in r.messages" :key="m.id" :msg="m" @retry="onRetry(m)" @decided="loadTasks" />
           </div>
         </div>
 
@@ -934,18 +905,7 @@ async function onConfirmRoundDialog(payload: { text: string; revertEffects: bool
       </template>
     </aside>
 
-    <!-- 回档 / 修改：原理相同（截断到本轮发起前），共用一个弹窗 -->
-    <RoundActionDialog
-      :open="roundDialog.open"
-      :kind="roundDialog.kind"
-      :round-index="roundDialog.index"
-      :question="roundDialog.question"
-      :busy="roundDialogBusy"
-      :error="roundDialogError"
-      :has-business-writes="roundDialog.business"
-      @cancel="closeRoundDialog"
-      @confirm="onConfirmRoundDialog"
-    />
+    <!-- 回档/修改已改为气泡内联（InlineRoundEditor，见 ChatMessage），不再使用居中弹窗 -->
   </div>
 </template>
 

@@ -9,28 +9,48 @@ import {t as tr} from "../i18n";
  *  · 状态不只靠颜色：符号 + 文字（✓ 完成 / ✕ 失败 / ⏹ 已取消 / ◌ 生成中 / ‼ 中断）
  */
 import type { KnowledgeResult, BusinessPlanResult, TaskPlanStep } from '@shared/types';
+import type { CheckinStatusResult, CheckinSummaryResult } from '@shared/types';
 import { computed, ref } from 'vue';
-import type { ChatMessage, ToolCallRecord } from '../stores/session';
+import type { ChatMessage, RoundActionResult, ToolCallRecord } from '../stores/session';
 import { useRunStore } from '../stores/run';
 import type { ScheduleQueryResult, LabStatusResult, FreeRoomsResult, EngineType } from '@shared/types';
 import type { OperationsReportResult } from '@shared/types';
 import type { Proposal } from '@shared/operations-contract';
 import MarkdownText from './MarkdownText.vue';
 import StatusTag from './StatusTag.vue';
+import InlineRoundEditor from './InlineRoundEditor.vue';
+import UiIcon from './UiIcon.vue';
 import PlanPanel from './PlanPanel.vue';
 import TaskResult from './TaskResult.vue';
 import BusinessPlanCard from './BusinessPlanCard.vue';
 import {useSessionStore} from '../stores/session';
 import OperationCard from './OperationCard.vue';
 import ReportCard from './ReportCard.vue';
+import CheckinCard from './CheckinCard.vue';
 import EvidenceObservationCard from './EvidenceObservationCard.vue';
 import type { EvidenceObservationResult } from '@shared/types';
 import type { Tone } from './ui-types';
 import { buildTurnRenderUnit, shouldForceExpand, toolTitle, toneOf, glyphOf, labelOf } from '../lib/turn-view';
 import { buildToolDisplay } from '../lib/tool-display';
 
-const props = defineProps<{ msg: ChatMessage }>();
-const emit = defineEmits<{ retry: []; decided: [] }>();
+const props = defineProps<{
+  msg: ChatMessage;
+  /** 工作模式用户消息才给回档/修改 */
+  canRewind?: boolean;
+  busy?: boolean;
+  /** 本轮牵涉业务写入，内联面板给简短提醒 */
+  businessWrites?: boolean;
+  /** 批次1：可删除本轮（顶部轮次条的删除入口迁移到助手回复底部） */
+  canDelete?: boolean;
+}>();
+const emit = defineEmits<{
+  (e: 'retry'): void;
+  (e: 'decided'): void;
+  (e: 'round-edit', payload: { userMessageId: string; text: string; revertEffects: boolean; result: RoundActionResult }): void;
+  (e: 'round-rewind', payload: { userMessageId: string; revertEffects: boolean; result: RoundActionResult }): void;
+  /** 批次1：删除本轮（父级走既有删除确认） */
+  (e: 'round-delete'): void;
+}>();
 const run = useRunStore();
 const session=useSessionStore();
 const copied = ref(false);
@@ -60,8 +80,12 @@ const reportArtifacts = computed(() =>
 const knowledgeArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind==='knowledge').map(t=>t.result as KnowledgeResult));
 const evidenceArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind==='evidence_observation'&&t.result).map(t=>({key:t.toolCallId,result:t.result as EvidenceObservationResult})));
 const businessArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.resultKind==='business_plan'&&t.result).map(t=>({key:t.toolCallId,result:t.result as BusinessPlanResult})));
+const checkinArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.result&&t.resultKind&&(t.resultKind==='checkin_status'||t.resultKind==='checkin_summary')).map(t=>({key:t.toolCallId,kind:t.resultKind as 'checkin_status'|'checkin_summary',result:t.result as CheckinStatusResult|CheckinSummaryResult})));
 
 const isUser = computed(() => props.msg.role === 'user');
+
+// 仅失败/中断/取消轮展开技术运行轨迹（排查用）；成功轮隐藏 token/耗时/工具调用等技术元信息
+const showTrace = computed(() => ['failed', 'interrupted', 'cancelled'].includes(props.msg.status));
 
 /**
  * A5 计划步骤：活跃轮（streaming）读 run store 的 plan（plan_updated 实时更新），
@@ -180,6 +204,54 @@ async function copyAnswer(): Promise<void> {
   }
 }
 
+/** 内联编辑/回档状态：null=正常显示气泡；否则在气泡位置显示 InlineRoundEditor */
+const editorMode = ref<'edit' | 'rollback' | null>(null);
+const editorBusy = ref(false);
+const editorError = ref('');
+
+function startEdit(): void {
+  if (props.busy) return;
+  editorError.value = '';
+  editorMode.value = 'edit';
+}
+function startRollback(): void {
+  if (props.busy) return;
+  editorError.value = '';
+  editorMode.value = 'rollback';
+}
+function cancelEditor(): void {
+  if (editorBusy.value) return;
+  editorMode.value = null;
+  editorError.value = '';
+}
+/**
+ * 两端共用回档执行（session.rollbackRound）：失败时编辑框保持打开并就地显示错误；
+ * 成功后再 emit 让 App / Mobile 各自处理重发、刷新与结果横幅。
+ */
+async function onEditorSubmit(payload: { text: string; revertEffects: boolean }): Promise<void> {
+  const mode = editorMode.value;
+  if (!mode || editorBusy.value) return;
+  const cid = session.currentId;
+  if (!cid) return;
+  editorBusy.value = true;
+  editorError.value = '';
+  try {
+    const res = await session.rollbackRound(cid, props.msg.id, payload.revertEffects);
+    if (!res.ok) {
+      editorError.value = res.message ?? '回档失败';
+      return;
+    }
+    editorMode.value = null;
+    if (mode === 'edit') {
+      emit('round-edit', { userMessageId: props.msg.id, text: payload.text, revertEffects: payload.revertEffects, result: res });
+    } else {
+      emit('round-rewind', { userMessageId: props.msg.id, revertEffects: payload.revertEffects, result: res });
+    }
+  } finally {
+    editorBusy.value = false;
+  }
+}
+
 /**
  * 引擎/模型标注 —— 必须显示**真正在回答的那个模型**。
  * 之前只在 engine==='agnes' 时硬编码"Agnes 3.0 Flash"：聊天模式走 DashScope 链时
@@ -212,7 +284,33 @@ const engineTitle = computed(() => {
 
 <template>
   <article class="msg" :class="isUser ? 'msg--user' : 'msg--assistant'" :data-status="msg.status">
-    <div v-if="isUser" class="msg__userbubble">{{ msg.text }}</div>
+    <template v-if="isUser">
+      <div v-if="editorMode" class="msg__editorwrap">
+        <InlineRoundEditor
+          :mode="editorMode"
+          :initial-text="msg.text"
+          :busy="editorBusy"
+          :error="editorError"
+          :business-writes="Boolean(businessWrites)"
+          @cancel="cancelEditor"
+          @submit="onEditorSubmit"
+        />
+      </div>
+      <template v-else>
+        <div class="msg__userbubble">{{ msg.text }}</div>
+        <div class="msg__actions msg__actions--user">
+          <button type="button" class="msg__iconbtn" :title="tr(copied ? '已复制' : '复制')" :aria-label="tr('复制')" @click="copyAnswer">
+            <UiIcon :name="copied ? 'check' : 'copy'" :size="16" />
+          </button>
+          <button v-if="canRewind" type="button" class="msg__iconbtn" :title="tr('回档到本轮发起前')" :aria-label="tr('回档到本轮发起前')" @click="startRollback">
+            <UiIcon name="rewind" :size="16" />
+          </button>
+          <button v-if="canRewind" type="button" class="msg__iconbtn" :title="tr('修改并重新发起')" :aria-label="tr('修改并重新发起')" @click="startEdit">
+            <UiIcon name="edit" :size="16" />
+          </button>
+        </div>
+      </template>
+    </template>
 
     <template v-else>
       <div class="msg__ahead">
@@ -220,9 +318,6 @@ const engineTitle = computed(() => {
         <StatusTag :tone="statusMeta.tone" :glyph="statusMeta.glyph" :label="statusMeta.label" />
         <!-- PC-4：引擎与耗时收敛为一枚徽标，细节移入 hover 提示 -->
         <span v-if="engineLabel || msg.ms" class="msg__engine" :title="engineTitle + (msg.ms ? ` · ${msg.ms} ms` : '')">i</span>
-        <button v-if="msg.text && !isUser" type="button" class="msg__copy" @click="copyAnswer">
-          {{tr(copied ? '已复制' : '复制')}}
-        </button>
       </div>
 
       <!-- A5 任务计划面板：活跃轮来自 plan_updated 事件（run store），历史轮来自
@@ -232,7 +327,7 @@ const engineTitle = computed(() => {
       <!-- 执行过程（T2）：活跃轮与历史轮同一口径 —— 运行中/中断/失败强制展开，
            正常完成默认收起成一行；每步带状态标签与耗时 -->
       <details
-        v-if="!textOnly && turnUnit.unit.steps.length"
+        v-if="!textOnly && showTrace && turnUnit.unit.steps.length"
         class="msg__trace"
         :open="shouldForceExpand(turnUnit.unit)"
       >
@@ -260,7 +355,7 @@ const engineTitle = computed(() => {
       </details>
 
       <!-- 工具调用卡（T4：按族分流摘要，18 个工具不再长一样；完整内容在下方结果卡） -->
-      <details v-if="!textOnly && msg.toolCalls.length" class="msg__tools">
+      <details v-if="!textOnly && showTrace && msg.toolCalls.length" class="msg__tools">
         <summary>{{tr("已执行")}} {{ msg.toolCalls.length }} {{tr("次工具调用（点击看参数与依据）")}}</summary>
         <div v-for="t in toolDisplays" :key="t.key" class="msg__tool" :data-family="t.display.family">
           <div class="msg__toolhead">
@@ -300,12 +395,30 @@ const engineTitle = computed(() => {
         @decided="emit('decided')"
       />
       <ReportCard v-for="a in reportArtifacts" :key="a.key" :report="a.report" />
+      <CheckinCard v-for="a in checkinArtifacts" :key="'ck-'+a.key" :kind="a.kind" :result="a.result" />
       <EvidenceObservationCard v-for="a in evidenceArtifacts" :key="'evo-'+a.key" :result="a.result" />
       <TaskResult v-for="a in queryArtifacts" :key="a.key" :artifact="{ kind: a.kind, result: a.result }" :engine="(msg.engine as EngineType | null | undefined)" />
       </template><p v-if="msg.error" class="msg__err" role="alert"> {{tr("失败原因：")}}{{ msg.error.code }} {{ msg.error.message }}<span v-if="msg.error.hint" class="msg__errhint">{{tr("建议：")}}{{ msg.error.hint }}</span>
       </p>
       <div v-if="(msg.status === 'failed' || msg.status === 'interrupted') && !run.inputLocked" class="msg__retryrow">
         <button type="button" class="msg__retry" @click="emit('retry')">{{tr("重新执行上一问")}}</button>
+      </div>
+
+      <div class="msg__actions msg__actions--assistant">
+        <button v-if="msg.text" type="button" class="msg__iconbtn" :title="tr(copied ? '已复制' : '复制')" :aria-label="tr('复制')" @click="copyAnswer">
+          <UiIcon :name="copied ? 'check' : 'copy'" :size="16" />
+        </button>
+        <!-- 批次1：删除轮入口迁移——垃圾桶在复制旁，父级走既有删除确认 -->
+        <button
+          v-if="canDelete && !busy"
+          type="button"
+          class="msg__iconbtn msg__iconbtn--danger"
+          :title="tr('删除本轮')"
+          :aria-label="tr('删除本轮')"
+          @click="emit('round-delete')"
+        >
+          <UiIcon name="trash" :size="16" />
+        </button>
       </div>
     </template>
   </article>
@@ -362,19 +475,50 @@ const engineTitle = computed(() => {
   cursor: help;
   user-select: none;
 }
-.msg__copy {
+/* 内联编辑器：PC 限宽靠右（编辑区够用又不铺满），触摸端满宽 */
+.msg__editorwrap {
+  width: min(100%, 680px);
   margin-left: auto;
-  border: 1px solid var(--border-strong);
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: calc(var(--ui-font-size) * 0.84615);
+}
+/* 气泡下方操作图标行：PC 靠 hover/聚焦浮现，触摸端常显（主流 Agent 口径） */
+.msg__actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.msg__actions--user { justify-content: flex-end; margin-left: auto; }
+.msg__actions--assistant { justify-content: flex-start; }
+.msg:hover .msg__actions,
+.msg:focus-within .msg__actions { opacity: 1; }
+.msg__iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
   border-radius: var(--radius-sm);
-  padding: 1px 8px;
   cursor: pointer;
 }
-.msg__copy:hover {
+.msg__iconbtn--danger:hover { color: var(--danger); }
+.msg__iconbtn:hover {
   color: var(--text);
   background: var(--surface-2);
+}
+.msg__iconbtn:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+/* 无精确指针（触摸）：操作行常显，点击目标放大到拇指友好尺寸 */
+@media (hover: none) {
+  .msg__actions { opacity: 1; }
+  .msg__iconbtn { width: 34px; height: 34px; }
+  .msg__editorwrap { width: 100%; }
 }
 .msg__text {
   margin: 0;

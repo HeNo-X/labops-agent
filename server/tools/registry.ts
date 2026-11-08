@@ -22,6 +22,7 @@ import type { KnowledgeResult, BusinessPlanResult, EvidenceObservationResult } f
 
 import type {
   CheckinStatusResult,
+  CheckinSummaryResult,
   FreeRoomsResult,
   LabStatusResult,
   OperationsReportResult,
@@ -42,6 +43,7 @@ import {
 import { coerceLabStatusArgs, runQueryLabStatus } from './query-lab-status.ts';
 import { coerceFreeRoomsArgs, runQueryFreeRooms } from './query-free-rooms.ts';
 import { queryCheckinStatus } from './query-checkin-status.ts';
+import { queryCheckinSummary } from './query-checkin-summary.ts';
 import { VISION_STATUS_TOOL } from './vision-query.ts';
 import { PERIOD_KEYS, isPeriodKey } from '../../shared/periods.ts';
 import {
@@ -49,7 +51,8 @@ import {
   runPrepareDutySession,
   runPrepareIssueTicket,
   runPrepareNotification,
-  runPrepareRoomClosure
+  runPrepareRoomClosure,
+  runPrepareRoomStatus
 } from './prepare-tools.ts';
 
 /** 注册表 —— 每个条目必须同时有 spec（给模型）与 execute（给服务端） */
@@ -78,6 +81,8 @@ export interface ToolContext {
   conversationId?: string | null;
   /** 工具白名单：传了就只允许这些工具（定时任务的"到点执行"通道用）；不传 = 不限制 */
   allowedTools?: string[];
+  /** 定时任务自主执行（高危）：准备完的方案直接提交原系统，不等本人确认 */
+  autonomous?: boolean;
 }
 
 /** 可判别联合：resultKind 与 result 的类型一一对应，调用方按 kind 收窄 */
@@ -91,6 +96,7 @@ export type ToolExecution =
   | { ok: true; resultKind:'business_plan'; result:BusinessPlanResult; summary:string }
   | { ok: true; resultKind:'evidence_observation'; result:EvidenceObservationResult; summary:string }
   | { ok: true; resultKind: 'checkin_status'; result: CheckinStatusResult; summary: string }
+  | { ok: true; resultKind: 'checkin_summary'; result: CheckinSummaryResult; summary: string }
   | { ok: true; resultKind: 'vision_field'; result: VisionFieldResult; summary: string }
   | { ok: true; resultKind: 'task_plan'; result: { steps: import('../../shared/types.ts').TaskPlanStep[]; updatedAt: string }; summary: string }
   | { ok: false; code: string; message: string; suggestions: string[]; summary: string };
@@ -218,6 +224,39 @@ const QUERY_CHECKIN_STATUS_SPEC: ToolSpec = {
   danger: false
 };
 
+const QUERY_CHECKIN_SUMMARY_SPEC: ToolSpec = {
+  name: 'query_checkin_summary',
+  description:
+    '查询【指定日期（+可选实验室/节次）】的上机课签到汇总，**仅管理员可用**（学生/志愿者调用会被主系统拒绝，如实转述）。' +
+    '返回每节课的应到人数（名册人数或班级档案人数）、已签到人数、未签到学号（账号）名单（不含姓名）与签退/补签到/扫错实验室/定位失败计数。' +
+    '红线：缺口只是"应到−实到"的账面差，必须现场核实后才能定性（人到未签/请假/旷课由人工判断），不得断言某人缺勤；' +
+    '请勿代替学生签到；逐人签到明细（谁在何时签的）依旧没有开放接口，本工具只给聚合与缺口名单。' +
+    '管理员问"今天签到情况/缺口/哪些课没签齐""E310 上午签到统计"时用本工具；学生问自己的签到用 query_checkin_status。',
+  parameters: {
+    type: 'object',
+    properties: {
+      date: {
+        type: 'string',
+        description: '可选。查询日期，YYYY-MM-DD。缺省为服务端当天（上海时区）。',
+        pattern: '^\\d{4}-\\d{2}-\\d{2}$'
+      },
+      labId: {
+        type: 'string',
+        description: '可选。只看某个实验室（房间编号，如 E310 对应的房间 id）。',
+        pattern: '^[A-Za-z0-9_-]{1,100}$'
+      },
+      periodKey: {
+        type: 'string',
+        enum: [...PERIOD_KEYS],
+        description: '可选。只看某一个节次；不传则返回当日全部排课节次。'
+      }
+    },
+    required: [],
+    additionalProperties: false
+  },
+  danger: false
+};
+
 // ===========================================================================
 //  参数校验（服务端白名单 + 类型校验，模型给的一律不可信）
 // ===========================================================================
@@ -315,6 +354,28 @@ const PREPARE_CLOSURE_SPEC: ToolSpec = {
       prepareNotice: { type: 'boolean', description: '是否同时生成受影响通知草稿（站内），缺省 false。' }
     },
     required: ['roomId', 'startDate', 'endDate', 'periodKeys', 'reason'],
+    additionalProperties: false
+  },
+  danger: false
+};
+
+const PREPARE_ROOM_STATUS_SPEC: ToolSpec = {
+  name: 'prepare_room_status',
+  description:
+    '【准备开门/关门】当管理员要求把某房间"开门/关门/打开/关闭（即时状态）"时使用，例如「把 E310 关门」「E312 开门」。' +
+    '只生成开门/关门办理单，用户确认后才在沙盒登记房间开放状态（覆盖层，不改房间档案）；本工具不执行任何写操作。' +
+    '这是即时的开放/门禁状态，不需要日期、节次或原因；长周期停用/检修才用 prepare_room_closure。',
+  parameters: {
+    type: 'object',
+    properties: {
+      roomId: { type: 'string', description: '房间号，例如 E310。必须来自系统已收录的房间号列表。' },
+      status: {
+        type: 'string',
+        enum: ['active', 'closed'],
+        description: 'active=开门（开放）；closed=关门（关闭）。'
+      }
+    },
+    required: ['roomId', 'status'],
     additionalProperties: false
   },
   danger: false
@@ -475,7 +536,7 @@ export const REGISTRY: RegisteredTool[] = [
   {spec:{name:'query_incident',description:'从原系统查询故障事件、影响范围和关联调课/停用/工单/通知。未登记事件先查询事件列表。',parameters:{type:'object',properties:{incidentId:{type:'string'}},additionalProperties:false},danger:false},execute:queryIncident,effect:'read'},
   {spec:{name:'prepare_incident_plan',description:'管理员保存用户明确声明的故障事件草稿，分析最多6项教学活动的联合候选，或准备处置/恢复方案。只能准备，实际提交必须由本人点击确认。缺失事实不得猜测。',parameters:{type:'object',properties:{action:{type:'string',enum:['draft','analyze','preview','restore','takeover']},incidentId:{type:'string'},expectedRevision:{type:'integer'},roomId:{type:'string'},date:{type:'string'},description:{type:'string'},device:{type:'string'},periodKeys:{type:'array',items:{type:'string',enum:[...PERIOD_KEYS]}},preference:{type:'string',enum:['keep_period','few_rooms','early']},candidateSetId:{type:'string'},optionId:{type:'string'},note:{type:'string'},undoMoves:{type:'boolean'}},required:['action'],additionalProperties:false},danger:false},execute:prepareIncident,effect:'draft'},
   {spec:{name:'query_business_context',description:'查询原系统当前账号可见的工单状态、通知已读、检查记录、临时停用或真实日报。不得拿沙盒统计冒充真实业务。',parameters:{type:'object',properties:{view:{type:'string',enum:['issues','notifications','closures','duty','report','tasks','incidents','health']},date:{type:'string'}},required:['view'],additionalProperties:false},danger:false},execute:queryBusiness,effect:'read'},
-  {spec:{name:'prepare_business_workflow',description:'准备原系统工单创建或流转、检查补全/最终交接/接收、通知或停用方案。先查 query_business_context 获取真实对象与版本。未明确说明的检查保持 unchecked。只准备，实际提交需本人点击消息卡。kind=notification.publish 时 audience 必须用**原系统口径**（all/role/class/user），与沙盒工具 prepare_notification 的 class_ids/role_scope 不同。',parameters:{type:'object',properties:{kind:{type:'string',enum:['resource.patch','issue.create','issue.action','duty.handover','duty.accept','duty.reassign','duty.item','notification.publish','closure.create','closure.revoke']},resourceKind:{type:'string',enum:['room','class','course']},resourceId:{type:'string'},field:{type:'string',enum:['capacity','size','equipment','requiredEquipment']},after:{},expectedResourceVersion:{type:'string'},evidence:{type:'string'},roomId:{type:'string'},description:{type:'string'},issueId:{type:'string'},expectedRevision:{type:'integer'},action:{type:'string',enum:['assign','start','submit','close','return','complete','carry']},assigneeId:{type:'string',description:'仅action=assign可填写；其他工单动作不得携带此字段'},itemId:{type:'string'},targetShiftId:{type:'string'},adoptItemIds:{type:'array',items:{type:'string'}},leftovers:{type:'array',items:{type:'object'}},taskId:{type:'string'},note:{type:'string'},shiftId:{type:'string'},checklist:{type:'array',items:{type:'object',properties:{key:{type:'string'},state:{type:'string',enum:['done','abnormal','unchecked']}},required:['key','state']}},finalize:{type:'boolean'},createIssue:{type:'boolean'},receiverId:{type:'string'},recordId:{type:'string'},title:{type:'string'},content:{type:'string'},audience:{type:'object',description:'仅 kind=notification.publish 需要。原系统口径四选一：{"kind":"all"}；{"kind":"role","role":"student"|"volunteer"}；{"kind":"class","className":"班级名"}；{"kind":"user","userId":"账号"}。⚠️ 不要用沙盒工具的 class_ids / role_scope；也不要给 admin 群发。收件人不明确时应先向用户确认，不要自行猜测。',properties:{kind:{type:'string',enum:['all','role','class','user']},role:{type:'string',enum:['student','volunteer'],description:'kind=role 时必填'},className:{type:'string',description:'kind=class 时必填：班级名称'},userId:{type:'string',description:'kind=user 时必填：接收账号'}},required:['kind'],additionalProperties:false},startDate:{type:'string'},endDate:{type:'string'},periodKeys:{type:'array',items:{type:'string',enum:[...PERIOD_KEYS]}},reason:{type:'string'},closureId:{type:'string'}},required:['kind'],additionalProperties:false},danger:false},execute:prepareWorkflow,effect:'draft'},
+  {spec:{name:'prepare_business_workflow',description:'准备原系统工单创建或流转、检查补全/最终交接/接收、通知或停用方案。先查 query_business_context 获取真实对象与版本。未明确说明的检查保持 unchecked。只准备，实际提交需本人点击消息卡。kind=notification.publish 时 audience 必须用**原系统口径**（all/role/class/user），与沙盒工具 prepare_notification 的 class_ids/role_scope 不同。kind=checkin.manual（**仅管理员**）为某学生补录一节上机课签到：必须给出 targetUsername/date/periodKey/labId 与必填 reason（代录原因）；缺口需现场核实后再代录，禁止把推测当签到事实。',parameters:{type:'object',properties:{kind:{type:'string',enum:['resource.patch','issue.create','issue.action','duty.handover','duty.accept','duty.reassign','duty.item','notification.publish','closure.create','closure.revoke','checkin.manual']},resourceKind:{type:'string',enum:['room','class','course']},resourceId:{type:'string'},field:{type:'string',enum:['capacity','size','equipment','requiredEquipment']},after:{},expectedResourceVersion:{type:'string'},evidence:{type:'string'},roomId:{type:'string'},description:{type:'string'},issueId:{type:'string'},expectedRevision:{type:'integer'},action:{type:'string',enum:['assign','start','submit','close','return','complete','carry']},assigneeId:{type:'string',description:'仅action=assign可填写；其他工单动作不得携带此字段'},itemId:{type:'string'},targetShiftId:{type:'string'},adoptItemIds:{type:'array',items:{type:'string'}},leftovers:{type:'array',items:{type:'object'}},taskId:{type:'string'},note:{type:'string'},shiftId:{type:'string'},checklist:{type:'array',items:{type:'object',properties:{key:{type:'string'},state:{type:'string',enum:['done','abnormal','unchecked']}},required:['key','state']}},finalize:{type:'boolean'},createIssue:{type:'boolean'},receiverId:{type:'string'},recordId:{type:'string'},title:{type:'string'},content:{type:'string'},targetUsername:{type:'string',description:'仅 kind=checkin.manual 需要：目标学生账号（学号），须已登记名册'},periodKey:{type:'string',enum:[...PERIOD_KEYS],description:'仅 kind=checkin.manual 需要：补录节次（单数）'},audience:{type:'object',description:'仅 kind=notification.publish 需要。原系统口径四选一：{"kind":"all"}；{"kind":"role","role":"student"|"volunteer"}；{"kind":"class","className":"班级名"}；{"kind":"user","userId":"账号"}。⚠️ 不要用沙盒工具的 class_ids / role_scope；也不要给 admin 群发。收件人不明确时应先向用户确认，不要自行猜测。',properties:{kind:{type:'string',enum:['all','role','class','user']},role:{type:'string',enum:['student','volunteer'],description:'kind=role 时必填'},className:{type:'string',description:'kind=class 时必填：班级名称'},userId:{type:'string',description:'kind=user 时必填：接收账号'}},required:['kind'],additionalProperties:false},startDate:{type:'string'},endDate:{type:'string'},periodKeys:{type:'array',items:{type:'string',enum:[...PERIOD_KEYS]}},reason:{type:'string'},closureId:{type:'string'}},required:['kind'],additionalProperties:false},danger:false},execute:prepareWorkflow,effect:'draft'},
   {spec:{name:'query_scheduled_jobs',description:'读取当前账号的定时规则、已保存执行结果或明日准备包。',parameters:{type:'object',properties:{view:{type:'string',enum:['rules','results','preparation']}},additionalProperties:false},danger:false},execute:queryScheduled,effect:'read'},
   {spec:{name:'prepare_scheduled_job',description:'仅预览固定模板定时规则，未来3次时间、样例、对象和效果必须让本人确认。不能调用确认接口；不能设置脚本、任意URL、自动调课或自动验收。普通用户仅能提醒自己。',parameters:{type:'object',properties:{action:{type:'string',enum:['create','change','pause','resume','archive','run_now']},jobId:{type:'string'},expectedVersion:{type:'integer'},reason:{type:'string'},spec:{type:'object',properties:{name:{type:'string'},kind:{type:'string',enum:['daily_report','tomorrow_courses','duty_reminder','due_followup','notice_reminder','lab_open_reminder','session_checkin_reminder','patrol_reminder']},timezone:{type:'string',enum:['Asia/Shanghai']},trigger:{type:'object',properties:{type:{type:'string',enum:['daily','weekly','once','duty','cron']},time:{type:'string'},weekdays:{type:'array',items:{type:'integer'}},at:{type:'string'},minutesBefore:{type:'integer'},expression:{type:'string'}},required:['type'],additionalProperties:false},calendarPolicy:{type:'string',enum:['all_days','teaching_days']},params:{type:'object'},recipients:{type:'array',items:{type:'object'}},approvedEffects:{type:'array',items:{type:'string',enum:['report','inbox']}}},required:['kind','trigger'],additionalProperties:false}},additionalProperties:false},danger:false},execute:prepareScheduled,effect:'draft'},
   {spec:{name:'query_knowledge',description:'检索当前软件操作说明，返回版本、生效日期与段落引用；未导入学校制度或厂家手册时明确缺依据。',parameters:{type:'object',properties:{query:{type:'string'}},required:['query'],additionalProperties:false},danger:false},execute:runKnowledge,effect:'read'},
@@ -486,8 +547,10 @@ export const REGISTRY: RegisteredTool[] = [
   { spec: QUERY_LAB_STATUS_SPEC, execute: executeQueryLabStatus, effect: 'read' },
   { spec: QUERY_FREE_ROOMS_SPEC, execute: executeQueryFreeRooms, effect: 'read' },
   { spec: QUERY_CHECKIN_STATUS_SPEC, execute: queryCheckinStatus, effect: 'read' },
+  { spec: QUERY_CHECKIN_SUMMARY_SPEC, execute: queryCheckinSummary, effect: 'read' },
   { spec: PREPARE_ISSUE_SPEC, execute: runPrepareIssueTicket, effect: 'draft' },
   { spec: PREPARE_CLOSURE_SPEC, execute: runPrepareRoomClosure, effect: 'draft' },
+  { spec: PREPARE_ROOM_STATUS_SPEC, execute: runPrepareRoomStatus, effect: 'draft' },
   { spec: PREPARE_NOTICE_SPEC, execute: runPrepareNotification, effect: 'draft' },
   { spec: PREPARE_DUTY_SPEC, execute: runPrepareDutySession, effect: 'draft' },
   { spec: REPORT_SPEC, execute: runCreateOperationsReport, effect: 'draft' },

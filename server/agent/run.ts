@@ -70,6 +70,8 @@ export interface RunInput {
   allowedTools?: string[];
   /** 客户端断开时置位：模型请求与流式输出随即停止，不再产生新事件 */
   signal?: AbortSignal;
+  /** 定时任务自主执行（service/agent-run 透传）：draft 工具准备完直接提交 */
+  autonomous?: boolean;
   /** N07：本轮结束时回传最终可信上下文（会话 API 落库用） */
   onContext?: (ctx: { labName: string | null; date: string | null; task: string | null }) => void;
 }
@@ -266,7 +268,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
     }
     if(transformation.kind==='query'){
       yield emit('tool_started',{step:1,toolCallId:'transform-query',tool:'query_schedule',args:transformation.args,sourceType} satisfies ToolStartedPayload);
-      const result=await executeTool('query_schedule',transformation.args,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode,signal:input.signal,allowedTools:input.allowedTools});
+      const result=await executeTool('query_schedule',transformation.args,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode,signal:input.signal,allowedTools:input.allowedTools,autonomous:input.autonomous});
       if(!result.ok||result.resultKind!=='schedule'){yield emit('run_failed',{code:result.ok?'unexpected_result':result.code,message:result.ok?'未取得课表':result.message});return;}
       yield emit('tool_result',{step:1,toolCallId:'transform-query',tool:'query_schedule',ok:true,ms:0,sourceType,resultKind:result.resultKind,result:result.result,summary:result.summary} satisfies ToolResultPayload);
       // Store the newly verified object before applying its requested presentation.
@@ -280,7 +282,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
     }
     commitContext();
     if (engine === 'demo'||(convMode==='chat'&&isBusinessConnected()&&planNativeDialogue(question,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode}))) {
-      yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode, allowedTools: input.allowedTools });
+      yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode, allowedTools: input.allowedTools, autonomous: input.autonomous });
     } else {
       // A10：模型链整体不可用（账号配额耗尽/未配置）且**尚未产生任何可展示内容**
       // 时，降级到确定性规则引擎——能查的照答（真实授权数据），并如实标注未用大模型。
@@ -301,6 +303,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
           actor: input.actor,
           conversationId: input.sessionId ?? null,
           mode: convMode,
+          autonomous: input.autonomous,
           week,
           toolListText,
           injectionSuspected
@@ -313,7 +316,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
         const fallbackable = code === 'agnes_quota_exhausted' || code === 'llm_not_configured';
         if (!fallbackable || sawContent || input.signal?.aborted) throw err;
         log.warn('llm_fallback_deterministic', { code, mode: convMode, reason: '模型链不可用，确定性引擎接管（如实标注）' });
-        yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode, allowedTools: input.allowedTools });
+        yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode, allowedTools: input.allowedTools, autonomous: input.autonomous });
       }
     }
   } catch (err) {
@@ -352,6 +355,8 @@ interface DemoArgs {
   mode?: 'chat' | 'task';
   /** 工具白名单（定时任务服务端调用用）：传了就只用这些工具 */
   allowedTools?: string[];
+  /** 定时任务自主执行（高危）：draft 工具准备完的方案直接提交原系统 */
+  autonomous?: boolean;
 }
 
 async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
@@ -362,7 +367,7 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
     const native=await nativePlan.execute();
     if(a.mode==='chat'&&native.ok&&native.resultKind==='business_plan'&&native.result.plan){yield a.emit('run_failed',{code:'mode_forbidden',message:'聊天模式仅可查询，准备办理单请切换任务模式'});return;}
     yield a.emit('tool_result',{step:1,toolCallId:'native-dialogue',tool:nativePlan.tool,ok:native.ok,ms:Date.now()-startedAt,sourceType:a.sourceType,summary:native.summary,...(native.ok?{resultKind:native.resultKind,result:native.result}:{error:{code:native.code,message:native.message}})});
-    const answer=native.ok?native.resultKind==='business_plan'?renderBusinessFacts(native.result):native.summary:native.message;yield* streamText(answer,a.emit,a.signal);yield a.emit('run_completed',{answer,steps:1,toolCalls:1,ms:a.watch.ms,sourceType:a.sourceType,engine:'demo',...(native.ok&&native.resultKind==='business_plan'&&native.result.plan?{taskStatus:'awaiting_confirmation'}:{})});return;
+    const answer=native.ok?native.resultKind==='business_plan'?renderBusinessFacts(native.result):(native.resultKind==='checkin_status'||native.resultKind==='checkin_summary')?renderDemoAnswer({kind:native.resultKind,payload:native.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label,question:a.question}):native.summary:native.message;yield* streamText(answer,a.emit,a.signal);yield a.emit('run_completed',{answer,steps:1,toolCalls:1,ms:a.watch.ms,sourceType:a.sourceType,engine:'demo',...(native.ok&&native.resultKind==='business_plan'&&native.result.plan?{taskStatus:'awaiting_confirmation'}:{})});return;
   }
   const plan = planDemo(a.question, a.intent, a.ds);
   a.log.info('demo_plan', { callTool: plan.callTool, args: plan.args, disclosures: plan.needsDisclosure, mode: a.mode });
@@ -374,6 +379,7 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
     const OPS_NAMES: Record<string, string> = {
       prepare_issue_ticket: '报修工单',
       prepare_room_closure: '房间停用',
+      prepare_room_status: '开门/关门',
       prepare_notification: '通知发布',
       prepare_duty_session: '值班安排',
       create_operations_report: '运营报告'
@@ -706,7 +712,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
         dataset: a.ds,
         now: a.now,
         actor: a.actor,
-        conversationId: a.conversationId ?? null, mode: a.mode, signal:a.signal, allowedTools: a.allowedTools
+        conversationId: a.conversationId ?? null, mode: a.mode, signal:a.signal, allowedTools: a.allowedTools, autonomous: a.autonomous
       });
       const ms = Date.now() - t0;
       toolCalls += 1;

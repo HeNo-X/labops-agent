@@ -1,10 +1,18 @@
 import { businessRequest,businessScope,effectiveRole,rememberBusinessTask,readBusinessTask,listBusinessTasks } from '../business/bridge.ts';
+import { queryCheckinStatus, PERSONAL_CHECKIN_RE } from './query-checkin-status.ts';
+import { queryCheckinSummary, CHECKIN_SUMMARY_RE } from './query-checkin-summary.ts';
 import { effectiveSchedule } from '../data/calendar.ts';
 import { isValidDateString } from '../time/term.ts';
 import { parseIntent } from '../agent/intent.ts';
 import type { ToolExecution, ToolContext } from './registry.ts';
 import type { BusinessResult, NativeContext, NativePlan, NativeCandidate } from '../../shared/business.ts';
 function fail(e:unknown):ToolExecution{return {ok:false,code:(e as {code?:string}).code||'business_unavailable',message:e instanceof Error?e.message:'原系统不可用',suggestions:[],summary:'未取得有效业务依据，尚未提交操作'};}
+// 自主执行（高危，spec.autonomous）：待确认方案直接提交原系统；失败不炸本轮，方案保留可人工确认
+async function autoCommit(plan:NativePlan|undefined,ctx:ToolContext):Promise<string>{
+  if(!ctx.autonomous||!plan||plan.state!=='awaiting_confirmation')return '';
+  try{await businessRequest('/plans/commit','POST',{planId:plan.id,version:plan.version},ctx.signal);return '定时任务自主执行：方案已直接提交原系统，未等待人工确认。';}
+  catch(e){return '定时任务自主执行：方案自动提交失败（'+(e instanceof Error?e.message:'未知错误')+'），方案已保留，仍可人工确认。';}
+}
 function result(data:Partial<BusinessResult>,ctx:ToolContext):ToolExecution{
   const r:BusinessResult={summary:'原系统查询完成',planId:data.plan?.id||null,candidates:[],workbenchUrl:'/operations.html?bridge=1'+(data.plan?'&planId='+data.plan.id:''),source:'原实验室系统',scopeKey:businessScope().scopeKey,queriedAt:ctx.now.iso,...data};
   if(r.taskId||r.plan||r.view==='schedule')rememberBusinessTask(ctx.conversationId,r);
@@ -101,8 +109,13 @@ export async function prepareWorkflow(args:Record<string,unknown>,ctx:ToolContex
     if(!audited.ok)return {ok:false,code:'bad_audience',message:audited.message,suggestions:[],summary:'通知的接收对象未确定，尚未提交任何内容'};
     payload={...args,audience:audited.audience};
   }
-  try{const endpoint=payload['kind']==='duty.handover'?'/handover/preview':'/workflow/preview';const r=await businessRequest(endpoint,'POST',{...payload,conversationId:ctx.conversationId||undefined},ctx.signal);const plan=r['plan'] as NativePlan;
-    return result({plan,task:r['task'] as BusinessResult['task'],taskId:plan.taskId,view:plan.kind==='resource.patch'?'health':plan.kind.startsWith('duty.')?'duty':plan.kind.startsWith('issue.')?'issues':plan.kind.startsWith('closure.')?'closures':'notifications',sourceRevision:plan.sourceRevision,summary:'原系统待确认方案已准备；业务尚未提交，请核对后本人点击确认。'},ctx);
+  // 管理员代录：把工具词表归一到主系统口径（roomId→labId；periodKeys 单元素→periodKey），其余校验交给主系统
+  if(args['kind']==='checkin.manual'){
+    payload={...payload,labId:args['labId']||args['roomId'],periodKey:args['periodKey']||(Array.isArray(args['periodKeys'])&&args['periodKeys'].length?args['periodKeys'][0]:undefined)};
+    delete payload['roomId'];delete payload['periodKeys'];
+  }
+  try{const endpoint=payload['kind']==='duty.handover'?'/handover/preview':'/workflow/preview';const r=await businessRequest(endpoint,'POST',{...payload,conversationId:ctx.conversationId||undefined},ctx.signal);const plan=r['plan'] as NativePlan;const autoNote=await autoCommit(plan,ctx);
+    return result({plan,task:r['task'] as BusinessResult['task'],taskId:plan.taskId,view:plan.kind==='resource.patch'?'health':plan.kind.startsWith('duty.')?'duty':plan.kind.startsWith('issue.')?'issues':plan.kind.startsWith('closure.')?'closures':plan.kind==='checkin.manual'?'checkin':'notifications',sourceRevision:plan.sourceRevision,summary:autoNote||(plan.kind==='checkin.manual'?'管理员代录方案已准备：记录标记 agent-manual 并全程审计，业务未提交，请核对后本人点击确认。':'原系统待确认方案已准备；业务尚未提交，请核对后本人点击确认。')},ctx);
   }catch(e){return fail(e);}
 }
 export async function queryIncident(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{
@@ -141,6 +154,29 @@ export function planNativeDialogue(q:string,ctx:ToolContext):{tool:string;args:R
     return {tool:'query_scheduled_jobs',args:{view:/结果|执行记录/.test(q)?'results':'rules'},execute:()=>queryScheduled({view:/结果|执行记录/.test(q)?'results':'rules'},ctx)};
   }
   if(/准备包/.test(q))return {tool:'query_scheduled_jobs',args:{view:'preparation'},execute:()=>queryScheduled({view:'preparation'},ctx)};
+  // 签到汇总（只读，仅管理员）：问"签到情况/缺口/统计"且当前身份非学生时走汇总；
+  // 学生问"签到情况"回落到本人状态（下一分支），保证学生永远拿不到缺口名单。
+  if(CHECKIN_SUMMARY_RE.test(q)&&effectiveRole()!=='student'){
+    const d=parseIntent(q,ctx.now).date?.date;
+    const room=[...(ctx.dataset.labs||[]),...(ctx.dataset.openLabs||[])].find(l=>l.name&&q.includes(l.name));
+    const args:{date?:string;labId?:string}={...(d?{date:d}:{}),...(room?{labId:room.id}:{})};
+    return {tool:'query_checkin_summary',args,execute:()=>queryCheckinSummary(args,ctx)};
+  }
+  // 管理员代录（draft，任务模式）：只匹配显式"补录/补签/代录"问法；解析得动的字段先填，
+  // 解析不动的留给主系统校验如实报错——绝不猜学号、节次或原因。
+  if(/补录|补签|代录/.test(q)&&effectiveRole()!=='student'){
+    const d=parseIntent(q,ctx.now).date?.date;
+    const sno=/\d{5,}/.exec(q)?.[0];
+    const room=[...(ctx.dataset.labs||[]),...(ctx.dataset.openLabs||[])].find(l=>l.name&&q.includes(l.name));
+    const periodKey=([[/上午第一大节|上午第一/,'am1'],[/上午第二大节|上午第二/,'am2'],[/下午第一大节|下午第一/,'pm1'],[/下午第二大节|下午第二/,'pm2'],[/晚上\s*AB/i,'eve_ab'],[/晚上\s*CD/i,'eve_cd']] as Array<[RegExp,string]>).find(([re])=>re.test(q))?.[1];
+    if(!sno)return {tool:'prepare_business_workflow',args:{kind:'checkin.manual'},execute:async()=>fail(new Error('请说明要补录的学号、日期、节次、实验室与代录原因，例如：给 2023002 补录今天下午第一大节在 E310 的签到，原因：设备故障无法扫码'))};
+    const args:Record<string,unknown>={kind:'checkin.manual',targetUsername:sno,...(d?{date:d}:{}),...(periodKey?{periodKey}:{}),...(room?{labId:room.id}:{})};
+    const reason=/原因[：:]\s*(.+)$/.exec(q)?.[1]?.trim();
+    if(reason)args['reason']=reason;
+    return {tool:'prepare_business_workflow',args,execute:()=>prepareWorkflow(args,ctx)};
+  }
+  // 学生本人签到状态（只读）：只匹配"我的签到"类问法；签到提醒规则仍由上方定时分支承接
+  if(PERSONAL_CHECKIN_RE.test(q)){const d=parseIntent(q,ctx.now).date?.date;return {tool:'query_checkin_status',args:d?{date:d}:{},execute:()=>queryCheckinStatus(d?{date:d}:{},ctx)};}
   if(/我的工作|任务中心|未完成任务|恢复任务/.test(q))return query({view:'tasks'});
   if(/资源数据健康|资源健康|数据健康清单/.test(q))return query({view:'health'});
   if(/故障事件|联合方案|联合处置|多门课|几门课|登记故障/.test(q)){const incidentId=/incident-[a-f0-9-]+/.exec(q)?.[0];return {tool:'query_incident',args:{incidentId},execute:()=>queryIncident({incidentId},ctx)};}

@@ -113,6 +113,7 @@ interface ValidBody {
   owner: SandboxActor;
   prompt: string;
   allowedTools: string[];
+  autonomous: boolean;
   sessionId: string;
   timeoutMs: number;
 }
@@ -135,6 +136,7 @@ function coerce(raw: unknown): { ok: true; value: ValidBody } | { ok: false; cod
   if (!prompt) return { ok: false, code: 'bad_prompt', message: 'prompt 不能为空' };
   if (prompt.length > 2000) return { ok: false, code: 'bad_prompt', message: 'prompt 超过 2000 字' };
 
+  const autonomous = b['autonomous'] === true;
   const requested = Array.isArray(b['allowedTools']) ? b['allowedTools'] : [];
   const allowedTools = [...new Set(requested.filter((x): x is string => typeof x === 'string' && Boolean(x.trim())).map((x) => x.trim()))];
 
@@ -149,6 +151,7 @@ function coerce(raw: unknown): { ok: true; value: ValidBody } | { ok: false; cod
       owner: { id, role: role as SandboxRole, label: typeof o['label'] === 'string' ? o['label'] : id },
       prompt,
       allowedTools,
+      autonomous,
       sessionId: sessionIdOf(id, sessionRaw || `scheduled-${jobRunId}`),
       timeoutMs
     }
@@ -191,6 +194,7 @@ async function execute(body: ValidBody): Promise<Record<string, unknown>> {
     mode,
     actor: body.owner,
     allowedTools: allowed,
+    autonomous: body.autonomous,
     signal
   })) {
     runId = ev.runId || runId;

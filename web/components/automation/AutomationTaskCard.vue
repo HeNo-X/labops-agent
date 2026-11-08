@@ -7,7 +7,7 @@
  *
  *  无障碍：状态不只靠颜色 —— 符号 + 文案 + 边框样式三重编码。
  */
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { t as tr } from '../../i18n';
 import UiIcon from '../UiIcon.vue';
 import type { AutomationJob } from '../../composables/useAutomation';
@@ -28,9 +28,23 @@ const props = defineProps<{
   readonly?: boolean;
 }>();
 
-const emit = defineEmits<{ open: []; toggle: [] }>();
+const emit = defineEmits<{ open: []; toggle: []; delete: [] }>();
 
 const status = computed(() => statusMeta(props.job.displayStatus || props.job.status));
+// 历史记录删除（高危低频）：仅已完成/已归档可删；两步确认防误触
+const confirmDel = ref(false);
+let delTimer: ReturnType<typeof setTimeout> | undefined;
+const deletable = computed(() => !props.readonly && props.job.canManage && (props.job.displayStatus === 'completed' || props.job.status === 'archived'));
+function askDelete(): void {
+  if (!confirmDel.value) {
+    confirmDel.value = true;
+    delTimer = setTimeout(() => { confirmDel.value = false; }, 4000);
+    return;
+  }
+  clearTimeout(delTimer);
+  confirmDel.value = false;
+  emit('delete');
+}
 // B：maxRuns 用尽后 displayStatus=completed——开关按 displayStatus 判定（OFF+不可点），
 // 否则会出现"卡片说已完成、开关却是开的"的自相矛盾
 const on = computed(() => isOn(props.job.displayStatus || props.job.status));
@@ -78,6 +92,16 @@ function formatShort(iso: string): string {
       <span class="auto-card__meta auto-card__meta--last">{{ tr(lastText) }}</span>
     </button>
 
+    <button
+      v-if="deletable"
+      type="button"
+      class="auto-card__del"
+      :class="{ 'is-arming': confirmDel }"
+      :disabled="busy"
+      @click="askDelete"
+    >
+      {{ confirmDel ? tr('再点一次确认删除') : tr('删除记录') }}
+    </button>
     <label v-if="toggleEnabled" class="auto-switch" :title="tr(on ? '暂停此自动化' : '恢复此自动化')">
       <input type="checkbox" role="switch" :checked="on" :disabled="busy" @change.prevent="emit('toggle')" />
       <span class="auto-switch__track" aria-hidden="true"><span class="auto-switch__dot" /></span>
@@ -120,6 +144,28 @@ function formatShort(iso: string): string {
 }
 .auto-card.is-info {
   border-left-color: var(--primary);
+}
+.auto-card__del {
+  align-self: center;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.auto-card__del:hover {
+  color: var(--danger, #b91c1c);
+  border-color: var(--danger, #b91c1c);
+}
+.auto-card__del.is-arming {
+  color: #fff;
+  background: var(--danger, #b91c1c);
+  border-color: var(--danger, #b91c1c);
 }
 .auto-card.is-muted,
 .auto-card.is-off {
@@ -252,6 +298,7 @@ function formatShort(iso: string): string {
 .auto-switch input:checked + .auto-switch__track .auto-switch__dot,
 .auto-switch__track.is-on .auto-switch__dot {
   transform: translateX(18px);
+  background: var(--primary-contrast);
 }
 .auto-switch input:disabled + .auto-switch__track {
   opacity: 0.6;

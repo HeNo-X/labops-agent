@@ -201,6 +201,22 @@ async function toggleJob(job: AutomationJob): Promise<void> {
   await automation.toggle(job);
 }
 
+// 历史记录沉底：运行中 → 暂停 → 已完成 → 已归档（区内稳定，不打散原有顺序）
+const sortedJobs = computed(() => {
+  const rank = (j: AutomationJob): number =>
+    j.status === 'archived' ? 4 : j.displayStatus === 'completed' ? 3 : j.status === 'active' ? 1 : 2;
+  return [...automation.jobs.value].sort((a, b) => rank(a) - rank(b));
+});
+
+const delConfirm = ref<AutomationJob | null>(null);
+async function onDelete(job: AutomationJob): Promise<void> {
+  if (delConfirm.value?.id !== job.id) {
+    delConfirm.value = job; // 卡片自身已做两步确认，这里兜底直接执行
+  }
+  await automation.deleteJob(job);
+  delConfirm.value = null;
+}
+
 async function runNow(job: AutomationJob): Promise<void> {
   await automation.runNow(job);
 }
@@ -408,7 +424,7 @@ useVisibleRefresh(
           </div>
           <div class="auto-list">
             <AutomationTaskCard
-              v-for="job in automation.jobs.value"
+              v-for="job in sortedJobs"
               :key="job.id"
               :job="job"
               :templates="automation.templates.value"
@@ -416,6 +432,7 @@ useVisibleRefresh(
               :readonly="readonly"
               @open="openDetail(job)"
               @toggle="toggleJob(job)"
+              @delete="onDelete(job)"
             />
           </div>
 

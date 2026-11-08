@@ -100,9 +100,12 @@ export function useAutomation() {
   const connected = computed(() => business.connected);
   const activeCount = computed(() => jobs.value.filter((j) => j.status === 'active').length);
 
-  /** 统一守卫：防并发、集中错误、丢弃跨账号的过期响应 */
+  /** 统一守卫：防并发、集中错误、丢弃跨账号的过期响应。忙时不再静默：显式提示，避免旧方案被误确认 */
   async function guard(fn: () => Promise<void>): Promise<void> {
-    if (busy.value) return;
+    if (busy.value) {
+      error.value = '上一个操作尚未完成，请稍候再试';
+      return;
+    }
     const scope = business.scopeKey;
     busy.value = true;
     error.value = '';
@@ -172,6 +175,8 @@ export function useAutomation() {
    */
   async function requestPlan(action: AutomationAction, spec?: ScheduledSpec, job?: AutomationJob): Promise<boolean> {
     let ok = false;
+    // 先清旧方案：即使本次请求被守卫挡掉或失败，也不会残留上一动作（如 run_now）被误确认
+    plan.value = null;
     await guard(async () => {
       const scope = business.scopeKey;
       const body: Record<string, unknown> = {
@@ -264,6 +269,17 @@ export function useAutomation() {
     await requestPlan('archive', undefined, job);
   }
 
+  /** 删除历史任务记录（仅已完成/已归档；主系统一并清运行历史，审计行保留） */
+  async function deleteJob(job: AutomationJob): Promise<void> {
+    await guard(async () => {
+      const scope = business.scopeKey;
+      await businessApi('proxy/scheduled-jobs/delete', { jobId: job.id, scopeKey: business.scopeKey });
+      if (scope !== business.scopeKey) return;
+      if (detail.value?.job.id === job.id) detail.value = null;
+      await refreshQuiet();
+    });
+  }
+
   async function savePreference(next: ReminderPreference): Promise<boolean> {
     let ok = false;
     await guard(async () => {
@@ -312,6 +328,7 @@ export function useAutomation() {
     toggle,
     runNow,
     archive,
+    deleteJob,
     savePreference,
     loadPreparation,
     reset

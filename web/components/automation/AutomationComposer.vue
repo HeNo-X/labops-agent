@@ -58,18 +58,37 @@ const PARAM_LABEL: Record<string, string> = {
 const createDisabled = computed(() => isAgentTemplate.value && !String(spec.value.prompt ?? '').trim());
 const schedSummary = computed(() => {
   if (schedOpen.value) return tr('收起调度设置');
-  return schedTouched.value ? triggerText(spec.value) : tr('+ 添加计划');
+  return schedTouched.value ? triggerText(spec.value) : tr('添加计划');
 });
 const isAgentTemplate = computed(() => spec.value.kind === 'agent_prompt');
 const execMode = computed<'message' | 'agent'>(() => (spec.value.execMode === 'agent' ? 'agent' : 'message'));
 const agentTools = computed<string[]>(() => (Array.isArray(spec.value.agentTools) ? spec.value.agentTools : []));
 const DRAFT_TOOLS: Array<{ name: string; label: string }> = [
-  { name: 'prepare_notification', label: '生成通知草稿（仍需本人确认后发布）' },
-  { name: 'prepare_issue_ticket', label: '生成报修工单草稿（仍需本人确认）' }
+  { name: 'prepare_notification', label: '生成通知草稿（未连主系统时沙盒可用）' },
+  { name: 'prepare_issue_ticket', label: '生成报修工单草稿（未连主系统时沙盒可用）' },
+  { name: 'prepare_business_workflow', label: '原系统业务方案：通知发布 / 工单创建与流转等（连接主系统时可用；自主执行开启后到点直接提交）' }
 ];
 function setExecMode(mode: 'message' | 'agent'): void {
   spec.value.execMode = mode;
-  if (mode === 'message') spec.value.agentTools = [];
+  if (mode === 'message') {
+    spec.value.agentTools = [];
+    spec.value.autonomous = false; // 自主执行仅在 Agent 方式下有意义
+  }
+}
+// B：自主执行勾选——第一次点只弹高危确认，二次点击才真正置位
+const autonomyAsk = ref(false);
+function toggleAutonomous(e: Event): void {
+  const input = e.target as HTMLInputElement;
+  if (input.checked) {
+    input.checked = false; // 等二次确认后再勾上
+    autonomyAsk.value = true;
+  } else {
+    spec.value.autonomous = false;
+  }
+}
+function confirmAutonomy(): void {
+  spec.value.autonomous = true;
+  autonomyAsk.value = false;
 }
 function toggleTool(name: string): void {
   const set = new Set(agentTools.value);
@@ -326,7 +345,10 @@ watch(
               <button type="button" role="radio" :aria-checked="execMode === 'message'" :class="{ 'is-on': execMode === 'message' }" :disabled="busy" @click="setExecMode('message')">{{ tr('只发消息') }}</button>
               <button type="button" role="radio" :aria-checked="execMode === 'agent'" :class="{ 'is-on': execMode === 'agent' }" :disabled="busy" @click="setExecMode('agent')">{{ tr('让 Agent 去做') }}</button>
             </div>
-            <span v-if="execMode === 'agent'" class="auto-chip auto-chip--note">{{ tr('仍需本人确认') }}</span>
+            <label v-if="execMode === 'agent'" class="auto-check auto-check--auto" :title="tr('勾选后 Agent 将不再等待你确认')">
+              <input type="checkbox" :checked="spec.autonomous === true" :disabled="busy" @change="toggleAutonomous($event)">
+              <span>{{ tr('允许 Agent 自主执行任务') }}</span>
+            </label>
           </div>
           <fieldset v-if="execMode === 'agent'" class="auto-field auto-field--tools">
             <legend class="auto-field__label">{{ tr('额外允许的动作（默认只读）') }}</legend>
@@ -373,6 +395,19 @@ watch(
     </div>
 
     <!-- 影响核对：与表单同页，用户看到"会被通知谁、会在哪几次运行"后才落库 -->
+          <!-- B：自主执行高危二次确认——第一次点勾选只弹窗，这里再点确认才真正勾上 -->
+      <div v-if="autonomyAsk" class="auto-risk" role="alertdialog" aria-modal="true" :aria-label="tr('高危操作确认')" @click.self="autonomyAsk = false">
+        <div class="auto-risk__box">
+          <h3 class="auto-risk__title">{{ tr('⚠️ 高危操作：允许 Agent 自主执行') }}</h3>
+          <p>{{ tr('勾选后，到点运行的 Agent 准备好方案后将直接提交原系统（如发布通知、创建或流转工单），不再等待你本人确认。') }}</p>
+          <p>{{ tr('误操作可能影响真实业务数据。仅在你完全信任该任务指令、且清楚它会做什么时才开启。') }}</p>
+          <div class="auto-risk__actions">
+            <button type="button" :disabled="busy" @click="autonomyAsk = false">{{ tr('取消') }}</button>
+            <button type="button" class="auto-danger" :disabled="busy" @click="confirmAutonomy">{{ tr('我已了解风险，确认开启') }}</button>
+          </div>
+        </div>
+      </div>
+
     <section v-if="plan" class="auto-review" :aria-label="tr('影响核对')">
       <h3>{{ tr('确认后才会生效') }}</h3>
       <dl class="auto-review__grid">
@@ -433,6 +468,12 @@ watch(
 }
 .auto-check input {
   margin-top: 3px;
+}
+.auto-check input[type=checkbox] {
+  width: 16px;
+  min-height: 0;
+  flex-shrink: 0;
+  accent-color: var(--primary, #1668dc);
 }
 .auto-composer {
   display: grid;
@@ -692,6 +733,14 @@ watch(
 .auto-field--cmd { display: flex; flex-direction: column; gap: 6px; }
 .auto-textarea--big { width: 100%; resize: vertical; line-height: 1.65; }
 .auto-chiprow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.auto-check--auto { padding: 6px 12px; border: 1px dashed var(--border-strong); border-radius: 999px; }
+.auto-check--auto input[type=checkbox] { width: 15px; height: 15px; margin-top: 0; }
+.auto-risk { position: fixed; inset: 0; z-index: 200; background: rgba(0, 0, 0, 0.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.auto-risk__box { background: var(--surface, #fff); color: var(--text, #111); max-width: 460px; width: 100%; border-radius: 14px; padding: 20px; display: grid; gap: 12px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35); }
+.auto-risk__title { margin: 0; font-size: 15px; color: var(--danger, #b91c1c); }
+.auto-risk__box p { margin: 0; font-size: 13px; line-height: 1.6; }
+.auto-risk__actions { display: flex; gap: 10px; justify-content: flex-end; }
+.auto-risk__actions .auto-danger { background: var(--danger, #b91c1c); border-color: var(--danger, #b91c1c); color: #fff; }
 .auto-seg--chip { display: inline-flex; gap: 2px; border: 1px solid var(--border); border-radius: 999px; padding: 2px; }
 .auto-seg--chip button { border: 0; background: transparent; border-radius: 999px; padding: 4px 12px; font: calc(var(--ui-font-size) * 0.92308) var(--font-sans); color: var(--text-muted); cursor: pointer; }
 .auto-seg--chip button.is-on { background: var(--primary); color: var(--primary-contrast, #fff); }
@@ -713,7 +762,7 @@ watch(
 .auto-primary--big:disabled { opacity: .45; cursor: not-allowed; }
 
 /* 交互反馈补齐（2026-11-07） */
-.auto-seg button:hover,
+.auto-seg button:hover:not(.is-on),
 .auto-weekdays button:hover {
   background: var(--surface-3);
   color: var(--text);

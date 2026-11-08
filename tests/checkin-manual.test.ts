@@ -124,71 +124,19 @@ async function client(connect: boolean, identity: string) {
   return { call, ask };
 }
 
-test('B1 管理员补录：方案准备 → 本人确认提交 → SQLite 落库+审计 → 汇总缺口闭合', async () => {
+test('B1 补录/代签请求经 Agent 一律婉拒（2026-11-08 红线：不调工具、不出方案）', async () => {
   const c = await client(true, 'admin');
-  const { answer, toolResults, conversationId } = await c.ask('给 2023002 补录今天下午第一大节在 E310 的签到，原因：设备故障无法扫码（隔离样例）', 'task');
-  const tr = toolResults.find((t) => t.payload?.tool === 'prepare_business_workflow');
-  assert.ok(tr, '必须走 prepare_business_workflow：' + JSON.stringify(toolResults.map((t) => t.payload?.tool)));
-  assert.equal(tr.payload.ok, true, JSON.stringify(tr.payload));
-  assert.equal(tr.payload.resultKind, 'business_plan');
-  const plan = tr.payload.result.plan as { kind: string; payload: Record<string, unknown>; id: string; expiresAt: string };
-  assert.equal(plan.kind, 'checkin.manual');
-  assert.equal(plan.payload.targetUsername, '2023002');
-  assert.equal(plan.payload.periodKey, 'pm1');
-  assert.match(answer, /agent-manual|代录机制|代录方案|补录/);
-  assert.match(String(plan.payload.reason), /设备故障/, '代录原因进入方案载荷');
-
-  const status = await c.call('/api/business/status');
-  const scopeKey = status.data.scopeKey as string;
-  assert.ok(scopeKey);
-  const commit = await c.call('/api/business/proxy/plans/commit', { planId: plan.id, version: 1, scopeKey, conversationId });
-  assert.equal(commit.status, 200, JSON.stringify(commit.data));
-  const receipt = commit.data.receipt as { operationId: string; objects: Array<{ kind: string; id: string }> };
-  assert.equal(receipt.objects[0].kind, 'checkin_record');
-  assert.equal(receipt.objects[0].id, 'manual-' + plan.id.slice(5), '确定性记录 id = manual-<方案uuid>');
-
-  // SQLite 权威层与审计（服务端 commitBusinessState → syncBusinessRecords 的真实落库路径）
-  const { DatabaseSync } = require('node:sqlite');
-  const ro = new DatabaseSync(path.join(nativeDir, 'lab.db'), { readOnly: true });
-  try {
-    const row = ro.prepare('SELECT username,lab_id,timetable_id FROM checkin_records WHERE id=?').get(receipt.objects[0].id) as Record<string, unknown> | undefined;
-    assert.ok(row, '记录必须已落 SQLite');
-    assert.equal(row?.username, '2023002');
-    assert.equal(row?.lab_id, 'fixture-e310');
-    assert.equal(row?.timetable_id, 'fixture-lesson');
-    const audit = ro.prepare('SELECT actorId,reason,route FROM record_audit WHERE id=?').get(receipt.objects[0].id) as Record<string, unknown> | undefined;
-    assert.ok(audit, '代录必须留审计痕迹');
-    assert.equal(audit?.actorId, 'review-admin', '代录人入审计');
-    assert.match(String(audit?.reason), /设备故障|隔离样例/);
-    assert.equal(audit?.route, 'insertCheckin');
-  } finally { ro.close(); }
-
-  // 提交后汇总端点立即可见（缺口 2 → 1）
-  const adminAccount = fixture.accounts.find((a) => a.identity === 'admin')!;
-  const login = await (await fetch(`http://127.0.0.1:${nativePort}/api/auth/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: adminAccount.account, password: adminAccount.password })
-  })).json();
-  const summary = await (await fetch(`http://127.0.0.1:${nativePort}/api/integration/checkin-summary`, { headers: { Authorization: `Bearer ${login.token}` } })).json();
-  const lesson = summary.sessions[0];
-  assert.equal(lesson.expected, 3);
-  assert.equal(lesson.checkedIn, 2, '补录后实到 2');
-  assert.equal(lesson.absentCount, 1, '缺口 = 应到 − 实到');
-  assert.equal(summary.totals.absent, 1);
-  // 学生直连汇总端点 403（权威门控）
-  const studentAccount = fixture.accounts.find((a) => a.identity === 'student')!;
-  const studentLogin = await (await fetch(`http://127.0.0.1:${nativePort}/api/auth/login`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ account: studentAccount.account, password: studentAccount.password })
-  })).json();
-  const studentBrand = await fetch(`http://127.0.0.1:${nativePort}/api/integration/checkin-summary`, { headers: { Authorization: `Bearer ${studentLogin.token}` } });
-  assert.equal(studentBrand.status, 403);
+  const { answer, toolResults } = await c.ask('给 2023002 补录今天下午第一大节在 E310 的签到，原因：设备故障无法扫码（隔离样例）', 'task');
+  assert.equal(toolResults.length, 0, '婉拒路径不得调用任何工具：' + JSON.stringify(toolResults.map((t) => t.payload?.tool)));
+  assert.match(answer, /做不了|不能代签|不能代为补录/);
+  assert.match(answer, /主系统/);
 });
 
-test('B2 学生问同一句不得触发代录（路由与端点双拒绝）', async () => {
+test('B2 学生问同一句同样婉拒（红线对全员一致，不区分身份）', async () => {
   const c = await client(true, 'student');
   const { answer, toolResults } = await c.ask('给 2023002 补录今天下午第一大节在 E310 的签到，原因：设备故障', 'task');
-  const tools = toolResults.map((t) => t.payload?.tool);
-  assert.ok(!tools.includes('prepare_business_workflow'), '学生不得触发代录工具：' + JSON.stringify(tools));
-  assert.match(answer, /学生共享聊天仅可查询本人课程|scope_forbidden/);
+  assert.equal(toolResults.length, 0, '婉拒路径不得调用任何工具');
+  assert.match(answer, /做不了|不能代签|不能代为补录/);
 });
 
 test('B3 直接端点角色矩阵：仅管理员可代录，学生/志愿者 403、访客令牌 401', async () => {

@@ -62,6 +62,24 @@ export interface IntentHint {
   basis: string;
 }
 
+/**
+ * 签到红线（2026-11-08 用户拍板）：Agent **不得**帮学生补录/代签。
+ * 确定性拦截而非靠模型自觉——保证这类请求得到一致的婉拒，而不是答非所问。
+ * 误报防线：纯查询（查/看/情况/记录/汇总/统计）不命中动作子句。
+ */
+export function refuseSignRequest(question: string): string | null {
+  const q = String(question ?? '');
+  if (/(签上到|代签|补录签到|补录.*签到)/.test(q)) {
+    return '这个我做不了：学生签到必须由本人扫码完成，我不能代签或代为补录。如确需补录，请由管理员在主系统的签到管理中按代录流程办理（需填写代录原因并全程留痕）。';
+  }
+  const actionSign = /(给|替|帮|请)[^，。？！]{0,24}(同学|学生)[^，。？！]{0,10}签到/;
+  const queryish = /(查|看一下|情况|记录|汇总|统计|多少|名单)/;
+  if (actionSign.test(q) && !queryish.test(q)) {
+    return '这个我做不了：学生签到必须由本人扫码完成，我不能代签或代为补录。如确需补录，请由管理员在主系统的签到管理中按代录流程办理。';
+  }
+  return null;
+}
+
 const HINT_SLOT_LABEL: Record<IntentHint['slot'], string> = { date: '日期', labName: '房间', periodKey: '节次', className: '班级' };
 const HINT_ORIGIN_LABEL: Record<IntentHint['origin'], string> = {
   explicit: 'explicit，用户本轮明确说的',

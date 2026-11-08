@@ -118,9 +118,11 @@ export async function* streamChatWithFallback(
   opts: StreamOptions,
   mode: 'chat' | 'task',
   log?: Logger,
-  onAttempt?: (spec: LlmProviderSpec) => void
+  onAttempt?: (spec: LlmProviderSpec) => void,
+  /** 方案B 多模型重答：从链上第 N 个模型开始（跳过前面已试错/答偏的） */
+  startIndex = 0
 ): AsyncGenerator<AgnesStreamEvent> {
-  const list = providersForMode(mode);
+  const list = providersForMode(mode).slice(Math.max(0, startIndex));
   if (!list.length) {
     throw new AgnesError(
       'llm_not_configured',

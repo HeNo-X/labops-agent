@@ -164,9 +164,26 @@ export function runQuerySchedule(
       return bare ? name.endsWith(classKey) : name === classKey;
     });
     if (!exists) {
-      const options = [...allClasses].sort((x, y) => x.localeCompare(y, 'zh-Hans-CN')).slice(0, 30);
+      // 相似度优先：用户写的「智能本班」应把「智能本2501」这类前缀近亲排到最前，
+      // 让模型能直接反问"你要找的是 X 吗"，而不是把真候选埋在字母序列表尾部。
+      const bare = classKey; // 已去掉「班/级」后缀
+      const similarity = (n: string): number => {
+        const name = n.replace(/[班级]$/, '');
+        if (name === bare) return 0;
+        if (name.startsWith(bare) || bare.startsWith(name)) return 1;
+        if (name.includes(bare) || bare.includes(name)) return 2;
+        return 3;
+      };
+      const options = [...allClasses]
+        .sort((x, y) => similarity(x) - similarity(y) || x.localeCompare(y, 'zh-Hans-CN'))
+        .slice(0, 30);
       base.suggestions = options;
-      base.notes.push(`系统里没有班级「${classKey}」；可选班级共 ${allClasses.size} 个，例如：${options.slice(0, 8).join('、')}`);
+      const near = options.filter((n) => similarity(n) <= 1).slice(0, 3);
+      base.notes.push(
+        near.length
+          ? `系统里没有班级「${classKey}」。最接近的候选：${near.join('、')}。可选班级共 ${allClasses.size} 个，例如：${options.slice(0, 8).join('、')}`
+          : `系统里没有班级「${classKey}」；可选班级共 ${allClasses.size} 个，例如：${options.slice(0, 8).join('、')}`
+      );
       return { ...base, lessons: [], byPeriod: emptyByPeriod(), reason: 'class_not_found' };
     }
   }

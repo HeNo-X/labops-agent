@@ -168,11 +168,76 @@ const PERIOD_PHRASES: Array<[RegExp, PeriodKey]> = [
   [/第?\s*[二两2]\s*大\s*节/, 'am2']
 ];
 
+
+/**
+ * 节次编号口径（2026-11-08 用户给定，务必照此实现）：
+ *   上午第一大节=第1-2节　上午第二大节=第3-4节
+ *   下午第一大节=第5-6节　下午第二大节=第7-8节
+ *   晚上AB节=第AB节　　　　晚上CD节=第CD节
+ * 单说「第5节」「第7节」分别归属 56 节、78 节。
+ * 缩写：上一=上午第一大节、下二=下午第二大节、早八=第1-2节。
+ * 注意「上一/下一」是口语缩写，不是"上一个"，做否定前瞻避免误伤。
+ */
+const NUM_TO_PERIOD: Record<number, PeriodKey> = {
+  1: 'am1', 2: 'am1', 3: 'am2', 4: 'am2',
+  5: 'pm1', 6: 'pm1', 7: 'pm2', 8: 'pm2'
+};
+
+const PERIOD_COMBO: Array<[RegExp, PeriodKey]> = [
+  [/第?\s*12\s*节/, 'am1'],
+  [/第?\s*34\s*节/, 'am2'],
+  [/第?\s*56\s*节/, 'pm1'],
+  [/第?\s*78\s*节/, 'pm2']
+];
+
+const PERIOD_ABBR: Array<[RegExp, PeriodKey]> = [
+  [/早\s*八/, 'am1'],
+  [/上\s*一(?!\s*[个次步页])/, 'am1'],
+  [/上\s*二/, 'am2'],
+  [/下\s*一(?!\s*[个次步页])/, 'pm1'],
+  [/下\s*二/, 'pm2'],
+  [/(?:^|[^A-Za-z])AB\s*节?/i, 'eve_ab'],
+  [/(?:^|[^A-Za-z])CD\s*节?/i, 'eve_cd']
+];
+
+/** 把文字里的节次指代解析成有序、去重的 PeriodKey 列表（解析不出返回 []） */
+export function resolveNumericPeriods(text: string): PeriodKey[] {
+  const t = String(text ?? '');
+  const keys: PeriodKey[] = [];
+  const push = (k: PeriodKey): void => {
+    if (!keys.includes(k)) keys.push(k);
+  };
+
+  for (const [re, key] of PERIOD_ABBR) if (re.test(t)) push(key);
+  for (const [re, key] of PERIOD_COMBO) if (re.test(t)) push(key);
+
+  // 范围：5-6节、5~6节、5到6节 → 展开区间内的每一节
+  for (const m of t.matchAll(/第?\s*([1-8])\s*(?:[-~—–]|至|到)\s*([1-8])\s*节/g)) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    const lo = Math.min(a, b);
+    const hi = Math.max(a, b);
+    for (let n = lo; n <= hi; n += 1) push(NUM_TO_PERIOD[n]!);
+  }
+  // 并列：5、7节 / 5，7节 / 5和7节 → **只取这两个端点**，不做区间展开
+  // （"第1、7节"是"第1节和第7节"，不是 1~7 全部，展开会把结果放宽 4 倍）
+  for (const m of t.matchAll(/第?\s*([1-8])\s*(?:、|,|，|和|与)\s*([1-8])\s*节/g)) {
+    push(NUM_TO_PERIOD[Number(m[1])]!);
+    push(NUM_TO_PERIOD[Number(m[2])]!);
+  }
+  // 单节：第5节 / 5节 / 第7节
+  for (const m of t.matchAll(/第?\s*([1-8])\s*节/g)) push(NUM_TO_PERIOD[Number(m[1])]!);
+  return keys;
+}
+
 /** 直接写 key 也认 */
 export function resolvePeriodKey(text: string): PeriodKey | null {
   const t = String(text ?? '');
   for (const [re, key] of PERIOD_PHRASES) if (re.test(t)) return key;
   for (const p of PERIODS) if (new RegExp(`\\b${p.key}\\b`).test(t)) return periodByKey(p.key)?.key ?? null;
+  // 数字/组合/缩写（第5节、56节、上一、早八…）：恰好命中一个节次才算单节
+  const numeric = resolveNumericPeriods(t);
+  if (numeric.length === 1) return numeric[0]!;
   return null;
 }
 
@@ -191,6 +256,9 @@ export function resolvePeriodRange(text: string): PeriodKey[] | null {
   // 精确节次优先：已经能定位单节次就不做范围放宽
   if (resolvePeriodKey(t)) return null;
   for (const [re, keys] of PERIOD_RANGE_PHRASES) if (re.test(t)) return [...keys];
+  // 跨大节（5、7节）或多节并列：按 PERIODS 顺序返回
+  const numeric = resolveNumericPeriods(t);
+  if (numeric.length > 1) return PERIODS.map((p) => p.key).filter((k) => numeric.includes(k));
   return null;
 }
 

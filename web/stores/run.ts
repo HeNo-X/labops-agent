@@ -289,9 +289,11 @@ export const useRunStore = defineStore('run', () => {
   const exampleQuestions = computed<string[]>(() => {
     const room = selectedLab.value ?? labs.value[0]?.name ?? 'E310';
     const other = labs.value.find((l) => l.name !== room)?.name ?? 'D517';
-    const d = demoDate.value;
     const list: string[] = [];
-    if (d) list.push(`${room} ${d} 有哪些课？`);
+    // 2026-11-08 口径：示例固定两条日期查询（过去 10-27、未来 11-25），
+    // 让评审一眼看到能跨周/跨月查课表；其余示例保留相对时间（明天下午…）。
+    list.push(`${room} 2026-10-27 有哪些课？`);
+    list.push(`${room} 2026-11-25 有哪些课？`);
     list.push(`${other} 现在开放吗？`);
     list.push(`明天下午第二大节哪些实验室空着？`);
     // 首屏示例原本全是只读查询，评委看不到本项目最有区分度的"提案→本人确认"链路。

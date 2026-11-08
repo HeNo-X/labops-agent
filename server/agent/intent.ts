@@ -41,6 +41,8 @@ export interface Intent {
   /** 节次范围（"上午"= am1+am2；"下午"= pm1+pm2；"晚上"= eve_ab+eve_cd）—— F12 */
   periodKeys: PeriodKey[] | null;
   labName: string | null;
+  /** 按班级查（"智能本2501班"）—— 与 labName 二选一 */
+  className: string | null;
   /** 上一问任务类型（由 run.ts 从会话上下文注入，N08 追问继承） */
   lastTask?: string | null;
   /** 解析过程中发现的歧义/降级说明 */
@@ -358,6 +360,18 @@ export function parseIntent(text: string, now: ServerNow): Intent {
   const periodKeys = periodKey ? null : resolvePeriodRange(text);
   const labName = resolveLabName(text);
 
+  // 兜底：问题里出现「XX班」就认定他在按班级问，不依赖模型自觉填 className
+  // 只取"数字前最多 6 个字"作专业前缀，再剥掉动词/指代（查一下、那、的…），
+  // 否则「查找一下智能本2501班」会被连成「查找一下智能本2501」。
+  const stripLead = (v: string): string =>
+    v.replace(/^(?:麻烦|请|帮我|我|想|要|查一下|看一下|一下|查|看|问|找|那|这|个|的|是|和|与|在|给|把|们|班|有|课|上)+/, '');
+  const withSuffix = text.match(/([A-Za-z\u4e00-\u9fa5]{0,6}?)(\d{2,4})\s*班/);
+  // 没有"班"字也认（「计本2501下二有课吗」）：要求 4 位数字 + 前面 2~4 个中文，
+  // 且后面不跟 年月日级（避免把 2026 年这类日期当班级）。
+  const bareClass = withSuffix ? null : text.match(/([\u4e00-\u9fa5]{2,4})(\d{4})(?![\d年月日级号])/);
+  const matched = withSuffix ?? bareClass;
+  const className = matched ? `${stripLead(matched[1]!)}${matched[2]}`.trim() || null : null;
+
   if (dateInvalid) notes.push(`日期输入非法：${dateInvalid.reason}`);
   if (!date && !dateInvalid) notes.push('未识别到日期指代 → 缺省按服务端当天处理，并在上下文里标明这是缺省值');
   if (labName && !date && !dateInvalid) notes.push(`识别到房间号 ${labName}，但未识别到日期`);
@@ -365,7 +379,8 @@ export function parseIntent(text: string, now: ServerNow): Intent {
   if (labName && /^\d/.test(labName)) notes.push(`房间号 ${labName} 未带字母前缀，将按系统收录的房间推断（如 310 → E310）`);
   if (periodKeys) notes.push(`识别到时间范围（${periodKeys.join('/')}）——"整个范围都空闲"与"其中一节空闲"含义不同，需按口径处理`);
 
-  return { date, dateInvalid, periodKey, periodKeys, labName, notes };
+  if (className) notes.push(`识别到班级「${className}」——按班级查课表，不需要房间号`);
+  return { date, dateInvalid, periodKey, periodKeys, labName, className, notes };
 }
 
 /** 给模型看的"当前时间与指代解算"上下文块（人话，省 token 且模型理解更准） */
@@ -375,6 +390,9 @@ export function buildTimeContext(now: ServerNow, intent: Intent, weekNote: strin
     `【教学周】${weekNote}`,
     `【"本周"的定义】含今天的那一教学周的周一~周日；裸写"周三"指本周三。`
   ];
+  if (intent.className) {
+    lines.push(`【按班级查询】用户提到了班级「${intent.className}」：调用 query_schedule 时请传 className="${intent.className}"（不要传 labName）。`);
+  }
   if (intent.date) {
     lines.push(
       `【已解算的日期指代】用户说的「${intent.date.raw}」= ${intent.date.date}（${WEEKDAY_LABELS[weekdayOf(intent.date.date)]}）。依据：${intent.date.source}`

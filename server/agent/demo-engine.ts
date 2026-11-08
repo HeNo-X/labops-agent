@@ -598,7 +598,9 @@ function renderScheduleAnswer(
 ): string {
   const weekText =
     result.weekNo === null ? '教学周无法确定' : `第 ${result.weekNo} 教学周（${result.weekNo % 2 === 1 ? '单周' : '双周'}）`;
-  const head = `${result.labName ?? '该房间'}（${result.labLocation ?? '位置未录入'}）${result.date}（${result.weekdayLabel}，${weekText}）`;
+  const head = result.labName
+    ? `${result.labName}（${result.labLocation ?? '位置未录入'}）${result.date}（${result.weekdayLabel}，${weekText}）`
+    : `该班级 ${result.date}（${result.weekdayLabel}，${weekText}）`;
 
   if (result.reason === 'lab_not_found') {
     return `**查不到课表：系统里没有收录这个房间号。**\n\n可选的房间号：${result.suggestions.join('、') || '（当前未收录任何房间）'}。`;

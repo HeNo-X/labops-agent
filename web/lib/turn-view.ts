@@ -94,6 +94,8 @@ const TOOL_TITLES: Record<string, string> = {
   query_free_rooms: '查找空闲房间',
   query_checkin_status: '查询签到状态',
   query_checkin_summary: '查询签到汇总',
+  query_term_schedule: '查询学期安排/值班模板',
+  apply_term_schedule: '修改学期安排/值班模板',
   query_vision_status: '查询现场事实',
   prepare_issue_ticket: '准备报修单',
   prepare_room_closure: '准备停用计划',

@@ -71,10 +71,13 @@ export function runQuerySchedule(
   }
 
   const rawLabName = typeof args.labName === 'string' ? args.labName.trim() : '';
-  if (!rawLabName) {
+  // 2026-11-08：允许**按班级**查（"智能本2501班的课表"）——用户脑子里最先想到的往往
+  // 是"我这个班"，不是房间号。二者必须给一个，都没给才拒绝。
+  const rawClassName = typeof args.className === 'string' ? args.className.trim() : '';
+  if (!rawLabName && !rawClassName) {
     throw new ToolArgumentError(
-      'missing_lab',
-      '第一阶段必须指定 labName（房间号），否则结果无法收敛到可读规模',
+      'missing_selector',
+      '需要房间号或班级名之一（例如 "E310" 或 "智能本2501班"），否则结果无法收敛',
       availableRoomNames(ds)
     );
   }
@@ -82,9 +85,9 @@ export function runQuerySchedule(
   // ---------- 2. 找房间（普通实验室 + 开放实验室都认）----------
   // A7：裸数字房间号（"310今天有课吗"）按后缀解析——唯一命中自动收敛并在 notes
   // 如实标注，多个命中如实报歧义（可选项给全），零个走下方 lab_not_found 结果。
-  let lab: LabRow | null = findLab(ds, rawLabName) ?? findOpenLab(ds, rawLabName);
+  let lab: LabRow | null = rawLabName ? (findLab(ds, rawLabName) ?? findOpenLab(ds, rawLabName)) : null;
   let bareResolved = false;
-  if (!lab) {
+  if (rawLabName && !lab) {
     const bare = findLabsByNameSuffix(ds, rawLabName);
     if (bare.length === 1) {
       lab = bare[0]!;
@@ -111,6 +114,10 @@ export function runQuerySchedule(
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
   // A7：裸数字自动解析必须让用户看见（工具消息 reminder 要求 notes 原样转达）
   if (bareResolved && lab) notes.push(`房间号「${rawLabName}」未带字母前缀，已按 ${lab.name} 理解`);
+  // 班级口径：去掉用户常带的"班/级"后缀再比对，避免"智能本2501班"匹配不到"智能本2501"
+  const classKey = rawClassName.replace(/[班级]$/, '');
+  const classOf = (row: TimetableRow): string[] => (row.classNames.length ? row.classNames : row.className ? [row.className] : []);
+  if (classKey) notes.push(`按班级「${classKey}」查询：同一时段多个教室的课会一起列出`);
 
   const provenance: ScheduleQueryResult['provenance'] = {
     sourceType: ds.sourceType,
@@ -147,7 +154,7 @@ export function runQuerySchedule(
   };
 
   // ---------- 3. 房间不存在：明确说没有，并给出可选房号（不编造）----------
-  if (!lab) {
+  if (!lab && rawLabName) {
     const names = availableRoomNames(ds);
     base.suggestions = names;
     base.notes.push(
@@ -164,12 +171,18 @@ export function runQuerySchedule(
   }
 
   // ---------- 5. 过滤 ----------
-  const labKey = normalizeLabName(lab.name);
+  const labKey = lab ? normalizeLabName(lab.name) : '';
   const sameWeekday = ds.timetable.filter(
     (row) => Number(row.weekday) === weekday && normalizeLabName(row.labName) === labKey
   );
 
-  const matched: TimetableRow[] = effectiveSchedule(ds,date).filter(row => normalizeLabName(row.labName) === labKey && (!periodFilter || row.periodKey === periodFilter));
+  const effective = effectiveSchedule(ds, date);
+  const matched: TimetableRow[] = effective.filter((row) => {
+    const byPeriod = !periodFilter || row.periodKey === periodFilter;
+    if (!byPeriod) return false;
+    if (classKey) return classOf(row).some((n) => n.replace(/[班级]$/, '') === classKey);
+    return normalizeLabName(row.labName) === labKey;
+  });
   const statistics = calendar.stats(matched);
   notes.push(`统计口径：${statistics.recordCount} 条班级展开记录、${statistics.activityCount} 个教学活动、${statistics.classCount} 个班级、${statistics.occupiedPeriodCount} 个占用大节。`);
   if (statistics.conflicts.length) notes.push(`⚠️ 存在 ${statistics.conflicts.length} 个疑似冲突时段，须核实合班或导入数据；不能据此确认房间可用。`);
@@ -192,8 +205,8 @@ export function runQuerySchedule(
         classNames: names,
         className: cn,
         merged: names.length > 1,
-        labId: row.labId || lab.id,
-        labName: row.labName || lab.name,
+        labId: row.labId || lab?.id || '',
+        labName: row.labName || lab?.name || '',
         term: row.term,
         weeks: row.weeks,
         updatedAt: row.updatedAt
@@ -211,14 +224,14 @@ export function runQuerySchedule(
   let reason: ScheduleQueryResult['reason'];
   if (lessons.length > 0) {
     reason = 'ok';
-    if (lab.status !== 'active') {
+    if (lab && lab.status !== 'active') {
       notes.push(`注意：该房间当前状态为「${lab.status === 'inactive' ? '停用/修整' : lab.status}」，排课信息仍然有效，但现场可能无法使用`);
     }
   } else if (holiday) {
     reason = 'no_class_that_day';
   } else if (periodFilter) {
     reason = 'no_class_in_that_period';
-  } else if (lab.status !== 'active') {
+  } else if (lab && lab.status !== 'active') {
     reason = 'lab_not_active';
   } else {
     reason = 'no_class_that_day';

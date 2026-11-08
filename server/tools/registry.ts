@@ -127,7 +127,7 @@ const QUERY_SCHEDULE_SPEC: ToolSpec = {
     '本工具只读、不改动任何数据。不要用它回答签到人数、钥匙位置、人员名单、房间档案类问题——那些不在本工具范围内。',
   parameters: {
     type: 'object',
-    properties: {
+    properties: {className:{type:'string',description:'按班级查课表（与 labName 二选一），如 "智能本2501班"'},
       date: {
         type: 'string',
         description: '查询日期，格式必须是 YYYY-MM-DD（例如 2026-09-30）。',
@@ -291,6 +291,11 @@ export function coerceQueryScheduleArgs(raw: Record<string, unknown>): QuerySche
   if (typeof labName === 'string' && labName.trim()) out.labName = labName.trim();
   else if (labName !== undefined && labName !== null && labName !== '') {
     throw new ToolArgumentError('bad_lab', `labName 参数必须是字符串，收到：${typeof labName}`);
+  }
+  const className = raw['className'];
+  if (typeof className === 'string' && className.trim()) out.className = className.trim();
+  else if (className !== undefined && className !== null && className !== '') {
+    throw new ToolArgumentError('bad_class', `className 参数必须是字符串，收到：${typeof className}`);
   }
   const periodKey = raw['periodKey'];
   if (typeof periodKey === 'string') {

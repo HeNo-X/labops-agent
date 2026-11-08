@@ -571,6 +571,8 @@ export interface QueryScheduleArgs {
   labName?: string;
   /** 可选：只查某个节次 */
   periodKey?: PeriodKey;
+  /** 按班级查（与 labName 二选一）：'智能本2501'/'智能本2501班' 都可 */
+  className?: string;
 }
 
 export interface ScheduleLesson {

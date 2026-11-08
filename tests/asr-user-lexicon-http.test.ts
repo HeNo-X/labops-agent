@@ -25,7 +25,7 @@ process.env.LABOPS_AUTH_MODE = 'demo';
 process.env.LABOPS_DB_PATH = path.join(temp, 'lexicon.sqlite');
 process.env.AGNES_API_KEY = '';
 // 有 Key 才会真的走到上游调用（我们用替身接住），否则端点直接 503
-process.env.DASHSCOPE_API_KEY = 'sk-test-fake-key-never-real';
+process.env.DASHSCOPE_API_KEY = 'test-fake-key-never-real-42';
 delete process.env.ASR_API_KEY;
 delete process.env.ASR_PROTOCOL;
 delete process.env.ASR_CONTEXT_ENABLED;

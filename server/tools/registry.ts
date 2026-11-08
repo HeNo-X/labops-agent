@@ -2,6 +2,14 @@ import { isBusinessConnected, effectiveRole } from '../business/bridge.ts';
 import { runKnowledge } from './knowledge.ts';
 import { APPLY_TERM_SCHEDULE_SPEC, applyTermSchedule } from './apply-term-schedule.ts';
 import { QUERY_TERM_SCHEDULE_SPEC, runQueryTermSchedule } from './query-term-schedule.ts';
+import {
+  QUERY_CHECKIN_RECORDS_SPEC,
+  QUERY_OPENLAB_RECORDS_SPEC,
+  QUERY_KEY_RECORDS_SPEC,
+  queryCheckinRecords,
+  queryOpenlabRecords,
+  queryKeyRecords
+} from './query-checkin-records.ts';
 import { runAnalyzeEvidenceImage } from './analyze-evidence-image.ts';
 import { executeTaskPlan } from './task-plan.ts';
 import { prepareSchedule, queryDuty, queryBusiness, prepareWorkflow, queryIncident, prepareIncident,queryScheduled,prepareScheduled } from './business.ts';
@@ -103,6 +111,7 @@ export type ToolExecution =
   | { ok: true; resultKind: 'task_plan'; result: { steps: import('../../shared/types.ts').TaskPlanStep[]; updatedAt: string }; summary: string }
   | { ok: true; resultKind: 'term_schedule_applied'; result: import('./apply-term-schedule.ts').ApplyTermScheduleResult; summary: string }
   | { ok: true; resultKind: 'term_schedule'; result: Record<string, unknown>; summary: string }
+  | { ok: true; resultKind: 'records'; result: Record<string, unknown>; summary: string }
   | { ok: false; code: string; message: string; suggestions: string[]; summary: string };
 
 // ===========================================================================
@@ -589,6 +598,10 @@ export const REGISTRY: RegisteredTool[] = [
     execute: (a, ctx) => applyTermSchedule(a, ctx.signal),
     effect: 'write'
   },
+  // 逐人明细 / 开放实验室签到签退 / 钥匙台账（2026-11-08 开放；学号与借用人由服务端掩码）
+  { spec: QUERY_CHECKIN_RECORDS_SPEC as unknown as ToolSpec, execute: (a, ctx) => queryCheckinRecords(a, ctx.signal), effect: 'read' },
+  { spec: QUERY_OPENLAB_RECORDS_SPEC as unknown as ToolSpec, execute: (a, ctx) => queryOpenlabRecords(a, ctx.signal), effect: 'read' },
+  { spec: QUERY_KEY_RECORDS_SPEC as unknown as ToolSpec, execute: (a, ctx) => queryKeyRecords(a, ctx.signal), effect: 'read' },
   { spec: PREPARE_ISSUE_SPEC, execute: runPrepareIssueTicket, effect: 'draft' },
   { spec: PREPARE_CLOSURE_SPEC, execute: runPrepareRoomClosure, effect: 'draft' },
   { spec: PREPARE_ROOM_STATUS_SPEC, execute: runPrepareRoomStatus, effect: 'draft' },

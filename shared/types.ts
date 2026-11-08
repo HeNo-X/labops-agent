@@ -198,7 +198,7 @@ export interface ToolStartedPayload {
 }
 
 /** 结构化结果的类别。前端据此选择渲染器，不再假设所有工具都返回课表 */
-export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation' | 'checkin_status' | 'checkin_summary' | 'vision_field' | 'task_plan' | 'term_schedule' | 'term_schedule_applied';
+export type ToolResultKind = 'schedule' | 'lab_status' | 'free_rooms' | 'operation_proposal' | 'operations_report' | 'knowledge' | 'business_plan' | 'evidence_observation' | 'checkin_status' | 'checkin_summary' | 'vision_field' | 'task_plan' | 'term_schedule' | 'term_schedule_applied' | 'records';
 
 export interface ToolResultPayload {
   step: number;

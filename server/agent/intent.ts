@@ -43,10 +43,92 @@ export interface Intent {
   labName: string | null;
   /** 按班级查（"智能本2501班"）—— 与 labName 二选一 */
   className: string | null;
+  /** 方案B（2026-11-08）：上下文线索。carried 线索**只进这里、不写槽位**——
+   *  沿用与否由模型结合上文判断（见 docs/上下文继承改造-方案B-20261108.md）。 */
+  hints?: IntentHint[];
   /** 上一问任务类型（由 run.ts 从会话上下文注入，N08 追问继承） */
   lastTask?: string | null;
   /** 解析过程中发现的歧义/降级说明 */
   notes: string[];
+}
+
+/** 方案B：规则从决策者降级为提议者——每条线索都带来源与一句话依据 */
+export interface IntentHint {
+  slot: 'date' | 'labName' | 'periodKey' | 'className';
+  value: string;
+  /** explicit=本轮明说；carried=来自上一问；inferred=按规则推断；resolved=唯一匹配补全 */
+  origin: 'explicit' | 'carried' | 'inferred' | 'resolved';
+  /** 给人看的一句话说明——模型必须能读到"这是猜的还是用户说的" */
+  basis: string;
+}
+
+const HINT_SLOT_LABEL: Record<IntentHint['slot'], string> = { date: '日期', labName: '房间', periodKey: '节次', className: '班级' };
+const HINT_ORIGIN_LABEL: Record<IntentHint['origin'], string> = {
+  explicit: 'explicit，用户本轮明确说的',
+  carried: 'carried，来自上一问',
+  inferred: 'inferred，按规则推断',
+  resolved: 'resolved，按唯一匹配补全'
+};
+
+/**
+ * 会话承接（方案B）：上一问的房间/日期在 hints 模式下**只写线索不写槽位**，
+ * 沿用与否由模型判断；legacy 模式（CONTEXT_HINTS=0）保持旧的原样写槽位行为。
+ * 纪律与旧逻辑一致：找空闲房间/寒暄不承接；非法日期绝不承接；班级明确时与房间互斥。
+ */
+export function applySessionCarry(
+  intent: Intent,
+  sess: { labName: string | null; date: string | null; question?: string } | null,
+  opts: { roomlessIntent: boolean; hintsMode: boolean }
+): void {
+  if (!sess) return;
+  const classIntent = Boolean(intent.className);
+  if (opts.roomlessIntent || classIntent || intent.dateInvalid) return;
+  const from = sess.question ? `（来自「${sess.question.slice(0, 40)}」）` : '';
+  if (!intent.labName && sess.labName) {
+    if (opts.hintsMode) {
+      (intent.hints ??= []).push({
+        slot: 'labName',
+        value: sess.labName,
+        origin: 'carried',
+        basis: `用户本轮没写房间。上一问用的是 ${sess.labName}${from}。若沿用，必须在回答里说明"按上一问的房间 ${sess.labName} 计算"；若判断与本问无关就不要采用。`
+      });
+    } else {
+      intent.labName = sess.labName;
+      intent.notes.push(`未识别到房间号，沿用上一问的 ${sess.labName}`);
+    }
+  }
+  if (!intent.date && sess.date) {
+    if (opts.hintsMode) {
+      (intent.hints ??= []).push({
+        slot: 'date',
+        value: sess.date,
+        origin: 'carried',
+        basis: `用户本轮没写日期。上一问用的是 ${sess.date}${from}。若沿用，必须在回答里说明"按上一问的日期 ${sess.date} 计算"；若判断与本问无关就不要采用。`
+      });
+    } else {
+      intent.date = { date: sess.date, raw: '（沿用上一问）', source: `本轮未识别到日期指代，沿用上一问的 ${sess.date}` };
+      intent.notes.push(`未识别到日期指代，沿用上一问的 ${sess.date}`);
+    }
+  }
+  // 节次（periodKey/periodKeys）不沿用 —— 过滤过强容易把"换个房间再问"变成"查不到"，宁缺勿错
+}
+
+/**
+ * 方案B：确定性引擎（无模型）没有"结合上文判断"的能力——把 carried 线索
+ * 落回槽位，行为与旧继承完全一致（文档 §7 风险表的既定口径）。
+ */
+export function applyHintsToSlots(intent: Intent): void {
+  for (const h of intent.hints ?? []) {
+    if (h.origin !== 'carried') continue;
+    if (h.slot === 'labName' && !intent.labName) {
+      intent.labName = h.value;
+      intent.notes.push(`未识别到房间号，沿用上一问的 ${h.value}`);
+    }
+    if (h.slot === 'date' && !intent.date) {
+      intent.date = { date: h.value, raw: '（沿用上一问）', source: `本轮未识别到日期指代，沿用上一问的 ${h.value}` };
+      intent.notes.push(`未识别到日期指代，沿用上一问的 ${h.value}`);
+    }
+  }
 }
 
 // ===========================================================================
@@ -405,5 +487,21 @@ export function buildTimeContext(now: ServerNow, intent: Intent, weekNote: strin
   if (intent.labName) lines.push(`【已识别的房间号】${intent.labName}`);
   if (intent.periodKey) lines.push(`【已识别的节次】${intent.periodKey}`);
   if (intent.periodKeys) lines.push(`【已识别的节次范围】${intent.periodKeys.join('、')}`);
+
+  // 方案B：有线索时追加"线索不是结论"块——规则摊开依据，沿用与否由模型判断
+  const hints = intent.hints ?? [];
+  if (hints.length) {
+    lines.push(`【本句可用的线索】（这些是**线索不是结论**，你可以不采纳）`);
+    for (const h of hints) {
+      lines.push(`- ${HINT_SLOT_LABEL[h.slot]}：${h.basis}（${HINT_ORIGIN_LABEL[h.origin]}）`);
+    }
+    const hasCarried = hints.some((h) => h.origin === 'carried');
+    if (hasCarried) {
+      lines.push(`【沿用纪律】若本次日期/房间/节次不是用户本轮明确说的，而是你按上下文沿用的，正文必须出现一句依据说明（例如"按上一问的 2026-11-10 计算"）；没有这句依据就不要沿用。`);
+    }
+    if (intent.className && hasCarried) {
+      lines.push(`【规则】班级与房间互斥：用户明确说了班级，就不要把上一问的房间带进来。`);
+    }
+  }
   return lines.join('\n');
 }

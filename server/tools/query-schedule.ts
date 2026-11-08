@@ -211,7 +211,7 @@ export function runQuerySchedule(
   notes.push(`统计口径：${statistics.recordCount} 条班级展开记录、${statistics.activityCount} 个教学活动、${statistics.classCount} 个班级、${statistics.occupiedPeriodCount} 个占用大节。`);
   if (statistics.conflicts.length) notes.push(`⚠️ 存在 ${statistics.conflicts.length} 个疑似冲突时段，须核实合班或导入数据；不能据此确认房间可用。`);
 
-  // ---------- 6. 展开成 lessons（合班时每班一条，与老系统一致）----------
+    // ---------- 6. 展开成 lessons（合班时每班一条，与老系统一致）----------
   const lessons: ScheduleLesson[] = [];
   for (const row of matched) {
     const p = periodByKey(row.periodKey);

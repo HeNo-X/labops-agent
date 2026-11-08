@@ -310,3 +310,8 @@ export function describeConfig(c: AppConfig): string[] {
     `日志级别        : ${c.logLevel}`
   ];
 }
+
+/** 方案B（2026-11-08）：上下文继承改造开关——false 时回退旧的"沿用直接写槽位"行为 */
+export function contextHintsEnabled(): boolean {
+  return bool('CONTEXT_HINTS', true);
+}

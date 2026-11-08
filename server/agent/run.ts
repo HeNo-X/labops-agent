@@ -44,7 +44,8 @@ import type { ChatMessage, TokenUsage } from '../llm/agnes.ts';
 import { executeTool, toolSpecs, toolsForMode } from '../tools/registry.ts';
 import { availableRoomNames } from '../tools/query-schedule.ts';
 import { LAB_STATUS_RE } from './demo-engine.ts';
-import { buildTimeContext, parseIntent } from './intent.ts';
+import { applyHintsToSlots, applySessionCarry, buildTimeContext, parseIntent } from './intent.ts';
+import { contextHintsEnabled } from '../config.ts';
 import type { Intent } from './intent.ts';
 import { getSession, rememberSession } from './session.ts';
 import { loadContext } from '../persistence/db.ts';
@@ -162,6 +163,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   /** 该模式计划使用的模型；真正生效的模型在 runAgnesEngine 里由 fallback 决定 */
   const plannedModel = modelForMode(runMode);
   const intent: Intent = parseIntent(question, now);
+  const contextHints = contextHintsEnabled();
 
   // ---- 会话承接（阶段 2A）：缺房间/日期时显式沿用上一问，且必须留痕 ----
   // F13 继承纪律：
@@ -190,22 +192,9 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   }
   // 按班级问课表时**绝不继承房间号**：否则「查智能本2501班的课」会被做成
   // 「查 E310 的课」，答出来的是别的班的课（2026-11-08 线上就是这个错法）。
-  const classIntent = Boolean(intent.className);
-  if (sess && !roomlessIntent && !classIntent && !intent.dateInvalid) {
-    if (!intent.labName && sess.labName) {
-      intent.labName = sess.labName;
-      intent.notes.push(`未识别到房间号，沿用上一问的 ${sess.labName}`);
-    }
-    if (!intent.date && sess.date) {
-      intent.date = {
-        date: sess.date,
-        raw: '（沿用上一问）',
-        source: `本轮未识别到日期指代，沿用上一问的 ${sess.date}`
-      };
-      intent.notes.push(`未识别到日期指代，沿用上一问的 ${sess.date}`);
-    }
-    // 注意：节次（periodKey/periodKeys）不沿用 —— 节次过滤过强容易把"换个房间再问"变成"查不到"，宁缺勿错
-  }
+  // 方案B：hints 模式下 carried 只进 intent.hints（线索），沿用与否由模型判断；
+  // legacy（CONTEXT_HINTS=0）保持旧的直接写槽位行为。逻辑本体在 intent.ts 便于单测。
+  applySessionCarry(intent, sess, { roomlessIntent, hintsMode: contextHints });
   const commitContext = () => {
     const knownRooms = new Set(availableRoomNames(ds).map((n) => normalizeLabName(n)));
     const task: string | null =
@@ -363,6 +352,8 @@ interface DemoArgs {
 }
 
 async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
+  // 方案B：确定性引擎没有模型做指代消解——把 carried 线索落回槽位（行为与旧继承一致）
+  applyHintsToSlots(a.intent);
   const nativePlan=isBusinessConnected()?planNativeDialogue(a.question,{dataset:a.ds,now:a.now,actor:a.actor,conversationId:a.conversationId,mode:a.mode,signal:a.signal}):null;
   if(nativePlan){
     yield a.emit('tool_started',{step:1,toolCallId:'native-dialogue',tool:nativePlan.tool,args:nativePlan.args,sourceType:a.sourceType});

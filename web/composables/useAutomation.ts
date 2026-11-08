@@ -273,7 +273,16 @@ export function useAutomation() {
   async function deleteJob(job: AutomationJob): Promise<void> {
     await guard(async () => {
       const scope = business.scopeKey;
-      await businessApi('proxy/scheduled-jobs/delete', { jobId: job.id, scopeKey: business.scopeKey });
+      try {
+        await businessApi('proxy/scheduled-jobs/delete', { jobId: job.id, scopeKey: business.scopeKey });
+      } catch (e) {
+        // 线上主系统未部署 delete 路由时的兜底解释（其 404 文案为「定时任务入口不存在」）
+        const msg = (e as Error).message || '';
+        if (msg.includes('入口不存在') || msg.includes('404')) {
+          throw new Error('当前连接的主系统版本尚未支持删除历史记录，需更新部署主系统后可用');
+        }
+        throw e;
+      }
       if (scope !== business.scopeKey) return;
       if (detail.value?.job.id === job.id) detail.value = null;
       await refreshQuiet();

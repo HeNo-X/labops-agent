@@ -98,7 +98,11 @@ async function logout():Promise<void>{
 const { start, cancel } = useAgentStream();
 
 const draft = ref(session.draftFor('__new'));
-// N21：草稿按会话保存；切回会话时恢复
+// N21：草稿按会话保存；切回会话时恢复；无选中会话时同步设置页快捷发起写入的 __new 草稿
+watch(
+  () => session.draftFor('__new'),
+  (t) => { if (!session.currentId) draft.value = t; }
+);
 watch(
   () => session.currentId,
   (id) => {

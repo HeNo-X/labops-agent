@@ -694,6 +694,21 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     });
 
     const toolNotes: string[] = [];
+    /**
+     * 单次往返（2026-11-09）：确定性只读查询一次工具就能定稿。
+     *
+     * 为什么可以提前收敛：本函数结尾本来就是
+     *   if (verifiedAnswers.length) answer = verifiedAnswers.join('\n\n')
+     * ——说明**最终答案一直是工具结果的确定性渲染**，第二次模型往返产出的
+     * 只是一段被丢弃的复述。而单次模型往返实测 ~40s，这一刀直接省掉一半时间，
+     * 语义权仍然 100% 在模型手里（调哪个工具、传什么参数都由它决定）。
+     *
+     * 保守约束（任一条不满足就老老实实走第二轮）：
+     *   · 本轮只有 1 个工具调用（多调用意味着它还想要更多信息）；
+     *   · 工具属于只读查询白名单（不碰 prepare/提案/内部任务计划）；
+     *   · 用户原话里没有"然后/再/顺便/以及/对比/分别"这类多步意图标记。
+     */
+    let singlePassCandidate = false;
     for (let ci = 0; ci < calls.length; ci++) {
       const call = calls[ci]!;
       const name = call.function.name;
@@ -773,6 +788,19 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
 
       if (exec.ok) {
         consecutiveToolFailures = 0;
+        const SINGLE_PASS_TOOLS = new Set([
+          'query_schedule', 'query_checkin_status', 'query_checkin_summary',
+          'query_vision_status', 'query_free_rooms', 'query_lab_status'
+        ]);
+        const multiIntent = /然后|再|顺便|以及|对比|分别|哪个更/.test(a.question);
+        if (
+          process.env['AGENT_SINGLE_PASS'] !== '0' &&
+          calls.length === 1 &&
+          SINGLE_PASS_TOOLS.has(name) &&
+          !multiIntent
+        ) {
+          singlePassCandidate = true;
+        }
         if(exec.resultKind==='business_plan')businessFacts.push(exec.result);
         // A5：计划是模型自己的工作记录，不是业务答案——不进 verifiedAnswers，
         // 单独以 plan_updated 事件广播给界面（计划面板）。
@@ -848,6 +876,11 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     }
     // 一轮工具响应必须连续配对，注记统一追加在整组 tool 消息之后。
     if (toolNotes.length) messages.push({ role: 'system', content: [...new Set(toolNotes)].join('\n') });
+
+    if (singlePassCandidate) {
+      a.log.info('single_pass_shortcut', { steps, toolCalls, saved: 'skip_second_model_roundtrip' });
+      break;
+    }
   }
 
   if (verifiedAnswers.length) {

@@ -3,6 +3,8 @@ import { queryCheckinStatus, PERSONAL_CHECKIN_RE } from './query-checkin-status.
 import { queryCheckinSummary, CHECKIN_SUMMARY_RE } from './query-checkin-summary.ts';
 import { effectiveSchedule } from '../data/calendar.ts';
 import { isValidDateString } from '../time/term.ts';
+import { PERIOD_KEYS, isPeriodKey } from '../../shared/periods.ts';
+import { normalizeLabName } from '../data/store.ts';
 import { parseIntent } from '../agent/intent.ts';
 import type { ToolExecution, ToolContext } from './registry.ts';
 import type { BusinessResult, NativeContext, NativePlan, NativeCandidate } from '../../shared/business.ts';
@@ -119,12 +121,41 @@ export async function prepareWorkflow(args:Record<string,unknown>,ctx:ToolContex
   }catch(e){return fail(e);}
 }
 export async function queryIncident(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{
- try{if(typeof args['incidentId']!=='string')return queryBusiness({view:'incidents'},ctx);const r=await businessRequest('/incidents/'+args['incidentId'],'GET',undefined,ctx.signal);return result({view:'incidents',incident:r['incident'] as BusinessResult['incident'],impact:r['impact'] as BusinessResult['impact'],taskId:(r['incident'] as BusinessResult['incident'])?.taskId,summary:'故障事件及其原系统关联对象已回查；工单登记不代表修复。'},ctx);}catch(e){return fail(e);}
+ try{const incidentId=typeof args['incidentId']==='string'?args['incidentId'].trim():'';if(!incidentId)return queryBusiness({view:'incidents'},ctx);const r=await businessRequest('/incidents/'+incidentId,'GET',undefined,ctx.signal);return result({view:'incidents',incident:r['incident'] as BusinessResult['incident'],impact:r['impact'] as BusinessResult['impact'],taskId:(r['incident'] as BusinessResult['incident'])?.taskId,summary:'故障事件及其原系统关联对象已回查；工单登记不代表修复。'},ctx);}catch(e){return fail(e);}
+}
+/**
+ * 主系统 /incidents/draft 需要 roomId+date+description+periodKeys 四项，但工具清单只把
+ * action 标成必填——模型据此漏项时，请求会在原系统撞成一句"请选择故障影响节次"，
+ * 既没给合法值也没给映射，只能反复重试到步数上限（2026-11-10 实机演示实测到）。
+ * 这里在发起请求前按同一口径校验，并把缺什么、合法值是什么一次说清；缺资料时模型应先问用户。
+ */
+function assertIncidentDraftArgs(args:Record<string,unknown>,ctx:ToolContext):{roomId:string}{
+  const bad=(code:string,message:string)=>Object.assign(new Error(message),{code});
+  const rawRoom=typeof args['roomId']==='string'?args['roomId'].trim():'';
+  if(!rawRoom)throw bad('missing_room','登记故障事件需要 roomId：原系统房间编号（取 query_business_context 返回的 rooms[].id），不要用房间名。');
+  // 主系统只认 rooms[].id，模型常交房间名（"E310"）→ 撞一句"请选择实验室"再回头查清单，
+  // 一次演示要多烧两轮。服务端已有房间清单，这里做唯一映射：编号或名字都收，歧义才报错。
+  const labs=(ctx.dataset?.labs||[]) as Array<{id:string;name:string}>;
+  const byId=labs.find(l=>l.id===rawRoom);
+  const byName=byId?[]:labs.filter(l=>normalizeLabName(l.name)===normalizeLabName(rawRoom));
+  if(!byId&&byName.length!==1)throw bad('lab_not_found',`找不到唯一房间「${rawRoom}」${byName.length>1?'（同名房间 '+byName.length+' 个）':''}；请改用 rooms[].id，可选：${labs.slice(0,20).map(l=>l.id+'（'+l.name+'）').join('、')||'清单为空'}`);
+  const roomId=(byId||byName[0]!).id;
+  const date=typeof args['date']==='string'?args['date'].trim():'';
+  if(!isValidDateString(date))throw bad('bad_date',`登记故障事件需要合法 date（YYYY-MM-DD，用服务端给出的日期），收到：${date||'（未提供）'}。`);
+  const description=typeof args['description']==='string'?args['description'].trim():'';
+  if(description.length<4)throw bad('missing_description','登记故障事件需要 description：用户明确声明的故障事实原文，不得代用户猜测。');
+  const raw=args['periodKeys'];
+  if(!Array.isArray(raw)||!raw.length)throw bad('missing_period',`登记故障事件需要 periodKeys（影响节次，数组）：合法值 ${PERIOD_KEYS.join(' / ')}（上午第一大节=am1、上午第二大节=am2、下午第一大节=pm1、下午第二大节=pm2、晚上AB节=eve_ab、晚上CD节=eve_cd）。用户未说明影响哪些节次时请先向用户确认，不要猜测。`);
+  const illegal=raw.filter(p=>!isPeriodKey(p));
+  if(illegal.length)throw bad('bad_period',`periodKeys 含非法节次：${illegal.join(' / ')}；合法值 ${PERIOD_KEYS.join(' / ')}（上午第一大节=am1、上午第二大节=am2、下午第一大节=pm1、下午第二大节=pm2、晚上AB节=eve_ab、晚上CD节=eve_cd）。`);
+  return {roomId};
 }
 export async function prepareIncident(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{
  if(ctx.mode==='chat')return fail(new Error('请切换任务模式准备事件方案'));
  try{const action=args['action']||'draft',incidentId=args['incidentId'];if(!['draft','analyze','preview','restore','takeover'].includes(String(action)))throw new Error('事件动作不支持');if(action!=='draft'&&typeof incidentId!=='string')throw new Error('请先查询并指定原系统事件编号');
- const endpoint=action==='draft'?'/incidents/draft':'/incidents/'+incidentId+'/'+action;const r=await businessRequest(endpoint,'POST',{...args,conversationId:ctx.conversationId||undefined},ctx.signal),plan=r['plan'] as NativePlan|undefined;
+ if(action!=='draft'&&typeof incidentId!=='string')throw new Error('请先查询并指定原系统事件编号');
+ const patch=action==='draft'?assertIncidentDraftArgs(args,ctx):{};
+ const endpoint=action==='draft'?'/incidents/draft':'/incidents/'+incidentId+'/'+action;const r=await businessRequest(endpoint,'POST',{...args,...patch,conversationId:ctx.conversationId||undefined},ctx.signal),plan=r['plan'] as NativePlan|undefined;
  return result({view:'incidents',plan,incident:r['incident'] as BusinessResult['incident'],task:r['task'] as BusinessResult['task'],taskId:plan?.taskId||(r['incident'] as BusinessResult['incident'])?.taskId,incidentSet:r['candidateSet'] as BusinessResult['incidentSet'],impact:r['impact'] as BusinessResult['impact'],summary:plan?'故障事件方案已准备，等待本人核对全部对象并点击确认。':'故障事件草稿或联合候选已准备，教学安排尚未变更。'},ctx);
  }catch(e){return fail(e);}
 }

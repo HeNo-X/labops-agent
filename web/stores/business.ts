@@ -8,7 +8,9 @@ import {initializePreferences} from '../preferences';
 import {actorHeaders} from '../actor';
 import type {NativeActor} from '@shared/business';
 export async function businessApi<T>(path:string,body?:unknown):Promise<T>{
-  if(body&&path.startsWith('proxy/')&&!['proxy/notifications/read','proxy/notifications/read-batch','proxy/reminder-preferences'].includes(path)){const id=useSessionStore().currentId;if(id)body={...(body as Record<string,unknown>),conversationId:id};}
+  // 2026-11-09 修：主系统的 /scheduled-jobs/delete 用严格字段白名单（只认 jobId+scopeKey），
+  // 这里若再自动塞 conversationId 会被判「包含不支持的字段」。删除与当前会话无关，跳过注入。
+  if(body&&path.startsWith('proxy/')&&!['proxy/notifications/read','proxy/notifications/read-batch','proxy/reminder-preferences','proxy/scheduled-jobs/delete'].includes(path)){const id=useSessionStore().currentId;if(id)body={...(body as Record<string,unknown>),conversationId:id};}
   const scope=requestScope();try{const res=await clientFetch('/api/business/'+path,{method:body===undefined?'GET':'POST',headers:{...actorHeaders(),'Content-Type':'application/json'},...(body===undefined?{}:{body:JSON.stringify(body)}),signal:AbortSignal.any([scope.signal,AbortSignal.timeout(15000)])});
   if(!res.ok)throw await responseError(res);const data=await res.json();if(!scope.current())throw new Error('账号范围已变化');return data as T;}finally{scope.done();}
 }

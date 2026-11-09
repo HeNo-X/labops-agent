@@ -250,7 +250,7 @@ export function getConfig(): AppConfig {
     },
     agent: {
       maxSteps: int('AGENT_MAX_STEPS', 6, 1, 12),
-      wallClockMs: int('AGENT_WALL_CLOCK_MS', 60000, 5000, 600000),
+      wallClockMs: int('AGENT_WALL_CLOCK_MS', 120000, 5000, 600000),
       /**
        * 上下文预算（确定性截断，不做 LLM 摘要压缩）。
        * 关闭开关（CONTEXT_TRIM_ENABLED=0）时行为与改造前完全一致 —— 只保留决策可观测。

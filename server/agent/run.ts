@@ -114,7 +114,7 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
     }
     yield event;
   }
-  if (timeout.aborted && !originalSignal?.aborted) yield {seq:lastSeq+1,v:1,runId:lastRunId,type:'run_failed',ts:nowIso(),payload:{code:'deadline_exceeded',message:'任务达到总时间上限，已中止；已产生的提案可在任务中心回查。',hint:'缩小查询范围后重试'}};
+  if (timeout.aborted && !originalSignal?.aborted) yield {seq:lastSeq+1,v:1,runId:lastRunId,type:'run_failed',ts:nowIso(),payload:{code:'deadline_exceeded',message:'任务达到总时间上限，已中止；若本轮已生成办理单，可在任务中心回查。',hint:'可重试一次，或把问题缩小到一个房间/一个时间段'}};
 }
 
 async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {

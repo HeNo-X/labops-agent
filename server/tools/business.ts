@@ -115,7 +115,7 @@ export async function prepareWorkflow(args:Record<string,unknown>,ctx:ToolContex
     delete payload['roomId'];delete payload['periodKeys'];
   }
   try{const endpoint=payload['kind']==='duty.handover'?'/handover/preview':'/workflow/preview';const r=await businessRequest(endpoint,'POST',{...payload,conversationId:ctx.conversationId||undefined},ctx.signal);const plan=r['plan'] as NativePlan;const autoNote=await autoCommit(plan,ctx);
-    return result({plan,task:r['task'] as BusinessResult['task'],taskId:plan.taskId,view:plan.kind==='resource.patch'?'health':plan.kind.startsWith('duty.')?'duty':plan.kind.startsWith('issue.')?'issues':plan.kind.startsWith('closure.')?'closures':plan.kind==='checkin.manual'?'checkin':'notifications',sourceRevision:plan.sourceRevision,summary:autoNote||(plan.kind==='checkin.manual'?'管理员代录方案已准备：记录标记 agent-manual 并全程审计，业务未提交，请核对后本人点击确认。':'原系统待确认方案已准备；业务尚未提交，请核对后本人点击确认。')},ctx);
+    return result({plan,task:r['task'] as BusinessResult['task'],taskId:plan.taskId,view:plan.kind==='resource.patch'?'health':plan.kind.startsWith('key.')?'tasks':plan.kind.startsWith('duty.')?'duty':plan.kind.startsWith('issue.')?'issues':plan.kind.startsWith('closure.')?'closures':plan.kind==='checkin.manual'?'checkin':'notifications',sourceRevision:plan.sourceRevision,summary:autoNote||(plan.kind==='checkin.manual'?'管理员代录方案已准备：记录标记 agent-manual 并全程审计，业务未提交，请核对后本人点击确认。':plan.kind.startsWith('key.')?'钥匙借还方案已准备：台账尚未变化，请核对借用人/归还状态后本人点击确认。':'原系统待确认方案已准备；业务尚未提交，请核对后本人点击确认。')},ctx);
   }catch(e){return fail(e);}
 }
 export async function queryIncident(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{

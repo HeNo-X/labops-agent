@@ -1,4 +1,5 @@
-import {classifyLabRequest,scopeAnswer} from './domain.ts';
+import {scopeAnswer} from './domain.ts';
+import {routeTurn,type RouteResult} from './route-turn.ts';
 import {renderBusinessFacts} from '../business/fact-text.ts';
 import { planNativeDialogue, verifiedRecommendation } from '../tools/business.ts';
 import type { BusinessResult } from '../../shared/business.ts';
@@ -43,13 +44,12 @@ import { engineForMode, modelForMode, modelPlan, streamChatWithFallback } from '
 import type { ChatMessage, TokenUsage } from '../llm/agnes.ts';
 import { executeTool, toolSpecs, toolsForMode } from '../tools/registry.ts';
 import { availableRoomNames } from '../tools/query-schedule.ts';
-import { LAB_STATUS_RE } from './demo-engine.ts';
-import { applyHintsToSlots, applySessionCarry, buildTimeContext, parseIntent, refuseSignRequest } from './intent.ts';
+import { applyHintsToSlots, applySessionCarry, buildTimeContext, parseIntent } from './intent.ts';
 import { contextHintsEnabled } from '../config.ts';
 import type { Intent } from './intent.ts';
 import { getSession, rememberSession } from './session.ts';
 import { loadContext } from '../persistence/db.ts';
-import { planDemo, renderDemoAnswer, runDemoTool, FREE_ROOMS_RE, SMALLTALK_RE } from './demo-engine.ts';
+import { planDemo, renderDemoAnswer, runDemoTool } from './demo-engine.ts';
 import { RECOMMENDATION_FORMAT, PROMPT_VERSION, buildSystemPrompt, buildDynamicTurnContext, shouldReciteFailure, failureRecitationText, detectInjection, sanitizeInput, wrapUserQuery } from './prompts.ts';
 import { normalizeLabName } from '../data/store.ts';
 
@@ -79,13 +79,7 @@ export interface RunInput {
   onContext?: (ctx: { labName: string | null; date: string | null; task: string | null }) => void;
 }
 
-/** 本轮问题指向的任务类型（N08 继承用） */
-function planTaskOf(question: string): string | null {
-  if (FREE_ROOMS_RE.test(question)) return 'free_rooms';
-  if (LAB_STATUS_RE.test(question)) return 'lab_status';
-  if (/(课|排课|课表)/.test(question)) return 'schedule';
-  return null;
-}
+/** 本轮问题指向的任务类型已并入 routeTurn.taskHint（整合方案 §4 单一裁决点） */
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -136,12 +130,14 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
 
   const persistedContext=input.sessionId?.startsWith('conv-')?loadContext(input.sessionId):null;
   const remembered=input.sessionId?getSession(`${input.actor?.id||'anonymous'}:${businessScope(input.actor?.id).scopeKey}:${input.sessionId}`):null;
-  const decision=classifyLabRequest(question,Boolean(persistedContext?.labName||persistedContext?.task||remembered?.labName||remembered?.lastTask));
-  if(decision!=='query'){
+  // 单一裁决点（整合方案 §4）：五处"这一问怎么答"的判断收敛到 routeTurn，此处只算一次，下游各站点读字段。
+  const route=routeTurn({question,hasContext:Boolean(persistedContext?.labName||persistedContext?.task||remembered?.labName||remembered?.lastTask),engineDemo:engineForMode(input.mode==='chat'?'chat':'task')==='demo'});
+  if(route.kind==='scope'){
+    log.info('route_turn',{runId,kind:route.kind,reason:route.reason});
     if(input.signal?.aborted)return;
     const clock=serverNow();
     yield emit('run_started',{runId,...(input.sessionId?{sessionId:input.sessionId}:{}),question,engine:'scope',sourceType:'demo',serverNow:{...clock,timezone:'Asia/Shanghai'},resolvedTimeHint:{raw:null,date:null,source:'本轮仅提供范围引导'},term:{term:'未查询校历',termStart:null,weekNo:null,weekDeterminable:false,note:'未查询业务数据'},allowedTools:[]} satisfies RunStartedPayload);
-    const answer=scopeAnswer(decision);yield* streamText(answer,emit,input.signal);
+    const answer=scopeAnswer(route.domain);yield* streamText(answer,emit,input.signal);
     if(!input.signal?.aborted)yield emit('run_completed',{answer,steps:0,toolCalls:0,ms:watch.ms,sourceType:'demo',engine:'scope',strategy:'scope_guidance'} satisfies RunCompletedPayload);
     return;
   }
@@ -172,7 +168,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   //   · 找空闲房间/寒暄/能力外问题不继承房间号（范围语义不同或无必要）；
   //   · 非法日期绝不继承，也绝不静默回落（dateInvalid 分支直接显式报错）；
   //   · 只有真实存在的房间才允许写入会话记忆（E999 这类错误实体不能升级为上下文）。
-  const roomlessIntent = FREE_ROOMS_RE.test(question) || SMALLTALK_RE.test(question.trim());
+  const roomlessIntent = route.roomless;
   const sessionKey=input.sessionId?`${input.actor?.id||'anonymous'}:${businessScope(input.actor?.id).scopeKey}:${input.sessionId}`:undefined;
   let sess = getSession(sessionKey);
   // N07：进程重启后内存表为空 → 从会话库的 ContextSnapshot 回退加载
@@ -200,7 +196,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   const commitContext = () => {
     const knownRooms = new Set(availableRoomNames(ds).map((n) => normalizeLabName(n)));
     const task: string | null =
-      intent.dateInvalid || roomlessIntent ? (sess?.lastTask ?? null) : (planTaskOf(question) ?? sess?.lastTask ?? null);
+      intent.dateInvalid || roomlessIntent ? (sess?.lastTask ?? null) : (route.taskHint ?? sess?.lastTask ?? null);
     const finalCtx = {
       labName: intent.labName && knownRooms.has(normalizeLabName(intent.labName)) ? intent.labName : (sess?.labName ?? null),
       date: intent.dateInvalid ? (sess?.date ?? null) : (intent.date?.date ?? sess?.date ?? null),
@@ -275,11 +271,11 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
       intent.labName=String(transformation.args['labName']);intent.date={date:String(transformation.args['date']),raw:'本轮变更查询',source:'重新取得对应范围的课表'};commitContext();yield* streamText(answer,emit,input.signal);yield emit('run_completed',{answer,steps:1,toolCalls:1,ms:watch.ms,sourceType,engine:'facts',strategy:'verified_query_transform'} satisfies RunCompletedPayload);return;
     }
     commitContext();
-    // 签到红线：代签/补录类请求确定性婉拒（不进模型、不调工具，杜绝答非所问）
-    const signRefusal = refuseSignRequest(question);
-    if (signRefusal) {
-      yield* streamText(signRefusal, emit, input.signal);
-      yield emit('run_completed', { answer: signRefusal, steps: 0, toolCalls: 0, ms: watch.ms, sourceType, engine: 'facts', strategy: 'scope_guidance' } satisfies RunCompletedPayload);
+    // 签到红线：代签/补录类请求确定性婉拒（不进模型、不调工具，杜绝答非所问）——裁决在 routeTurn，此处只执行。
+    if (route.kind === 'sign_refusal' && route.signRefusal) {
+      log.info('route_turn', { runId, kind: route.kind, reason: route.reason });
+      yield* streamText(route.signRefusal, emit, input.signal);
+      yield emit('run_completed', { answer: route.signRefusal, steps: 0, toolCalls: 0, ms: watch.ms, sourceType, engine: 'facts', strategy: 'scope_guidance' } satisfies RunCompletedPayload);
       return;
     }
     if (engine === 'demo'||(convMode==='chat'&&isBusinessConnected()&&planNativeDialogue(question,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode}))) {
@@ -309,7 +305,8 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
           providerShift: shift,
           week,
           toolListText,
-          injectionSuspected
+          injectionSuspected,
+          route
         })) {
           yield ev;
         }
@@ -552,6 +549,7 @@ interface AgnesArgs extends Omit<DemoArgs, 'sourceType'> {
   week: { weekNo: number | null; determinable: boolean; note: string };
   toolListText: string;
   injectionSuspected: boolean;
+  route: RouteResult;
 }
 
 async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
@@ -789,17 +787,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
 
       if (exec.ok) {
         consecutiveToolFailures = 0;
-        const SINGLE_PASS_TOOLS = new Set([
-          'query_schedule', 'query_checkin_status', 'query_checkin_summary',
-          'query_vision_status', 'query_free_rooms', 'query_lab_status'
-        ]);
-        const multiIntent = /然后|再|顺便|以及|对比|分别|哪个更/.test(a.question);
-        if (
-          process.env['AGENT_SINGLE_PASS'] !== '0' &&
-          calls.length === 1 &&
-          SINGLE_PASS_TOOLS.has(name) &&
-          !multiIntent
-        ) {
+        // 单程往返白名单与多意图标记的裁决都在 routeTurn.singlePassEligible（整合方案 §4）。
+        if (a.route.singlePassEligible(name, calls.length)) {
           singlePassCandidate = true;
         }
         if(exec.resultKind==='business_plan')businessFacts.push(exec.result);
@@ -889,9 +878,9 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     answer = verifiedAnswers.join('\n\n')+(explanation?'\n\n'+explanation:'');
     // A10：模型链中途死亡时如实标注——答案是工具结果的确定性渲染，不是大模型润色稿
     if (modelUnavailable) answer += '\n\n（模型链中途不可用：以上为工具结果的确定性渲染，未经大模型润色。）';
-  } else if (!lastToolFailure && !SMALLTALK_RE.test(a.question.trim())) {
+  } else if (!lastToolFailure && !a.route.smalltalk) {
     answer='我还需要更明确的实验室查询条件。请说明房间、日期或要办理的事项，例如“E310 今天有哪些课？”。';
-  } else if (!SMALLTALK_RE.test(a.question.trim())) {
+  } else if (!a.route.smalltalk) {
     // 走到这里 ⇒ 本轮没有任何成功的工具调用（成功必进 verifiedAnswers）。
     // 旧实现用 lastToolSummary 兜底，它在该分支恒为 null ⇒ 永远只说「请明确日期、房间或所需操作」
     // 这类通用文案 —— 对「帮我发一条通知」这种**已经说清操作**的请求是无效建议，

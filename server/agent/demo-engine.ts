@@ -1,5 +1,6 @@
 import {renderBusinessFacts} from '../business/fact-text.ts';
-import type { KnowledgeResult, BusinessPlanResult } from '../../shared/types.ts';
+import type { KnowledgeResult, EvidenceObservationResult } from '../../shared/types.ts';
+import type { TermScheduleResult } from '../tools/query-term-schedule.ts';
 /**
  * 演示引擎 —— 不依赖大模型的确定性兜底（无 AGNES_API_KEY 时启用）
  * ============================================================================
@@ -15,7 +16,7 @@ import type { KnowledgeResult, BusinessPlanResult } from '../../shared/types.ts'
  *  阶段 2A：支持三个工具的路由（query_schedule / query_lab_status / query_free_rooms）。
  */
 
-import type { CheckinStatusResult, CheckinSummaryResult, FreeRoomsResult, LabStatusResult, OperationsReportResult, QueryScheduleArgs, ScheduleQueryResult, ToolResultKind, VisionFieldResult } from '../../shared/types.ts';
+import type { CheckinStatusResult, CheckinSummaryResult, FreeRoomsResult, LabStatusResult, OperationsReportResult, QueryScheduleArgs, ScheduleQueryResult, VisionFieldResult } from '../../shared/types.ts';
 import type { Proposal } from '../../shared/operations-contract.ts';
 import type { Dataset } from '../data/store.ts';
 import { weekdayOf } from '../time/term.ts';
@@ -517,56 +518,143 @@ export async function runDemoTool(tool: string, args: Record<string, unknown>, c
   return executeTool(tool, args, ctx);
 }
 
-/** 把结构化结果渲染成可读回答（不调用模型）。**结论式短文案**：明细指向结构化结果卡，不逐条重复 */
+type SuccessfulToolExecution = Extract<ToolExecution, { ok: true }>;
+type SuccessfulResultKind = SuccessfulToolExecution['resultKind'];
+type ResultPayload<K extends SuccessfulResultKind> = Extract<SuccessfulToolExecution, { resultKind: K }>['result'];
+type DemoRenderExtras = { dateWasDefaulted: boolean; periodFiltered: boolean; textOnly?: boolean; scopeLabel?: string; question?: string };
+type DemoRendererMap = {
+  [K in SuccessfulResultKind]: (payload: ResultPayload<K>, extras: DemoRenderExtras) => string;
+};
+
+/** 实际分派表：新增成功 kind 或改动其载荷类型时，必须同步提供对应渲染器。 */
+export const DEMO_RESULT_RENDERERS: DemoRendererMap = {
+  schedule: renderScheduleAnswer,
+  lab_status: renderLabStatusAnswer,
+  free_rooms: renderFreeRoomsAnswer,
+  operation_proposal: renderProposalAnswer,
+  operations_report: renderReportAnswer,
+  knowledge: renderKnowledgeAnswer,
+  business_plan: renderBusinessFacts,
+  evidence_observation: renderEvidenceObservationAnswer,
+  checkin_status: renderCheckinStatusAnswer,
+  checkin_summary: renderCheckinSummaryAnswer,
+  vision_field: renderVisionFieldAnswer,
+  task_plan: renderTaskPlanAnswer,
+  // 注册表此项仍为 Record<string, unknown>，具体契约取自工具定义。
+  term_schedule: (payload) => renderTermScheduleAnswer(payload as unknown as TermScheduleResult),
+  term_schedule_applied: renderTermScheduleAppliedAnswer,
+  records: renderRecordsAnswer
+};
+
+/** 把结构化结果渲染成可读回答（不调用模型）；未知类型只显示摘要，不猜测载荷结构。 */
 export function renderDemoAnswer(
-  result: ScheduleQueryResult | { kind: ToolResultKind; payload: unknown },
-  extras: { dateWasDefaulted: boolean; periodFiltered: boolean; textOnly?:boolean; scopeLabel?:string; question?:string }
+  result: ScheduleQueryResult | { kind: string; payload: unknown; summary?: string },
+  extras: DemoRenderExtras
 ): string {
-  if(extras.textOnly){
-    const kind='kind' in result?result.kind:'schedule';
-    const base=renderDemoAnswer(result,{...extras,textOnly:false}).replace(/；?逐节明细见下方课表卡。?/g,'').replace(/明细见下方结果卡。?/g,'');
-    if(kind==='business_plan')return base;
-    const lines=[base];
-    // A8：聊天模式无结果卡 → 正文承担明细（列表化）；来源/版本/覆盖不上正文（噪音），
-    // 界面徽章与工具历史仍如实记录
-    if(kind==='schedule')for(const r of (( 'kind' in result?result.payload:result) as ScheduleQueryResult).lessons)lines.push(`- ${r.startTime}—${r.endTime} ${r.periodLabel}｜${r.courseName}｜${r.labName}｜班级 ${(r.classNames?.length?r.classNames:[r.className]).join('、')||'未知'}｜教师 ${r.teacher||'未录入'}｜编号 ${r.timetableId}`);
-    return lines.join('\n');
+  const kind = 'kind' in result ? result.kind : 'schedule';
+  const payload = 'kind' in result ? result.payload : result;
+  // 不用 in：constructor / toString / __proto__ 等原型属性不是渲染器。
+  if (!Object.hasOwn(DEMO_RESULT_RENDERERS, kind)) {
+    const summary = 'summary' in result && typeof result.summary === 'string' ? result.summary.trim() : '';
+    return ['暂无专用呈现。', summary].filter(Boolean).join('\n');
   }
-  if ('kind' in result) {
-    // RAG 批次3：知识结果改为**引用脚注**格式——[n] 编号按最终顺序（重排后）分配，
-    // 每个可引用段落一条：[n] 加粗标题+版本+§定位，正文跟在冒号后（A9 列表渲染）。
-    if (result.kind === 'knowledge') {
-      const r=result.payload as KnowledgeResult;
-      const lines=[r.summary, r.scope];
-      let n=0;
-      for (const h of r.hits) for (const p of h.paragraphs) {
-        n+=1;
-        lines.push(`- **[${n}] ${h.title}（v${h.version}）· ${p.locator}**：${p.text}`);
-      }
-      if (!n) lines.push('（本次检索没有可引用的段落——知识库未命中，不作答制度细节。）');
-      return lines.join('\n');
+  // 外部兼容入口允许 unknown；只在已确认 kind 存在的边界做一次类型擦除。
+  const renderer = DEMO_RESULT_RENDERERS[kind as SuccessfulResultKind] as (payload: unknown, extras: DemoRenderExtras) => string;
+  const base = renderer(payload, extras);
+  if (!extras.textOnly) return base;
+  const lines = [base.replace(/；?逐节明细见下方课表卡。?/g, '').replace(/明细见下方结果卡。?/g, '')];
+  // A8：聊天模式无结果卡 → 正文承担逐节明细；其他 kind 由其专用渲染器呈现。
+  if (kind === 'schedule') {
+    for (const r of (payload as ScheduleQueryResult).lessons) {
+      lines.push(`- ${r.startTime}—${r.endTime} ${r.periodLabel}｜${r.courseName}｜${r.labName}｜班级 ${(r.classNames?.length ? r.classNames : [r.className]).join('、') || '未知'}｜教师 ${r.teacher || '未录入'}｜编号 ${r.timetableId}`);
     }
-    if (result.kind === 'business_plan') return renderBusinessFacts(result.payload as BusinessPlanResult);
-    if (result.kind === 'lab_status') return renderLabStatusAnswer(result.payload as LabStatusResult, extras);
-    if (result.kind === 'checkin_status') return renderCheckinStatusAnswer(result.payload as CheckinStatusResult);
-    if (result.kind === 'checkin_summary') return renderCheckinSummaryAnswer(result.payload as CheckinSummaryResult);
-    if (result.kind === 'vision_field') return renderVisionFieldAnswer(result.payload as VisionFieldResult);
-    if (result.kind === 'free_rooms') return renderFreeRoomsAnswer(result.payload as FreeRoomsResult);
-    if (result.kind === 'operation_proposal') return renderProposalAnswer(result.payload as Proposal);
-    if (result.kind === 'operations_report') return renderReportAnswer(result.payload as OperationsReportResult);
-    if (result.kind === 'term_schedule') return renderTermScheduleAnswer(result.payload as never);
-    if (result.kind === 'term_schedule_applied') return renderTermScheduleAppliedAnswer(result.payload as never);
-    return renderScheduleAnswer(result.payload as ScheduleQueryResult, extras);
   }
-  return renderScheduleAnswer(result, extras);
+  return lines.join('\n');
+}
+
+function renderKnowledgeAnswer(r: KnowledgeResult): string {
+  // 引用脚注 [n] 按最终顺序分配，每个可引用段落一条。
+  const lines = [r.summary, r.scope];
+  let n = 0;
+  for (const h of r.hits) for (const p of h.paragraphs) {
+    n += 1;
+    lines.push(`- **[${n}] ${h.title}（v${h.version}）· ${p.locator}**：${p.text}`);
+  }
+  if (!n) lines.push('（本次检索没有可引用的段落——知识库未命中，不作答制度细节。）');
+  return lines.join('\n');
+}
+
+function renderEvidenceObservationAnswer(r: EvidenceObservationResult): string {
+  const o = r.observation;
+  const severity: Record<typeof o.severityGuess, string> = { unknown: '无法初判', minor: '轻微', moderate: '中等', severe: '严重' };
+  const lines = [
+    '**证据照片 · AI 视觉初判（非人工验收）**',
+    `- 设备类型：${o.deviceType || '无法确认'}`,
+    `- 严重度初判：${severity[o.severityGuess]}；置信度 ${Math.round(o.confidence * 100)}%`,
+    `- 铭牌可见文字：${o.nameplateText || '无法确认'}`,
+    `- 可见征象：${o.visibleSymptoms.join('；') || '画面中没有可确认的异常征象'}`,
+    `- 画面无法确认：${o.whatNotVisible.join('；') || '模型未列出盲区，请人工复核'}`
+  ];
+  if (r.attachments.length) lines.push(`- 分析附件：${r.attachments.map((a) => a.fileName).join('、')}`);
+  if (r.skipped?.length) lines.push(`- 未分析的附件：${r.skipped.join('；')}`);
+  if (r.scope) lines.push(r.scope);
+  lines.push('（仅为照片观察，不替代现场检查，不能证明设备已修复或通过验收。）');
+  return lines.join('\n');
+}
+
+function renderTaskPlanAnswer(r: ResultPayload<'task_plan'>): string {
+  const status: Record<ResultPayload<'task_plan'>['steps'][number]['status'], string> = { pending: '待办', done: '已完成', dropped: '已放弃' };
+  const lines = [`**任务计划：${r.steps.length} 步**（工作记录，不代表业务已执行）。`];
+  for (const step of r.steps) lines.push(`- ${step.id}｜${status[step.status]}｜${step.text}`);
+  if (!r.steps.length) lines.push('暂无计划步骤。');
+  if (r.updatedAt) lines.push(`更新时间：${r.updatedAt}`);
+  return lines.join('\n');
+}
+
+/** records 来自主系统三类明细接口；仅展示已知字段，身份掩码原样保留，不推断考勤。 */
+function renderRecordsAnswer(r: ResultPayload<'records'>): string {
+  const isKey = Array.isArray(r['keys']);
+  const rows = isKey ? r['keys'] : r['records'];
+  if (!Array.isArray(rows)) return '暂无可呈现的明细数据，不能据此判断没有记录。';
+  const scalar = (v: unknown): string => typeof v === 'string' || typeof v === 'number' ? String(v) : '';
+  const fields: Array<[string, string[]]> = isKey
+    ? [['编号', ['id']], ['钥匙', ['name']], ['实验室', ['labName', 'labId']], ['类型', ['labType']], ['位置', ['location']], ['借用人', ['holder']], ['备注', ['remark']]]
+    : [['姓名', ['name']], ['账号', ['user', 'username', 'actorId']], ['时间', ['at', 'time', 'ts']], ['实验室', ['labName', 'labId']], ['节次', ['periodKey']], ['替班对象', ['substituteFor']]];
+  const date = scalar(r['date']);
+  const total = typeof r['total'] === 'number' && Number.isFinite(r['total']) ? r['total'] : rows.length;
+  const lines = [`**${date ? date + ' ' : ''}${isKey ? '钥匙台账' : '签到签退明细'}：共 ${total} 条**${total !== rows.length ? `（本次返回 ${rows.length} 条）` : ''}。`];
+  for (const row of rows.slice(0, 30)) {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      lines.push('- 记录字段不可用，无法呈现。');
+      continue;
+    }
+    const values: string[] = [];
+    for (const [label, keys] of fields) {
+      const value = keys.map((key) => scalar(row[key])).find(Boolean);
+      if (value) values.push(`${label}：${value}`);
+    }
+    if (isKey) {
+      values.push(`借用状态：${row.borrowed === true ? '已借出' : row.borrowed === false ? '未借出' : '未知'}`);
+    } else {
+      const type = scalar(row.type);
+      if (type) values.push(`类型：${type === 'checkin' ? '签到' : type === 'checkout' ? '签退' : type}`);
+      const dutySource = scalar(row.dutySource);
+      if (dutySource) values.push(`值班来源：${dutySource === 'roster' ? '周值班模板' : dutySource === 'substitute' ? '替班' : dutySource}`);
+      if (typeof row.dutyMatched === 'boolean') values.push(`模板匹配：${row.dutyMatched ? '是' : '否'}`);
+      if (scalar(row.rosterSlot)) values.push(`模板席位：${scalar(row.rosterSlot)}`);
+    }
+    lines.push(`- ${values.join('｜') || '暂无可呈现的明细字段'}`);
+  }
+  if (!rows.length) lines.push('本次查询未返回记录，不据此推断现场状态。');
+  if (rows.length > 30) lines.push('正文仅显示前 30 条，请缩小查询范围查看其余记录。');
+  const meta = r['meta'];
+  if (meta && typeof meta === 'object' && 'note' in meta && typeof meta.note === 'string') lines.push(meta.note);
+  lines.push('（身份字段按服务端返回原样展示，不还原掩码；仅陈述记录事实，不作考勤定性。）');
+  return lines.join('\n');
 }
 
 /** 学期安排/值班模板（只读档案）：只读档案与课表解算无关——如实呈现导入状态与规模，空数组不得说成"无课/无人" */
-function renderTermScheduleAnswer(r: {
-  termSchedule: { enabled: boolean; notImported: boolean; term: string; weeks: number | null; sessions: unknown[]; cancelled: unknown[]; notes: string[] };
-  volunteerSchedule: { enabled: boolean; notImported: boolean; days: unknown[]; persons: Array<{ name: string; className: string; group: string }>; dutyRoom: unknown };
-  hint?: string;
-}): string {
+function renderTermScheduleAnswer(r: TermScheduleResult): string {
   const lines: string[] = [];
   const t = r.termSchedule, v = r.volunteerSchedule;
   lines.push(`**学期安排**：${t.enabled ? `已导入 · ${t.term || '（学期名未填）'}${t.weeks ? ` · ${t.weeks} 周` : ''} · ${t.sessions.length} 条课时` : '尚未导入'}`);
@@ -580,7 +668,7 @@ function renderTermScheduleAnswer(r: {
 }
 
 /** 学期安排/值班模板写回结果：如实呈现 revision 与规模，未自动发布的语义必须带上 */
-function renderTermScheduleAppliedAnswer(r: { target: string; revision: number; count: number; updatedBy: string; droppedKeys: string[] }): string {
+function renderTermScheduleAppliedAnswer(r: ResultPayload<'term_schedule_applied'>): string {
   const label = r.target === 'term' ? '学期安排' : '志愿者周值班模板';
   const lines: string[] = [];
   lines.push(`**${label}已更新**：revision=${r.revision}，当前 ${r.count} 条，操作者 ${r.updatedBy || '当前账号'}。`);

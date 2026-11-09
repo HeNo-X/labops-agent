@@ -47,7 +47,8 @@ export function transformSchedule(question:string,owner:string,session:string,no
   const index=ord?({'一':1,'二':2,'三':3,'1':1,'2':2,'3':3}[ord]||1)-1:null;
   const selected=id?facts.find(f=>f.factId===id):index!==null?[...facts].reverse()[index]:/前一次/.test(question)?facts[1]:facts[0];
   if(!selected||selected.fact.resultKind!=='schedule')return {kind:'error',message:'没有该身份与授权范围下的历史课表依据，请指定房间、日期重新查询。'};
-  const r=selected.fact.result,explicit:Intent=parseIntent(question,now);
+  // 事实编号是不透明标识符：UUID 的 hex 片段可能被误识别为房间号/日期而触发错误重查，解析意图前先剔除。
+  const r=selected.fact.result,explicit:Intent=parseIntent(question.replace(/fact-[a-f0-9-]+/g,''),now);
   if(explicit.dateInvalid)return {kind:'error',message:explicit.dateInvalid.reason};
   const changed=explicit.labName&&explicit.labName!==r.labName||explicit.date&&explicit.date.date!==r.date;
   const wanted=explicit.periodKey?[explicit.periodKey]:explicit.periodKeys;

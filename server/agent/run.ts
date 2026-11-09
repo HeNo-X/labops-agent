@@ -677,7 +677,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
         a.log.warn('recommendation_validation_failed', { steps, retried: recommendationRetried });
         if (!recommendationRetried && steps < cfg.agent.maxSteps) {
           recommendationRetried = true;
-          messages.push({ role: 'assistant', content: roundText || null });
+          // 空文本时不插 content:null 的 assistant 占位：无 tool_calls 的空 assistant 消息会被部分 OpenAI 兼容端 400 拒绝。
+          if (roundText) messages.push({ role: 'assistant', content: roundText });
           messages.push({ role: 'system', content: '推荐输出未通过 JSON 结构或业务事实校验。仅修正输出一次，不再调用工具。返回 1—3 个已查询且 eligible 的候选；每项仅含 candidateId、reasonCodes、evidenceRefs，引用与候选必须来自本轮结果。不得补造数字或输出 Markdown。' });
           continue;
         }

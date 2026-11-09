@@ -25,7 +25,9 @@ test('不完整工具调用不能交付给执行器',async()=>{
   await assert.rejects(()=>collect(chunk({tool_calls:[{index:0,id:'x',function:{name:'prepare_issue_ticket',arguments:'{}'}}]},'stop')+'data: [DONE]\n\n'));
 });
 test('模型编造的课程不会进入答案；各轮token累加；多轮表格不再请求模型',async()=>{
-  const original=globalThis.fetch;let calls=0;
+  // 本测试验的是**多次模型往返**下 usage 累加；be22aa8 的单程快捷会合法跳过第二轮，
+  // 故在此显式关短（AGENT_SINGLE_PASS=0）钉住旧前提，不改断言强度。
+  const original=globalThis.fetch,originalSinglePass=process.env.AGENT_SINGLE_PASS;process.env.AGENT_SINGLE_PASS='0';let calls=0;
   globalThis.fetch=async()=>{
     calls++;
     const body=calls===1?chunk({tool_calls:[{index:0,id:'s',function:{name:'query_schedule',arguments:JSON.stringify({date:'2026-09-28',labName:'E310'})}}]},'tool_calls',{prompt_tokens:10,completion_tokens:2,total_tokens:12}):chunk({content:'有数据库原理和数据结构与算法'},'stop',{prompt_tokens:20,completion_tokens:3,total_tokens:23});
@@ -40,8 +42,12 @@ test('模型编造的课程不会进入答案；各轮token累加；多轮表格
     const answer=(follow.find(e=>e.type==='run_completed')!.payload as {answer:string}).answer;
     assert.equal(calls,2);assert.equal(answer.split('\n').filter(l=>l.startsWith('|')).length,10);
     const other=await gather(runAgent({question:'把刚才的查询结果改成两列表格',sessionId:'fact-session',actor:{...actor,id:'other'}}));
-    const isolated=other.find(e=>e.type==='run_completed')!.payload as {answer:string;toolCalls:number};assert.equal(isolated.toolCalls,0);assert.ok(!isolated.answer.includes('示例程序设计'));assert.ok(!isolated.answer.includes('|'));assert.equal(calls,2);assert.ok(other.every(e=>e.type!=='tool_result'));
-  }finally{globalThis.fetch=original;}
+    // 默认放行后由事实权限层拒绝跨身份转换，不再被领域门控提前改成范围引导。
+    const isolated=other.find(e=>e.type==='run_failed')!.payload as {code:string;message:string};
+    assert.equal(isolated.code,'evidence_missing');assert.match(isolated.message,/没有该身份与授权范围下的历史课表依据/);
+    assert.ok(!isolated.message.includes('示例程序设计'));assert.ok(!isolated.message.includes('|'));assert.equal(calls,2);
+    assert.ok(other.every(e=>!['tool_started','tool_result','answer_delta','run_completed'].includes(e.type)));
+  }finally{globalThis.fetch=original;if(originalSinglePass===undefined)delete process.env.AGENT_SINGLE_PASS;else process.env.AGENT_SINGLE_PASS=originalSinglePass;}
 });
 test('贯穿模型请求的deadline在超时时中止，不发送完成事件',async()=>{
   const original=globalThis.fetch;

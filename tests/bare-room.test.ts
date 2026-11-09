@@ -49,14 +49,18 @@ test('A7-01 裸房间号+状态问法 → query（用户实测案例）', () => 
 });
 
 test('A7-02 4 位年份/日期不误判（(?!\\d) 看 assertions）', () => {
-  assert.equal(classifyLabRequest('2026有人吗'), 'redirect', '4 位纯数字是年份，不是房间');
-  assert.equal(classifyLabRequest('10月31日有人吗'), 'redirect', '日期里没有 3 位连续数字');
+  // 默认交给模型理解；放行不等于把年份或日期识别成房间。
+  for (const q of ['2026有人吗', '10月31日有人吗']) {
+    assert.equal(classifyLabRequest(q), 'query');
+    assert.equal(parseIntent(q, NOW).labName, null);
+  }
   assert.equal(classifyLabRequest('明天天气怎么样'), 'redirect', '既有越界用例不回退');
 });
 
 test('A7-03 带上下文的口语追问（"里面有人吗"）→ query', () => {
   assert.equal(classifyLabRequest('里面有人吗', true), 'query');
-  assert.equal(classifyLabRequest('里面有人吗', false), 'redirect', '无上下文时依旧如实引导');
+  // 无上下文也放行，由模型澄清对象，不由门控拒绝。
+  assert.equal(classifyLabRequest('里面有人吗', false), 'query');
 });
 
 // ---------- ② 意图抽取 ----------

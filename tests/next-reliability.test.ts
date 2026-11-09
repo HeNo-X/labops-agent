@@ -4,7 +4,7 @@ import {registerHooks} from 'node:module';
 registerHooks({resolve(specifier,context,next){if(specifier.startsWith('@shared/'))return next(new URL('../shared/'+specifier.slice(8)+'.ts',import.meta.url).href,context);if(specifier.startsWith('.')&&!/\.[a-z]+$/i.test(specifier)&&context.parentURL?.includes('/web/'))return next(new URL(specifier+'.ts',context.parentURL).href,context);return next(specifier,context);}});
 import {test,after} from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import http from 'node:http';
+import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import http from 'node:http';import nodeCrypto from 'node:crypto';
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'labops-next-'));process.env.LABOPS_DB_PATH=path.join(temp,'agent.sqlite');process.env.AGNES_API_KEY='';
 const {runAgent}=await import('../server/agent/run.ts');
 const {loadDataset,buildFromSnapshotLike}=await import('../server/data/store.ts');
@@ -64,6 +64,21 @@ test('事实最新查询不得复用旧数据，事实集按身份和授权代�
  assert.equal(transformSchedule('把刚才课表改成两列','other-owner','next-scope',now).kind,'error');
  getDb().prepare("INSERT INTO business_generations VALUES (?,1,'disconnected') ON CONFLICT(ownerId) DO UPDATE SET generation=generation+1").run(actor.id);
  assert.equal(transformSchedule('把刚才课表改成两列',actor.id,'next-scope',now).kind,'error');
+});
+test('事实编号里的hex片段不得被误识别为房间号而触发重查（固定UUID回归）',()=>{
+ // UUID 含 a305/da4137 这类形似房间号的片段；修复前 parseIntent 会提取出假房间导致 kind:'query'。
+ const original=nodeCrypto.randomUUID;
+ nodeCrypto.randomUUID=()=>'75e53515-29da-4137-a305-bfa6c1749487';
+ try{
+  const historical=runQuerySchedule({date:'2026-09-28',labName:'E310'},ds,now);
+  saveFacts(actor.id,'next-factid',{ok:true,resultKind:'schedule',result:historical,summary:'x'});
+  const id=listFacts(actor.id,'next-factid')[0]!.factId;
+  assert.equal(id,'fact-75e53515-29da-4137-a305-bfa6c1749487');
+  const t=transformSchedule(`把 ${id} 改成两列表格`,actor.id,'next-factid',now);
+  assert.equal(t.kind,'answer');assert.ok(t.kind==='answer'&&t.answer.startsWith('E310'));
+  // 负向对照：显式改房间仍须重查，剔除编号不能吞掉真实变更。
+  assert.equal(transformSchedule(`把 ${id} 改成两列表格，改查E312`,actor.id,'next-factid',now).kind,'query');
+ }finally{nodeCrypto.randomUUID=original;}
 });
 test('R04 原系统停用覆盖全天/部分节次/跨日/撤销/稳定ID，不混入沙盒',()=>{
  const data=buildFromSnapshotLike({term:{term:'test',termStart:'2026-09-07',termEnd:'2027-01-31'},labs:[{id:'stable-b',name:'E312',status:'active',capacity:60}],openLabs:[],timetable:[{id:'x',weekday:1,term:'test',labName:'Other',periodKey:'pm1',weeks:{from:1,to:20}}],roomClosures:[{id:'c',roomId:'stable-b',startDate:'2026-09-28',endDate:'2026-09-30',periodKeys:['am1'],status:'active'}],revision:'v1'},'live','');

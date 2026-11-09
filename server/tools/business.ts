@@ -212,13 +212,23 @@ export function planNativeDialogue(q:string,ctx:ToolContext):{tool:string;args:R
 }
 /** Validate model recommendations against authoritative candidates; no free-form ungrounded claims. */
 export function verifiedRecommendation(text:string,facts:BusinessResult[]):string|null{
-  let parsed:{recommendations?:Array<{candidateId:string;reasonCodes:string[];evidenceRefs:string[];capacity?:number;headcount?:number}>};try{parsed=JSON.parse(text);}catch{return null;}
-  if(!parsed.recommendations?.length||parsed.recommendations.length>3)return null;
+  let parsed:unknown;try{parsed=JSON.parse(text);}catch{return null;}
+  const isObject=(value:unknown):value is Record<string,unknown>=>value!==null&&typeof value==='object'&&!Array.isArray(value);
+  if(!isObject(parsed)||Object.keys(parsed).some(key=>key!=='recommendations')||!Array.isArray(parsed['recommendations'])||!parsed['recommendations'].length||parsed['recommendations'].length>3)return null;
   const reasons={capacity:'人数与容量满足约束',equipment:'课程设备需求满足约束',conflict_free:'房间、教师和班级在目标节次无冲突',service:'房间开放且该节次未停用'};
+  const fields=new Set(['candidateId','reasonCodes','evidenceRefs','capacity','headcount']),seen=new Set<string>();
   const lines:string[]=[];
-  for(const r of parsed.recommendations){const fact=facts.find(f=>f.candidates.some(c=>c.roomId+':'+c.periodKey===r.candidateId));const c=fact?.candidates.find(c=>c.roomId+':'+c.periodKey===r.candidateId);
-    if(!fact||!c?.eligible||!Array.isArray(r.evidenceRefs)||!r.evidenceRefs.length||r.evidenceRefs.some(ref=>ref!=='snapshot:'+fact.sourceRevision)||!Array.isArray(r.reasonCodes)||r.reasonCodes.some(code=>!(code in reasons))||r.capacity!==undefined&&r.capacity!==c.capacity||r.headcount!==undefined&&r.headcount!==c.headcount)return null;
-    lines.push(`${c.roomName} ${c.periodKey}：${r.reasonCodes.map(code=>reasons[code as keyof typeof reasons]).join('；')}（${c.headcount} 人 / 容量 ${c.capacity}；依据 snapshot:${fact.sourceRevision}）。`);
+  for(const r of parsed['recommendations']){
+    if(!isObject(r)||Object.keys(r).some(key=>!fields.has(key))||typeof r['candidateId']!=='string'||seen.has(r['candidateId']))return null;
+    const reasonCodes=r['reasonCodes'],evidenceRefs=r['evidenceRefs'];
+    if(!Array.isArray(reasonCodes)||reasonCodes.some(code=>typeof code!=='string'||!Object.hasOwn(reasons,code))||!Array.isArray(evidenceRefs)||!evidenceRefs.length||evidenceRefs.some(ref=>typeof ref!=='string'||!ref.trim()))return null;
+    for(const key of ['capacity','headcount'])if(Object.hasOwn(r,key)&&(typeof r[key]!=='number'||!Number.isFinite(r[key])))return null;
+    const matches=(c:NativeCandidate)=>c!=null&&typeof c.roomId==='string'&&typeof c.periodKey==='string'&&c.roomId+':'+c.periodKey===r['candidateId'];
+    const fact=Array.isArray(facts)?facts.find(f=>f&&Array.isArray(f.candidates)&&f.candidates.some(matches)):undefined;
+    const c=fact?.candidates.find(matches);
+    if(!fact||!c||c.eligible!==true||evidenceRefs.some(ref=>ref!=='snapshot:'+fact.sourceRevision)||r['capacity']!==undefined&&r['capacity']!==c.capacity||r['headcount']!==undefined&&r['headcount']!==c.headcount)return null;
+    seen.add(r['candidateId']);
+    lines.push(`${c.roomName} ${c.periodKey}：${reasonCodes.map(code=>reasons[code as keyof typeof reasons]).join('；')}（${c.headcount} 人 / 容量 ${c.capacity}；依据 snapshot:${fact.sourceRevision}）。`);
   }
   return '经业务事实校验的推荐：\n'+lines.join('\n');
 }

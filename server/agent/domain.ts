@@ -16,13 +16,13 @@ const ROOM_STATUS_Q=/有人|人多|空吗|空着|在吗|开放|开着|状态|什
 export function classifyLabRequest(question:string,hasContext=false):DomainDecision{
  const q=question.trim();
  if(GREETING.test(q)||CAPABILITY.test(q))return 'capabilities';
- if(EXTERNAL.test(q))return 'redirect';
+ if(EXTERNAL.test(q)&&!(hasContext&&FOLLOWUP.test(q)))return 'redirect';
  if(BUSINESS.test(q)||/\b[A-Za-z]{1,3}[- ]?\d{2,5}\b/.test(q)||(BARE_ROOM.test(q)&&ROOM_STATUS_Q.test(q)))return 'query';
  if(hasContext&&FOLLOWUP.test(q))return 'query';
  if(/^(?:帮我|请帮我|查一下|查查|查询|看看|继续|怎么办|帮助我|help me)[？?！!。.\s]*$/i.test(q))return 'clarify';
- return 'redirect';
+ return 'query';
 }
 export function scopeAnswer(decision:Exclude<DomainDecision,'query'>):string{
- const intro=decision==='redirect'?'这类问题超出了实验室助手的服务范围，暂时无法为你解答。':decision==='clarify'?'可以，请告诉我实验室名称、日期或你要办理的事项。':'你好，我是启真实验室工作助手。';
+ const intro=decision==='redirect'?'这类问题看起来超出了实验室助手的服务范围。如果你是想问实验室相关的事情，换个说法告诉我（房间、设备、事务）即可。':decision==='clarify'?'可以，请告诉我实验室名称、日期或你要办理的事项。':'你好，我是启真实验室工作助手。';
  return intro+'\n\n我可以查询课表、房间状态、空闲节次和钥匙登记，检索实验室操作说明，也能协助报修、巡检交接、通知和定时提醒。\n例如：“E310 今天有哪些课？”或“E310 投影没有信号，帮我报修”。';
 }

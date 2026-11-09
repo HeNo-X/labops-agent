@@ -171,6 +171,27 @@ function sessionIdOf(actorId: string, raw: string): string {
   return `${actorId}:${raw}`.slice(0, 128);
 }
 
+/**
+ * 调度器传的是主系统 username，而网页登录态的 actor id 是 `native-<hash>`——
+ * 两种口径不相等，会话若按 username 落库，用户列表里就看不到（等于没执行）。
+ * 已在本实例登录过（business_connections 有档案）时按同一账号的登录态 id 归属；
+ * 查不到才回落 username（demo 身份或未登录过，仍保证记录可审计）。
+ */
+function resolveConversationOwner(owner: SandboxActor): string {
+  try {
+    const self = getDb().prepare('SELECT 1 FROM business_connections WHERE ownerId=?').get(owner.id);
+    if (self) return owner.id;
+    const rows = getDb().prepare("SELECT ownerId,profile FROM business_connections WHERE ownerId LIKE 'native-%' ORDER BY ownerId").all() as Array<{ ownerId: string; profile: string }>;
+    for (const r of rows) {
+      try {
+        const p = JSON.parse(r.profile) as { username?: string; identity?: string };
+        if (p.username === owner.id && p.identity === owner.role) return r.ownerId;
+      } catch { /* 档案损坏的行跳过，继续找下一条 */ }
+    }
+  } catch { /* 表还不存在（首次登录前）：按 username 归属 */ }
+  return owner.id;
+}
+
 interface ToolTrace { tool: string; ok: boolean; summary?: string }
 
 async function execute(body: ValidBody, runIdHint: string, conversationId: string): Promise<Record<string, unknown>> {
@@ -309,18 +330,19 @@ export async function handleServiceAgent(req: IncomingMessage, res: ServerRespon
   //    落库不可用就**不执行**——"跑了但结果没落在任何会话里"正是本次修的根因。
   const runIdHint = newTraceId('run');
   const convMode: 'chat' | 'task' = body.allowedTools.length ? 'task' : 'chat';
+  const conversationOwner = resolveConversationOwner(body.owner);
   let conversationId = '';
   let assistantMessageId = '';
   try {
     const existing = body.sessionRaw
       ? getDb().prepare('SELECT id,ownerId FROM conversations WHERE id=? AND deletedAt IS NULL').get(body.sessionRaw) as { id: string; ownerId: string } | undefined
       : undefined;
-    if (existing && existing.ownerId === body.owner.id) {
+    if (existing && existing.ownerId === conversationOwner) {
       conversationId = existing.id;
     } else {
       const day = new Date().toISOString().slice(0, 10);
       const label = (body.jobTitle || body.prompt).replace(/\s+/g, ' ').trim().slice(0, 30) || '定时任务';
-      conversationId = createConversation(`${label} · ${day}`, convMode, { ownerId: body.owner.id, source: 'automation', jobId: body.jobId || body.jobRunId }).id;
+      conversationId = createConversation(`${label} · ${day}`, convMode, { ownerId: conversationOwner, source: 'automation', jobId: body.jobId || body.jobRunId }).id;
     }
     const created = createMessageWithRun(conversationId, body.prompt, `svc:${body.jobRunId}`, runIdHint);
     if ('duplicate' in created) throw new Error('该次运行已有会话记录，拒绝重复执行');

@@ -235,6 +235,20 @@ test('执行失败也落会话：assistant 写明失败码与建议（区分“�
   assert.equal(meta.error?.code, 'bad_tools');
 });
 
+test('native 登录态下自动化按登录态账号 id 归属（username 代传不落列表外的口径）', async () => {
+  const d = getDb();
+  d.prepare('INSERT OR REPLACE INTO business_connections VALUES (?,?,?)').run('native-fakehash-for-verify', 'enc:v1:dummy', JSON.stringify({ username: 'admin', identity: 'admin', className: '', name: '系统管理员' }));
+  try {
+    const out = await runService({ ...VALID, jobRunId: 'run-native-0001', jobTitle: '归属口径验证' }, 'aa77bb88cc99ddee');
+    assert.equal(out.status, 200, out.body);
+    const j = JSON.parse(out.body) as { conversationId: string };
+    const conv = d.prepare('SELECT ownerId FROM conversations WHERE id=?').get(j.conversationId) as Record<string, unknown>;
+    assert.equal(conv['ownerId'], 'native-fakehash-for-verify', '会话必须挂到与登录态同一 native actor id，否则列表不可见');
+  } finally {
+    d.prepare('DELETE FROM business_connections WHERE ownerId=?').run('native-fakehash-for-verify');
+  }
+});
+
 test('列表可见性：automation 会话带 source 出现在本人列表（徽标数据面）', async () => {
   const { listConversations } = await import('../server/persistence/db.ts');
   const rows = listConversations().filter((c) => c.source === 'automation');

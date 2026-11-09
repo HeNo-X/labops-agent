@@ -3,9 +3,6 @@
  * ============================================================================
  *  定位（任务书 §2.3 三层交付）：本轮交付第 1–2 层 —— 快照 + Agent 自有存储的分析
  *  与草稿能力，以及**独立业务沙盒**的真实执行链路（创建 → 确认 → 执行 → 回执）。
- *  生产适配器（第 3 层）尚未接入：executionEnvironment 恒为 'sandbox'，
- *  界面与服务端都会如实标注，绝不把沙盒结果说成已办理真实业务。
- *
  *  与 GPT 任务书的有意偏离（按本项目现状调整，README 记录）：
  *   · 身份：老系统无登录体系可复用 → 沙盒演示身份（三角色），服务端注入，
  *     前端仅可在沙盒内切换演示视角；模型参数里的任何身份字段一律不采信。
@@ -135,7 +132,8 @@ export interface OperationReceipt {
   operationId: string;
   requestHash: string;
   businessStatus: 'committed';
-  executionEnvironment: 'sandbox';
+  /** 如实标注：sandbox=仅沙盒台账；production=已真实写入主系统（notification.publish 写回后改写） */
+  executionEnvironment: ExecutionEnvironment;
   objects: ObjectRef[];
   committedAt: string;
   /** 站内通知已创建即 delivered；读状态跟踪未接入（readReceiptsNote 说明） */
@@ -161,7 +159,8 @@ export interface DecisionRequest {
 }
 
 export type DecisionOutcome =
-  | { ok: true; decision: 'confirm'; receipt: OperationReceipt; task: TaskRecord }
+  /** executedNow=true 表示本次调用真正执行了（非幂等重放），API 层据此触发生产写回 */
+  | { ok: true; decision: 'confirm'; receipt: OperationReceipt; task: TaskRecord; executedNow?: boolean }
   | { ok: true; decision: 'reject'; task: TaskRecord }
   | {
       ok: false;

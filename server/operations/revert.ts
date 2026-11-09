@@ -195,6 +195,10 @@ function compensateSandbox(ref: ProposalRef, input: { conversationId: string; us
       continue;
     }
     try {
+      if (object.kind === 'notification' && receipt.executionEnvironment === 'production') {
+        report.notReverted.push({ operationId: receipt.operationId, objectKind: object.kind, objectId: object.id, reason: '该通知已写入主系统收件箱，LabOps 不撤回真实通知；请到主系统处理。沙盒台账保留以供审计' });
+        continue;
+      }
       const outcome =
         object.kind === 'issue'
           ? revertBizIssue(object.id)

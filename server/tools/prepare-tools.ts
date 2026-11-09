@@ -493,7 +493,7 @@ export async function runPrepareNotification(args: Record<string, unknown>, ctx:
       kind: 'notification',
       goal: `发布通知《${title}》`,
       actionType: 'notification.publish',
-      payload: { title, content, level: levelRaw, audienceSummary, recipientCount: null },
+      payload: { title, content, level: levelRaw, audience: a, audienceSummary, recipientCount: null },
       payloadKind: 'notification',
       payloadView: { title, content, level: levelRaw, audienceSummary, recipientCount: null, readTracking: 'not_connected' },
       title: `站内通知 · ${title}`,

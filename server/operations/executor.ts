@@ -233,7 +233,7 @@ function decideInTransaction(input: DecisionInput): DecisionOutcome {
     updateOpsTaskStatus(proposal.taskId, 'completed');
     const task = getOpsTask(proposal.taskId);
     if (!task) return { ok: false, code: 'proposal_not_found', message: '提案关联的任务不存在' };
-    return { ok: true, decision: 'confirm', receipt, task };
+    return { ok: true, decision: 'confirm', receipt, task, executedNow: true };
   } catch (err) {
     // 网关失败：提案保持待确认（可换新幂等键重试），任务标失败并如实上报
     const message = err instanceof GatewayError ? err.message : `沙盒执行失败：${err instanceof Error ? err.message : String(err)}`;

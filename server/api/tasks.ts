@@ -16,6 +16,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DecisionOutcome, DecisionRequest, OperationReceipt } from '../../shared/operations-contract.ts';
 import { decideOnProposal } from '../operations/executor.ts';
 import { capabilitiesOf, resolveActor } from '../operations/identity.ts';
+import { pushNotificationToMainSystem } from '../operations/production.ts';
+import { isBusinessConnected } from '../business/bridge.ts';
 import {
   expireStaleProposals,
   getLatestProposalForTask,
@@ -23,7 +25,8 @@ import {
   getOpsOperationByProposal,
   getOpsProposal,
   getOpsTask,
-  listOpsTasks
+  listOpsTasks,
+  updateOpsOperationReceipt
 } from '../persistence/db.ts';
 import { readJsonBody } from './agent-chat.ts';
 
@@ -52,7 +55,8 @@ export async function handleTasksApi(req: IncomingMessage, res: ServerResponse, 
       json(res, 200, {
         operationsContractVersion: 'ops.v1',
         executionEnvironment: 'sandbox',
-        productionConnected: false,
+        productionConnected: isBusinessConnected(),
+        productionWriteActions: ['notification.publish'],
         proposalTtlMinutes: 30,
         actor,
         capabilities: capabilitiesOf(actor)
@@ -96,6 +100,17 @@ export async function handleTasksApi(req: IncomingMessage, res: ServerResponse, 
       if (outcome.task.taskId !== taskId) {
         json(res, 400, { ok: false, code: 'bad_request', message: `提案 ${input.proposalId} 不属于任务 ${taskId}` });
         return true;
+      }
+      // 生产写回（整合方案 §8.5）：本地台账提交成功后，已接通的动作类型真实写入主系统，
+      // 回执按事实改写环境/送达/说明；幂等重放（executedNow 缺省）不再推送。
+      if (outcome.ok && outcome.decision === 'confirm' && outcome.executedNow && outcome.receipt) {
+        const stored = getOpsProposal(input.proposalId);
+        if (stored?.proposal.actionType === 'notification.publish') {
+          const push = await pushNotificationToMainSystem(stored.payload as Record<string, unknown>, outcome.receipt.operationId);
+          const nextReceipt: OperationReceipt = { ...outcome.receipt, executionEnvironment: push.environment, deliveryStatus: push.deliveryStatus, deliveryNote: push.note };
+          updateOpsOperationReceipt(outcome.receipt.operationId, nextReceipt);
+          outcome.receipt = nextReceipt;
+        }
       }
       json(res, 200, outcome);
       return true;

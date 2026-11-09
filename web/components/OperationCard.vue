@@ -256,7 +256,7 @@ function formatCommittedAt(iso: string): string {
         <!-- 回执 -->
         <div v-if="receipt" class="opcard__receipt" role="status">
           <h4 class="opcard__rh">{{tr("业务回执（以此为准，聊天文字不是凭据）")}}</h4>
-          <div class="opcard__row"><span>{{tr("状态")}}</span><b>{{tr("已生效 ·")}} {{tr(receipt.executionEnvironment === 'sandbox' ? '沙盒' : receipt.executionEnvironment)}}</b></div>
+          <div class="opcard__row"><span>{{tr("状态")}}</span><b>{{tr("已生效 ·")}} {{receipt.executionEnvironment === 'production' ? tr('主系统') : tr(receipt.executionEnvironment === 'sandbox' ? '沙盒' : receipt.executionEnvironment)}}</b></div>
           <div class="opcard__row"><span>{{tr("时间")}}</span><b>{{ formatCommittedAt(receipt.committedAt) }}</b></div>
           <div class="opcard__row"><span>{{tr("执行身份")}}</span><b>{{ receipt.actor.label }}（{{ receipt.actor.role }}）</b></div>
           <p v-if="receipt.deliveryNote" class="opcard__rnote">{{ receipt.deliveryNote }}</p>

@@ -1122,6 +1122,11 @@ export function getOpsOperationByClientRequest(clientRequestId: string): Operati
   return row ? (JSON.parse(String(row['receipt'])) as OperationReceipt) : null;
 }
 
+/** 生产写回完成后按事实改写回执（环境/送达/说明）；业务事实仍以库内回执为准 */
+export function updateOpsOperationReceipt(operationId: string, receipt: OperationReceipt): void {
+  getDb().prepare('UPDATE ops_operations SET receipt=? WHERE id=?').run(JSON.stringify(receipt), operationId);
+}
+
 export function getOpsOperationByProposal(proposalId: string): OperationReceipt | null {
   const row = getDb()
     .prepare(`SELECT receipt FROM ops_operations WHERE proposalId = ? ORDER BY createdAt DESC LIMIT 1`)

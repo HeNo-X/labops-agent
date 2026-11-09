@@ -71,10 +71,39 @@ export function providersForMode(mode: 'chat' | 'task'): LlmProviderSpec[] {
       : [];
     return [...primary, ...fallbackSpecs('chat')];
   }
-  const primary: LlmProviderSpec[] = c.agnes.apiKey
-    ? [{ name: TASK_ENGINE, apiKey: c.agnes.apiKey, baseUrl: c.agnes.baseUrl, model: c.agnes.model }]
-    : [];
-  return [...primary, ...fallbackSpecs('task')];
+  /**
+   * 2026-11-09 用户口径：工作模式改为 **spark → glm → agnes**（agnes 实测单次首字
+   * 35~47s，spark 约 4s、glm 约 1s，先让它顶上去）。
+   * 仍然**不串用聊天链模型**：这里只用 task 链的 spark 槽位 + bigmodel + agnes。
+   * 顺序可用 TASK_CHAIN_ORDER 覆盖（如 "agnes,spark,glm" 一键回到旧口径）。
+   */
+  const order = (process.env['TASK_CHAIN_ORDER'] ?? 'spark,glm,agnes')
+    .split(',')
+    .map((v) => v.trim().toLowerCase())
+    .filter(Boolean);
+  const byName: Record<string, LlmProviderSpec | null> = {
+    agnes: c.agnes.apiKey ? { name: TASK_ENGINE, apiKey: c.agnes.apiKey, baseUrl: c.agnes.baseUrl, model: c.agnes.model } : null,
+    glm: c.bigmodel.apiKey ? { name: 'bigmodel', apiKey: c.bigmodel.apiKey, baseUrl: c.bigmodel.baseUrl, model: c.bigmodel.model } : null,
+    spark: c.xfyun.apiKey ? { name: 'xfyun', apiKey: c.xfyun.apiKey, baseUrl: c.xfyun.baseUrl, model: c.xfyun.taskModel } : null
+  };
+  const chain: LlmProviderSpec[] = [];
+  const seenChain = new Set<string>();
+  for (const key of order) {
+    const spec = byName[key];
+    if (!spec) continue;
+    const id = `${spec.baseUrl}::${spec.model}`;
+    if (seenChain.has(id)) continue;   // 同端点同模型不重复打
+    seenChain.add(id);
+    chain.push(spec);
+  }
+  // 顺序表里没写到的提供方仍按旧备用链补齐（避免配置遗漏导致链变短）
+  for (const spec of fallbackSpecs('task')) {
+    const id = `${spec.baseUrl}::${spec.model}`;
+    if (seenChain.has(id)) continue;
+    seenChain.add(id);
+    chain.push(spec);
+  }
+  return chain;
 }
 
 /** 该模式是否已有可用的大模型（否则上层走规则引擎） */

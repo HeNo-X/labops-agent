@@ -423,7 +423,8 @@ test('能力协商：capabilities 描述沙盒环境与当前身份', async () =
   const caps = typeRegistry.toolNames();
   assert.ok(caps.includes('prepare_issue_ticket'));
   assert.ok(caps.includes('create_operations_report'));
-  assert.equal(caps.length,28,'12 个只读（含 analyze_evidence_image 视觉初判、query_checkin_status 本人签到状态、query_checkin_summary 签到汇总（仅管理员）、query_vision_status 现场事实）+ 10 个准备/草稿（9 个 prepare_* 含开门/关门 prepare_room_status + create_operations_report）+ 1 个任务计划（A5 maintain_task_plan，工作记录非业务工具）');
+  // 2026-11-10 批次3：新增 query_user_directory 账号目录（只读）→ 29；此前 28 的明细构成文字已过时，只补新项不重写。
+  assert.equal(caps.length,29,'12 个只读（含 analyze_evidence_image 视觉初判、query_checkin_status 本人签到状态、query_checkin_summary 签到汇总（仅管理员）、query_vision_status 现场事实、query_user_directory 账号目录）+ 10 个准备/草稿（9 个 prepare_* 含开门/关门 prepare_room_status + create_operations_report）+ 1 个任务计划（A5 maintain_task_plan，工作记录非业务工具）');
   assert.ok(caps.includes('analyze_evidence_image'),'视觉初判必须是只读能力，不得带草稿效果');
   const visionTool = typeRegistry.REGISTRY.find((t) => t.spec.name === 'analyze_evidence_image');
   assert.equal(visionTool?.effect, 'read', '看图不得产生提案或任何业务写入');

@@ -613,6 +613,7 @@ function renderTaskPlanAnswer(r: ResultPayload<'task_plan'>): string {
 
 /** records 来自主系统三类明细接口；仅展示已知字段，身份掩码原样保留，不推断考勤。 */
 function renderRecordsAnswer(r: ResultPayload<'records'>): string {
+  if (r['directory'] === true) return renderDirectoryAnswer(r);
   const isKey = Array.isArray(r['keys']);
   const rows = isKey ? r['keys'] : r['records'];
   if (!Array.isArray(rows)) return '暂无可呈现的明细数据，不能据此判断没有记录。';
@@ -650,6 +651,35 @@ function renderRecordsAnswer(r: ResultPayload<'records'>): string {
   const meta = r['meta'];
   if (meta && typeof meta === 'object' && 'note' in meta && typeof meta.note === 'string') lines.push(meta.note);
   lines.push('（身份字段按服务端返回原样展示，不还原掩码；仅陈述记录事实，不作考勤定性。）');
+  return lines.join('\n');
+}
+
+/** 账号目录与名册汇总（query_user_directory）：掩码账号原样展示，名册只给班级人数 */
+function renderDirectoryAnswer(r: ResultPayload<'records'>): string {
+  const accounts = Array.isArray(r['accounts']) ? (r['accounts'] as Array<Record<string, unknown>>) : [];
+  const roster = Array.isArray(r['roster']) ? (r['roster'] as Array<Record<string, unknown>>) : [];
+  const scalar = (v: unknown): string => typeof v === 'string' || typeof v === 'number' ? String(v) : '';
+  const total = typeof r['total'] === 'number' && Number.isFinite(r['total']) ? r['total'] : accounts.length;
+  const IDENTITY: Record<string, string> = { admin: '管理员', volunteer: '志愿者', student: '学生' };
+  const STATUS: Record<string, string> = { active: '正常', disabled: '禁用', pending: '待激活', password_change_required: '需修改密码' };
+  const lines = [`**账号目录：共 ${total} 个账号**（学号已由服务端掩码；电话与学院信息不在返回范围内）。`];
+  for (const a of accounts.slice(0, 30)) {
+    const id = IDENTITY[scalar(a['identity'])] || scalar(a['identity']) || '未知';
+    const st = STATUS[scalar(a['status'])] || scalar(a['status']) || '未知';
+    lines.push(`- 账号：${scalar(a['account']) || '（空）'}｜姓名：${scalar(a['name']) || '（未登记）'}｜身份：${id}｜状态：${st}`);
+  }
+  if (!accounts.length) lines.push('本次查询未返回账号，不据此推断系统无人。');
+  if (accounts.length > 30) lines.push('正文仅显示前 30 个账号，可按身份或状态过滤查看其余。');
+  if (roster.length) {
+    lines.push('', `**班级名册汇总：${roster.length} 个班级**`);
+    for (const c of roster.slice(0, 30)) lines.push(`- ${scalar(c['className'])}：${scalar(c['count'])} 人`);
+    if (roster.length > 30) lines.push('仅显示前 30 个班级。');
+  } else {
+    lines.push('', '班级名册汇总为空（主系统未登记名册），不据此推断没有学生。');
+  }
+  const meta = r['meta'];
+  if (meta && typeof meta === 'object' && 'note' in meta && typeof (meta as { note: unknown }).note === 'string') lines.push((meta as { note: string }).note);
+  lines.push('（账号掩码值原样展示，不还原；目录仅陈述事实，不作人员定性。）');
   return lines.join('\n');
 }
 

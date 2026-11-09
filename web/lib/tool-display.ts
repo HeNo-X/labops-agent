@@ -56,6 +56,7 @@ const FAMILY_BY_TOOL: Record<string, ToolFamily> = {
   query_checkin_records: 'query',
   query_openlab_records: 'query',
   query_key_records: 'query',
+  query_user_directory: 'query',
   // 知识检索
   query_knowledge: 'knowledge',
   // 草稿类（effect:'draft'，只生成待确认方案，绝不自行执行）

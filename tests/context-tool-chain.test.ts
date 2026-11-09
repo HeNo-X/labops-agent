@@ -87,7 +87,7 @@ test('XML封装只产生一个真实闭合标签，原始实体和伪造角色�
   assert.ok(!wrapped.includes('<system>'));
   assert.equal(wrapUserQuery('E310 今天有课吗'), '<user_query>\nE310 今天有课吗\n</user_query>');
   assert.match(buildSystemPrompt({ toolList: '', sourceTypeLabel: 'test' }), /<untrusted_content_policy>/);
-  assert.equal(PROMPT_VERSION, 'labops-1.0.6-stable-prefix-v4');
+  assert.equal(PROMPT_VERSION, 'labops-1.0.6-stable-prefix-v5');
 });
 
 test('模型适配器请求使用封装，词表外问题进入模型链路，未核验文本不进入答案', async () => {

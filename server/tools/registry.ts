@@ -10,6 +10,7 @@ import {
   queryOpenlabRecords,
   queryKeyRecords
 } from './query-checkin-records.ts';
+import { QUERY_USER_DIRECTORY_SPEC, queryUserDirectory } from './query-user-directory.ts';
 import { runAnalyzeEvidenceImage } from './analyze-evidence-image.ts';
 import { executeTaskPlan } from './task-plan.ts';
 import { prepareSchedule, queryDuty, queryBusiness, prepareWorkflow, queryIncident, prepareIncident,queryScheduled,prepareScheduled } from './business.ts';
@@ -607,6 +608,7 @@ export const REGISTRY: RegisteredTool[] = [
   { spec: QUERY_CHECKIN_RECORDS_SPEC as unknown as ToolSpec, execute: (a, ctx) => queryCheckinRecords(a, ctx.signal), effect: 'read' },
   { spec: QUERY_OPENLAB_RECORDS_SPEC as unknown as ToolSpec, execute: (a, ctx) => queryOpenlabRecords(a, ctx.signal), effect: 'read' },
   { spec: QUERY_KEY_RECORDS_SPEC as unknown as ToolSpec, execute: (a, ctx) => queryKeyRecords(a, ctx.signal), effect: 'read' },
+  { spec: QUERY_USER_DIRECTORY_SPEC as unknown as ToolSpec, execute: (a, ctx) => queryUserDirectory(a, ctx.signal), effect: 'read' },
   { spec: PREPARE_ISSUE_SPEC, execute: runPrepareIssueTicket, effect: 'draft' },
   { spec: PREPARE_CLOSURE_SPEC, execute: runPrepareRoomClosure, effect: 'draft' },
   { spec: PREPARE_ROOM_STATUS_SPEC, execute: runPrepareRoomStatus, effect: 'draft' },

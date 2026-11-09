@@ -83,5 +83,5 @@ test('A5-07 UI 装配：PlanPanel 存在、被 ChatMessage 引用、活跃轮与
   // 提示词纪律行已入 system prompt（稳定前缀的一部分），版本号随之递增
   const promptsSrc=readFileSync(fileURLToPath(new URL('../server/agent/prompts.ts',import.meta.url)),'utf8');
   assert.ok(promptsSrc.includes('maintain_task_plan'));
-  assert.ok(promptsSrc.includes('labops-1.0.6-stable-prefix-v4'));
+  assert.ok(promptsSrc.includes('labops-1.0.6-stable-prefix-v5'));
 });

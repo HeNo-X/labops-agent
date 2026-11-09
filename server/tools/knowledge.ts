@@ -94,10 +94,19 @@ export async function runKnowledge(args:Record<string,unknown>,ctx:ToolContext):
     }catch(e){return {ok:false,code:'evidence_unavailable',message:(e as Error).message,suggestions:[],summary:'未取得有效设备资料'};}
   }
   // 角色必须经 effectiveRole：它取服务端核验的真实身份，客户端声明的角色不得提权
-  // RAG 批次1：检索走三路混合（向量路按配置静默启用/降级）
-  // RAG 批次3：LLM 重排按配置启用（RERANK_LLM，缺省关；任何失败静默回原序）
-  const retrieved=await retrieveHybrid(args['query'],effectiveRole(ctx.actor?.role||'student'),ctx.now.date);
-  const hits=await rerankHits(args['query'],retrieved,(ctx.mode??'task')==='chat'?'chat':'task',undefined,{signal:ctx.signal});
-  const summary=hits.length?`检索到 ${hits.length} 份当前有效的系统操作说明。`:'知识库未命中有效依据，不能回答该制度或设备问题。';
+  // RAG 全量注入（整合方案 P1-6，2026-11-10）：语料仅 3049 字，检索排序的收益为负，
+  // 改为把当前角色可见的全部有效文档整体交给模型，由系统提示的引用纪律带 [N] 出处脚注。
+  // 三路检索与 LLM 重排代码保留，KNOWLEDGE_FULL_INJECT=0 一键回退旧口径。
+  const effective=effectiveRole(ctx.actor?.role||'student');
+  const fullInject=process.env.KNOWLEDGE_FULL_INJECT!=='0';
+  let hits:RankedHit[];
+  if(fullInject){
+    hits=eligibleDocs(documents(),effective,ctx.now.date).map((doc)=>({doc,paragraphs:doc.paragraphs.map((text,i)=>({index:i+1,text})),via:['keyword' as const],score:0}));
+  }else{
+    // RAG 批次1：检索走三路混合（向量路按配置静默启用/降级）；批次3：LLM 重排按配置启用（缺省关）
+    const retrieved=await retrieveHybrid(args['query'],effective,ctx.now.date);
+    hits=await rerankHits(args['query'],retrieved,(ctx.mode??'task')==='chat'?'chat':'task',undefined,{signal:ctx.signal});
+  }
+  const summary=hits.length?(fullInject?`已提供当前角色可见的全部 ${hits.length} 份有效操作说明（全量注入，出处以文档·版本·§段落标注）。`:`检索到 ${hits.length} 份当前有效的系统操作说明。`):'知识库未命中有效依据，不能回答该制度或设备问题。';
   return {ok:true,resultKind:'knowledge',summary,result:{summary,scope:'本库仅含当前软件操作说明，学校管理制度与设备厂家手册尚待上传审核。',hits:hits.map(h=>({id:h.doc.id,title:h.doc.title,version:h.doc.version,effectiveFrom:h.doc.effectiveFrom,source:h.doc.source,url:`/api/knowledge/${h.doc.id}`,paragraphs:h.paragraphs.map(p=>({locator:`§${p.index}`,text:p.text}))}))}};
 }

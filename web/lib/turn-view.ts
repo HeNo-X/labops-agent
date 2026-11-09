@@ -99,6 +99,7 @@ const TOOL_TITLES: Record<string, string> = {
   query_checkin_records: '查询逐人签到明细',
   query_openlab_records: '查询开放实验室签到签退',
   query_key_records: '查询钥匙台账',
+  query_user_directory: '查询名册与账号',
   query_vision_status: '查询现场事实',
   prepare_issue_ticket: '准备报修单',
   prepare_room_closure: '准备停用计划',

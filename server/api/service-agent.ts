@@ -24,8 +24,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createHmac, timingSafeEqual, randomUUID } from 'node:crypto';
 import { getConfig } from '../config.ts';
-import { getDb } from '../persistence/db.ts';
-import { loggerFor } from '../obs/trace.ts';
+import { getDb, createConversation, createMessageWithRun, finalizeAssistantMessage } from '../persistence/db.ts';
+import { loggerFor, newTraceId } from '../obs/trace.ts';
 import { runAgent } from '../agent/run.ts';
 import { toolsForMode } from '../tools/registry.ts';
 import { modelForMode } from '../llm/router.ts';
@@ -115,6 +115,9 @@ interface ValidBody {
   allowedTools: string[];
   autonomous: boolean;
   sessionId: string;
+  sessionRaw: string;
+  jobTitle: string;
+  jobId: string;
   timeoutMs: number;
 }
 
@@ -141,6 +144,8 @@ function coerce(raw: unknown): { ok: true; value: ValidBody } | { ok: false; cod
   const allowedTools = [...new Set(requested.filter((x): x is string => typeof x === 'string' && Boolean(x.trim())).map((x) => x.trim()))];
 
   const sessionRaw = typeof b['sessionId'] === 'string' ? b['sessionId'].trim().slice(0, 96) : '';
+  const jobTitle = typeof b['jobTitle'] === 'string' ? b['jobTitle'].trim().slice(0, 120) : '';
+  const jobId = typeof b['jobId'] === 'string' ? b['jobId'].trim().slice(0, 96) : '';
   const timeoutRaw = Number(b['timeoutMs']);
   const timeoutMs = Number.isFinite(timeoutRaw) ? Math.min(Math.max(timeoutRaw, 5000), 120000) : 45000;
 
@@ -153,6 +158,9 @@ function coerce(raw: unknown): { ok: true; value: ValidBody } | { ok: false; cod
       allowedTools,
       autonomous,
       sessionId: sessionIdOf(id, sessionRaw || `scheduled-${jobRunId}`),
+      sessionRaw,
+      jobTitle,
+      jobId,
       timeoutMs
     }
   };
@@ -165,7 +173,7 @@ function sessionIdOf(actorId: string, raw: string): string {
 
 interface ToolTrace { tool: string; ok: boolean; summary?: string }
 
-async function execute(body: ValidBody): Promise<Record<string, unknown>> {
+async function execute(body: ValidBody, runIdHint: string, conversationId: string): Promise<Record<string, unknown>> {
   const taskTools = new Set(toolsForMode('task').map((t) => t.name));
   const unknown = body.allowedTools.filter((name) => !taskTools.has(name));
   if (unknown.length) {
@@ -180,7 +188,7 @@ async function execute(body: ValidBody): Promise<Record<string, unknown>> {
 
   const started = Date.now();
   let answer = '';
-  let runId = '';
+  let runId = runIdHint;
   let toolCalls = 0;
   let engine = '';
   let model = '';
@@ -190,7 +198,8 @@ async function execute(body: ValidBody): Promise<Record<string, unknown>> {
   const signal = AbortSignal.timeout(body.timeoutMs);
   for await (const ev of runAgent({
     question: body.prompt,
-    sessionId: body.sessionId,
+    sessionId: conversationId || body.sessionId,
+    runId: runIdHint,
     mode,
     actor: body.owner,
     allowedTools: allowed,
@@ -296,16 +305,61 @@ export async function handleServiceAgent(req: IncomingMessage, res: ServerRespon
     .prepare('INSERT INTO service_runs(jobRunId,status,payload,startedAt,updatedAt) VALUES(?,?,?,?,?) ON CONFLICT(jobRunId) DO UPDATE SET status=excluded.status,payload=NULL,startedAt=excluded.startedAt,updatedAt=excluded.updatedAt')
     .run(body.jobRunId, 'running', null, nowIso, nowIso);
 
+  // —— 到点自动化的会话落库（整合方案 §5）：先建会话+消息三件套，再执行。
+  //    落库不可用就**不执行**——"跑了但结果没落在任何会话里"正是本次修的根因。
+  const runIdHint = newTraceId('run');
+  const convMode: 'chat' | 'task' = body.allowedTools.length ? 'task' : 'chat';
+  let conversationId = '';
+  let assistantMessageId = '';
   try {
-    const result = await execute(body);
-    getDb().prepare('UPDATE service_runs SET status=?,payload=?,updatedAt=? WHERE jobRunId=?').run('done', JSON.stringify(result), new Date().toISOString(), body.jobRunId);
-    log.info('service_run_done', { jobRunId: body.jobRunId, owner: body.owner.id, mode: result['mode'], toolCalls: result['toolCalls'] });
-    reply(res, 200, { ...result, replayed: false });
+    const existing = body.sessionRaw
+      ? getDb().prepare('SELECT id,ownerId FROM conversations WHERE id=? AND deletedAt IS NULL').get(body.sessionRaw) as { id: string; ownerId: string } | undefined
+      : undefined;
+    if (existing && existing.ownerId === body.owner.id) {
+      conversationId = existing.id;
+    } else {
+      const day = new Date().toISOString().slice(0, 10);
+      const label = (body.jobTitle || body.prompt).replace(/\s+/g, ' ').trim().slice(0, 30) || '定时任务';
+      conversationId = createConversation(`${label} · ${day}`, convMode, { ownerId: body.owner.id, source: 'automation', jobId: body.jobId || body.jobRunId }).id;
+    }
+    const created = createMessageWithRun(conversationId, body.prompt, `svc:${body.jobRunId}`, runIdHint);
+    if ('duplicate' in created) throw new Error('该次运行已有会话记录，拒绝重复执行');
+    assistantMessageId = created.assistant.id;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn('service_run_conversation_unavailable', { jobRunId: body.jobRunId, message });
+    reply(res, 503, { error: 'conversation_store_unavailable', message: `无法建立自动化会话：${message}` });
+    return;
+  }
+
+  try {
+    const result = await execute(body, runIdHint, conversationId);
+    const cached = { ...result, conversationId };
+    getDb().prepare('UPDATE service_runs SET status=?,payload=?,updatedAt=? WHERE jobRunId=?').run('done', JSON.stringify(cached), new Date().toISOString(), body.jobRunId);
+    log.info('service_run_done', { jobRunId: body.jobRunId, owner: body.owner.id, mode: result['mode'], toolCalls: result['toolCalls'], conversationId });
+    try {
+      const tools = (result['tools'] ?? []) as ToolTrace[];
+      finalizeAssistantMessage(assistantMessageId, runIdHint, 'completed', String(result['answer'] ?? '') || '本轮正常完成，但没有产出正文。', {
+        conversationId, runId: runIdHint, source: 'automation', responseMode: convMode, queriedAt: new Date().toISOString(),
+        engine: result['engine'], model: result['model'], toolCalls: tools, usage: result['usage'],
+        headline: [...tools].reverse().find((t) => t.ok && t.summary)?.summary ?? null
+      });
+    } catch (persistErr) {
+      // 结果已缓存供调度器对账；会话终态写失败如实记日志，不假装已保存，也不阻断对调度器的应答。
+      log.warn('service_run_conversation_finalize_failed', { jobRunId: body.jobRunId, message: persistErr instanceof Error ? persistErr.message : String(persistErr) });
+    }
+    reply(res, 200, { ...cached, replayed: false });
   } catch (err) {
     const code = (err as Error & { code?: string }).code || 'run_failed';
     const message = (err as Error).message;
     getDb().prepare('UPDATE service_runs SET status=?,payload=?,updatedAt=? WHERE jobRunId=?').run('failed', JSON.stringify({ ok: false, code, message }), new Date().toISOString(), body.jobRunId);
     log.warn('service_run_failed', { jobRunId: body.jobRunId, owner: body.owner.id, code, message });
+    // 失败也要落一条助手消息写明原因——用户必须能区分"没执行"和"执行失败"。
+    try {
+      finalizeAssistantMessage(assistantMessageId, runIdHint, 'failed', `定时自动化执行失败：${message}（错误码 ${code}）。可在「自动化」中重试，或把错误码提供给管理员。`, {
+        conversationId, runId: runIdHint, source: 'automation', responseMode: convMode, queriedAt: new Date().toISOString(), error: { code, message }
+      });
+    } catch { /* 落库失败不掩盖原始失败应答 */ }
     reply(res, code === 'bad_tools' ? 400 : 502, { ok: false, error: code, message });
   }
 }

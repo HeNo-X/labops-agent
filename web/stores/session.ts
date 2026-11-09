@@ -24,6 +24,8 @@ export interface ConvSummary {
   preview: string;
   /** 会话类型：task=任务工作台（默认）；chat=纯聊天（不能执行任务操作） */
   mode?: 'chat' | 'task';
+  /** 会话来源：缺省=用户发起；'automation'=主系统定时任务到点触发 */
+  source?: string | null;
 }
 
 export interface ToolCallRecord {

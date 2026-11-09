@@ -130,7 +130,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               <button type="button" role="listitem" class="m-drawer__row" @click="pick(c.id)">
                 <b><UiIcon v-if="pins.ids.value.includes(c.id)" name="star" :size="12"/>{{ c.title || tr('新会话') }}</b>
                 <span>{{ c.preview || tr('尚未开始对话') }}</span>
-                <small>{{ session.timeLabel(c.lastActivityAt) }} · {{ c.messageCount }} {{ tr('条消息') }}</small>
+                <small>{{ c.source === 'automation' ? tr('定时自动化') + ' · ' : '' }}{{ session.timeLabel(c.lastActivityAt) }} · {{ c.messageCount }} {{ tr('条消息') }}</small>
               </button>
             </SwipeRow>
             <button

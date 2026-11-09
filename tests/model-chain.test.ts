@@ -142,12 +142,14 @@ test('全配置：两条链都是"主链在前、备用在后"，且备用顺序
     ['kimi-k3', 'qwen3.8-flash', 'qwen3.8-max-0902', 'glm-4.7-flash', 'spark-x2.6-4b'],
     '聊天链：DashScope 五模型 → BigModel → 星火(chat)'
   );
+  // 2026-11-09 e860f40 起工作链默认 spark→glm→agnes（agnes 首字 35~47s，先让快的顶上），
+  // 断言同步为现状，顺序仍可用 TASK_CHAIN_ORDER 覆盖回旧口径。
   assert.deepEqual(
     r.task.map((p) => p.model),
-    ['agnes-3.0-flash', 'spark-x2.6', 'glm-4.7-flash', 'spark-x2.6-4b'],
-    '工作链：Agnes → 星火(task，第一备用) → BigModel → 星火(chat)'
+    ['spark-x2.6', 'glm-4.7-flash', 'agnes-3.0-flash', 'spark-x2.6-4b'],
+    '工作链：星火(task，主链) → BigModel → Agnes → 星火(chat)'
   );
-  assert.deepEqual(r.task.map((p) => p.name), ['agnes', 'xfyun', 'bigmodel', 'xfyun']);
+  assert.deepEqual(r.task.map((p) => p.name), ['xfyun', 'bigmodel', 'agnes', 'xfyun']);
   assert.ok(r.chat.every((p) => p.hasKey) && r.task.every((p) => p.hasKey), '每条都要带 Key');
   // 两条链各自的端点必须不同域，防止 Key 串用
   assert.equal(new Set(r.task.map((p) => p.baseUrl)).size, 3, 'Agnes / 星火 / BigModel 三个端点');

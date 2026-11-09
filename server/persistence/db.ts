@@ -41,6 +41,8 @@ export interface ConversationRow {
   preview: string;
   /** 会话类型：task=任务工作台（默认）；chat=纯聊天（不能执行任务操作） */
   mode: 'chat' | 'task';
+  /** 会话来源：null=用户发起；'automation'=主系统定时任务到点触发 */
+  source?: string | null;
 }
 
 export interface MessageRow {
@@ -154,6 +156,9 @@ function initDatabase(): DatabaseSync {
 
     const columns = conn.prepare('PRAGMA table_info(conversations)').all() as Array<Record<string, unknown>>;
     if (!columns.some(c => c['name'] === 'ownerId')) conn.exec("ALTER TABLE conversations ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'legacy-unassigned'");
+    // 到点自动化（2026-11-09 整合方案 §5）：会话来源标记与任务号，供列表徽标与对账
+    if (!columns.some(c => c['name'] === 'source')) conn.exec("ALTER TABLE conversations ADD COLUMN source TEXT");
+    if (!columns.some(c => c['name'] === 'jobId')) conn.exec("ALTER TABLE conversations ADD COLUMN jobId TEXT");
     conn.exec(`
       CREATE TABLE IF NOT EXISTS demo_sessions (tokenHash TEXT PRIMARY KEY, subject TEXT NOT NULL, expiresAt INTEGER NOT NULL);
       -- RAG 批次1：知识段落向量索引（余弦检索在 JS 侧完成，语料规模小无需向量库）
@@ -263,7 +268,7 @@ function newId(prefix: string): string {
 export function listConversations(limit = 100): ConversationRow[] {
   const rows = getDb()
     .prepare(
-      `SELECT c.id, c.title, c.lastActivityAt, c.mode,
+      `SELECT c.id, c.title, c.lastActivityAt, c.mode, c.source,
               (SELECT COUNT(*) FROM messages m WHERE m.conversationId = c.id) AS messageCount,
               (SELECT CASE WHEN json_extract(m2.meta,'$.headline') IS NOT NULL
                            THEN json_extract(m2.meta,'$.headline')
@@ -282,16 +287,17 @@ export function listConversations(limit = 100): ConversationRow[] {
     createdAt: '',
     messageCount: Number(r['messageCount']),
     preview: String(r['preview'] ?? '').slice(0, 80),
-    mode: String(r['mode'] ?? 'task') as 'chat' | 'task'
+    mode: String(r['mode'] ?? 'task') as 'chat' | 'task',
+    source: r['source'] === null || r['source'] === undefined ? null : String(r['source'])
   }));
 }
 
-export function createConversation(title = '', mode: 'chat' | 'task' = 'task'): { id: string; createdAt: string } {
+export function createConversation(title = '', mode: 'chat' | 'task' = 'task', opts?: { ownerId?: string; source?: string; jobId?: string }): { id: string; createdAt: string } {
   const id = newId('conv');
   const now = new Date().toISOString();
   getDb()
-    .prepare(`INSERT INTO conversations (id, title, createdAt, lastActivityAt, mode, ownerId) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(id, title, now, now, mode === 'chat' ? 'chat' : 'task', currentActor()?.id ?? 'legacy-unassigned');
+    .prepare(`INSERT INTO conversations (id, title, createdAt, lastActivityAt, mode, ownerId, source, jobId) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(id, title, now, now, mode === 'chat' ? 'chat' : 'task', opts?.ownerId ?? currentActor()?.id ?? 'legacy-unassigned', opts?.source ?? null, opts?.jobId ?? null);
   return { id, createdAt: now };
 }
 

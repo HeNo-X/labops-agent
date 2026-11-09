@@ -32,6 +32,14 @@ process.env.LABOPS_DB_PATH = path.join(temp, 'agent.sqlite');
 
 const { __serviceInternals, handleServiceAgent, signServicePayload } = await import('../server/api/service-agent.ts');
 const { toolsForMode, executeTool } = await import('../server/tools/registry.ts');
+const { getDb } = await import('../server/persistence/db.ts');
+
+async function runService(body: unknown, nonce: string) {
+  const ex = fakeExchange(body, {});
+  Object.assign(ex.req, { headers: { 'content-type': 'application/json', ...signedHeaders(ex.raw, nonce) } });
+  await handleServiceAgent(ex.req, ex.res, '/api/service/agent-run');
+  return ex.out;
+}
 
 before(() => __serviceInternals.resetNonces());
 
@@ -164,4 +172,72 @@ test('签到接入批次3：到点真实跑一轮，签到问法走演示引擎�
   assert.match(one.answer, /没有连接原系统|取不到签到汇总/);
   assert.match(one.answer, /请勿代替学生签到/);
   assert.ok(!/\d{6,}/.test(one.answer.replace(/2026-\d{2}-\d{2}/g, '')), '不得编造学号名单');
+});
+
+// ---------------------------------------------------------------------------
+// 整合方案 §5（2026-11-09）：到点自动化必须落成真实会话——"跑了但结果不在任何会话里"
+// 等于没跑；失败也要落一条写明原因，让用户能区分"没执行"和"执行失败"。
+// ---------------------------------------------------------------------------
+test('自动化到点落会话：新建 automation 会话 + 指令/结果双消息 + 徽标字段', async () => {
+  const body = { ...VALID, jobRunId: 'run-conv-0001', prompt: '查询E310在2026-09-28的课表', jobTitle: '晚间课表巡检', jobId: 'job-eve-01' };
+  const out = await runService(body, 'aa0011bb22cc33dd');
+  assert.equal(out.status, 200, out.body);
+  const one = JSON.parse(out.body) as { ok: boolean; runId: string; conversationId: string };
+  assert.ok(one.conversationId, '应答必须带 conversationId');
+  const d = getDb();
+  const conv = d.prepare('SELECT id,title,mode,ownerId,source,jobId FROM conversations WHERE id=?').get(one.conversationId) as Record<string, unknown>;
+  assert.ok(conv, '会话必须真实落库');
+  assert.equal(conv['source'], 'automation', '会话必须打自动化来源标记（前端徽标依据）');
+  assert.equal(conv['ownerId'], 'admin', '归属必须是任务账号而不是 legacy-unassigned');
+  assert.equal(conv['jobId'], 'job-eve-01');
+  assert.match(String(conv['title']), /^晚间课表巡检 · \d{4}-\d{2}-\d{2}$/, '标题=任务名+日期');
+  const msgs = d.prepare('SELECT role,text,status,meta FROM messages WHERE conversationId=? ORDER BY ordinal').all(one.conversationId) as Array<Record<string, unknown>>;
+  assert.equal(msgs.length, 2, 'user 指令 + assistant 结果各一条');
+  assert.equal(msgs[0]['role'], 'user');
+  assert.equal(msgs[0]['text'], body.prompt, 'user 消息必须是指令原文');
+  assert.equal(msgs[1]['role'], 'assistant');
+  assert.equal(msgs[1]['status'], 'completed');
+  assert.ok(String(msgs[1]['text']).includes('E310'), '助手消息必须是结果全文');
+  const meta = JSON.parse(String(msgs[1]['meta'])) as Record<string, unknown>;
+  assert.equal(meta['runId'], one.runId, 'runId 落进消息 meta 供对账');
+  assert.equal(meta['source'], 'automation');
+});
+
+test('自动化不同 jobRunId 各建会话不覆盖；重放同一 jobRunId 不再建第三个', async () => {
+  const second = await runService({ ...VALID, jobRunId: 'run-conv-0002', prompt: '查询E310在2026-09-28的课表' }, 'bb1122cc33dd44ee');
+  assert.equal(second.status, 200, second.body);
+  const replay = await runService({ ...VALID, jobRunId: 'run-conv-0001', prompt: '查询E310在2026-09-28的课表' }, 'cc2233dd44ee55ff');
+  const replayJson = JSON.parse(replay.body) as { replayed: boolean; conversationId: string };
+  assert.equal(replayJson.replayed, true, '同 jobRunId 必须走缓存');
+  assert.ok(replayJson.conversationId, '重放应答同样要带会话编号（形状一致）');
+  const secondJson = JSON.parse(second.body) as { conversationId: string };
+  assert.notEqual(secondJson.conversationId, replayJson.conversationId, '第二次触发的会话不得覆盖第一次');
+  const d2 = getDb().prepare('SELECT COUNT(*) AS n FROM messages WHERE conversationId=?').get(secondJson.conversationId) as Record<string, unknown>;
+  assert.equal(Number(d2['n']), 2, '新会话自己落齐双消息');
+  const replayed = getDb().prepare('SELECT COUNT(*) AS n FROM messages WHERE conversationId=?').get(replayJson.conversationId) as Record<string, unknown>;
+  assert.equal(Number(replayed['n']), 2, '重放不追加任何消息');
+});
+
+test('执行失败也落会话：assistant 写明失败码与建议（区分“没执行”和“执行失败”）', async () => {
+  const out = await runService({ ...VALID, jobRunId: 'run-fail-0001', allowedTools: ['no_such_tool'] }, 'ee4455ff66aa77bb');
+  assert.equal(out.status, 400, out.body);
+  const d = getDb();
+  const json = JSON.parse(out.body) as { error: string };
+  assert.equal(json.error, 'bad_tools');
+  const conv = d.prepare("SELECT id FROM conversations WHERE source='automation' AND ownerId='admin' AND jobId='run-fail-0001'").get() as Record<string, unknown> | undefined;
+  assert.ok(conv, '失败也必须有会话可查（不是静默丢弃）');
+  const msgs = d.prepare('SELECT role,text,status,meta FROM messages WHERE conversationId=? ORDER BY ordinal').all(String(conv['id'])) as Array<Record<string, unknown>>;
+  assert.equal(msgs.length, 2);
+  assert.equal(msgs[1]['status'], 'failed');
+  assert.match(String(msgs[1]['text']), /定时自动化执行失败/);
+  assert.match(String(msgs[1]['text']), /bad_tools/, '消息正文必须带错误码');
+  const meta = JSON.parse(String(msgs[1]['meta'])) as { error?: { code: string } };
+  assert.equal(meta.error?.code, 'bad_tools');
+});
+
+test('列表可见性：automation 会话带 source 出现在本人列表（徽标数据面）', async () => {
+  const { listConversations } = await import('../server/persistence/db.ts');
+  const rows = listConversations().filter((c) => c.source === 'automation');
+  assert.ok(rows.length >= 2, '前面落下的自动化会话必须能在列表里按 source 筛出');
+  assert.ok(rows.every((c) => c.title.includes('·')), '标题带日期分隔');
 });

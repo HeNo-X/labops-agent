@@ -70,10 +70,10 @@ export interface IntentHint {
 export function refuseSignRequest(question: string): string | null {
   const q = String(question ?? '');
   const refusal = '这个我做不了：学生签到必须由本人扫码完成，我不能代签或代为补录。如确需补录，请由管理员在主系统的签到管理中按代录流程办理。';
-  // 第一类：动作词无歧义（签上到/代签/补录）——即使句子里带"查"也婉拒
-  if (/(签上到|代签|补录签到|补录.*签到)/.test(q)) return refusal;
-  // 第二类："给/替/帮/把/请 + 短宾语 + 签到"的祈使句式——必须排除查询语（查/情况/记录/汇总…）
-  const actionSign = /((给|替|帮|把|请)[^，。？！]{1,12}(同学|学生)[^，。？！]{0,10}签到)|((给|替|帮|把)[^，。？！]{1,12}签到)/;
+  // 第一类：动作词无歧义（签上到/签个到/代签/补录）——即使句子里带"查"也婉拒
+  if (/(签上到|签个到|代签|补录签到|补录.*签到)/.test(q)) return refusal;
+  // 第二类："给/替/帮/把/请 + 短宾语 + 签到/签个到"的祈使句式——必须排除查询语（查/情况/记录/汇总…）
+  const actionSign = /((给|替|帮|把|请)[^，。？！]{1,12}(同学|学生)[^，.？！]{0,10}(签到|签个到))|((给|替|帮|把)[^，.？！]{1,12}(签到|签个到))/;
   const queryish = /(查|看一下|情况|记录|汇总|统计|多少|名单|谁|哪些)/;
   if (actionSign.test(q) && !queryish.test(q)) return refusal;
   return null;

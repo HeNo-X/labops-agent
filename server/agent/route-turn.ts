@@ -8,6 +8,14 @@
  *
  *  与架构诊断"规则降级为提议者"一致：routeTurn 只做**安全相关的硬拦截**
  *  （签到红线、范围引导快速通道、寒暄白名单），语义理解仍交模型。
+ *
+ *  【单一裁决点不变量（批4 收口，2026-11-11）】
+ *  · run.ts 不得再有直连路由正则（FREE_ROOMS_RE/SMALLTALK_RE/LAB_STATUS_RE/
+ *    planTaskOf/MULTI_INTENT_RE 一律只住在本模块）——grep 可验证为零；
+ *  · 判定优先级：签到红线 > 范围门控（scope）> 语义代理（agent）；
+ *  · 新增路由判断必须进 routeTurn（纯函数、可单测），不得在 run.ts 加 if；
+ *  · 例外（确定性编排）：chain-plan / read-compose / 事实转换是内容级分派，
+ *    属批L/D-F 设计而非路由裁决，不受本不变量约束。
  */
 import { classifyLabRequest, type DomainDecision } from './domain.ts';
 import { FREE_ROOMS_RE, SMALLTALK_RE, LAB_STATUS_RE } from './demo-engine.ts';
@@ -62,7 +70,9 @@ export function routeTurn(i: RouteInput): RouteResult {
     callCount === 1 &&
     SINGLE_PASS_TOOLS.has(toolName) &&
     !MULTI_INTENT_RE.test(question);
-  if (domain !== 'query') return { kind: 'scope', reason: `领域门控快速通道判为 ${domain}`, domain, smalltalk, roomless, taskHint, signRefusal: null, singlePassEligible };
+  // 判定优先级（批4 收口）：签到红线（安全硬拦截）> 范围门控 > 语义代理。
+  // 红线先判：混合句式（如"代签+讲个笑话"）必须得到红线答复而不是被域外引导吞掉。
   if (signRefusal) return { kind: 'sign_refusal', reason: '签到红线：代签/补录类请求确定性婉拒，不进模型不调工具', domain, smalltalk, roomless, taskHint, signRefusal, singlePassEligible };
+  if (domain !== 'query') return { kind: 'scope', reason: `领域门控快速通道判为 ${domain}`, domain, smalltalk, roomless, taskHint, signRefusal: null, singlePassEligible };
   return { kind: 'agent', reason: i.engineDemo ? '演示引擎：规则引擎直接作答' : '语义判断归模型；规则仅保留安全硬拦截', domain, smalltalk, roomless, taskHint, signRefusal: null, singlePassEligible };
 }

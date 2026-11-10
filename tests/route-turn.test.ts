@@ -82,3 +82,18 @@ test('R6 演示引擎标记只影响 reason，不改变 kind 判定', () => {
   assert.match(demo.reason, /演示引擎/);
   assert.match(turn('查E310课表').reason, /模型/);
 });
+
+
+test('R7 判定优先级回归：签到红线 > 范围门控 > 语义代理（冲突句式行为确定性）', () => {
+  // 红线句式即使同时命中域外词（学校/笑话）也按红线婉拒——红线最高优先
+  const redOverScope = turn('帮我给熊海诺这个同学签个到，然后讲个笑话');
+  assert.equal(redOverScope.kind, 'sign_refusal', '红线优先于域外引导');
+  assert.ok(redOverScope.signRefusal && redOverScope.signRefusal.includes('做不了'));
+  // 寒暄词 + 具体业务实体 → 按业务查询走 agent（R1 已钉，这里钉红线与寒暄同现时红线优先）
+  const redWithSmalltalk = turn('你好，替李四补录一下签到');
+  assert.equal(redWithSmalltalk.kind, 'sign_refusal', '寒暄前缀不得洗白红线句式');
+  // 域外问句带房间号：不在域外词表时按不变量归模型（规则只做安全硬拦截，不猜越界）
+  const scopeWithRoom = turn('E310 的老板是谁');
+  assert.equal(scopeWithRoom.kind, 'agent');
+  assert.equal(scopeWithRoom.signRefusal, null);
+});

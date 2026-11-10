@@ -1,5 +1,6 @@
 import {scopeAnswer} from './domain.ts';
 import {routeTurn,type RouteResult} from './route-turn.ts';
+import { detectChain, runChain } from './chain-plan.ts';
 import {renderBusinessFacts} from '../business/fact-text.ts';
 import { planNativeDialogue, verifiedRecommendation } from '../tools/business.ts';
 import type { BusinessResult } from '../../shared/business.ts';
@@ -277,6 +278,30 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
       yield* streamText(route.signRefusal, emit, input.signal);
       yield emit('run_completed', { answer: route.signRefusal, steps: 0, toolCalls: 0, ms: watch.ms, sourceType, engine: 'facts', strategy: 'scope_guidance' } satisfies RunCompletedPayload);
       return;
+    }
+    // 确定性链编排（批次D）：契约固定的多步办理链交给服务端按已验证接口顺序驱动。
+    // 依据是实测——spark 单轮 15~30 s 里读 29 份工具清单只占 0.5 s，大头是每轮重新生成
+    // "思考+工具名+参数"；把三步机械往返省掉，才是不动墙钟/步数安全值的前提下真正的提速。
+    // 边界：前置参数不齐时 runChain 一步都不执行并交回模型；一旦执行过就不交回，只如实汇报。
+    const chainKind = isBusinessConnected() && convMode === 'task' ? detectChain({ question, mode: convMode }) : null;
+    if (chainKind) {
+      const chain = await runChain(chainKind, {
+        question, intent, ds, now, mode: convMode,
+        execute: (tool, args) => executeTool(tool, args, { dataset: ds, now, actor: input.actor, conversationId: input.sessionId, mode: convMode, signal: input.signal, allowedTools: input.allowedTools, autonomous: input.autonomous })
+      });
+      if (chain.steps.length) {
+        for (const [i, step] of chain.steps.entries()) {
+          yield emit('tool_started', { step: i + 1, toolCallId: `chain-${i + 1}`, tool: step.tool, args: step.args, sourceType } satisfies ToolStartedPayload);
+          yield emit('tool_result', { step: i + 1, toolCallId: `chain-${i + 1}`, tool: step.tool, ok: step.ok, ms: step.ms, sourceType, summary: step.summary ?? '', ...(step.ok ? { resultKind: step.resultKind, result: step.result } : { error: { code: step.code ?? 'chain_failed', message: step.message ?? '链上一步失败' } }) } satisfies ToolResultPayload);
+        }
+        log.info('chain_orchestration', { runId, kind: chainKind, steps: chain.steps.length, awaitingConfirmation: chain.awaitingConfirmation, stoppedReason: chain.stoppedReason });
+        const answer = chain.answer ?? `联合处置链在第 ${chain.steps.length} 步停下：${chain.stoppedReason}。已完成的步骤见方案卡；未经你确认的不会写入主系统。`;
+        commitContext();
+        yield* streamText(answer, emit, input.signal);
+        yield emit('run_completed', { answer, steps: chain.steps.length, toolCalls: chain.steps.length, ms: watch.ms, sourceType, engine: 'facts', strategy: 'deterministic_chain', ...(chain.awaitingConfirmation ? { taskStatus: 'awaiting_confirmation' as const } : {}) } satisfies RunCompletedPayload);
+        return;
+      }
+      log.info('chain_orchestration', { runId, kind: chainKind, steps: 0, handback: chain.stoppedReason });
     }
     if (engine === 'demo'||(convMode==='chat'&&isBusinessConnected()&&planNativeDialogue(question,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode}))) {
       yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode, allowedTools: input.allowedTools, autonomous: input.autonomous });

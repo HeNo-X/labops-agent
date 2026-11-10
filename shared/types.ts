@@ -223,7 +223,7 @@ export interface AnswerDeltaPayload {
 
 export interface RunCompletedPayload {
   durable?: boolean;
-  strategy?: 'fact_transform'|'verified_query_transform'|'scope_guidance';
+  strategy?: 'fact_transform'|'verified_query_transform'|'scope_guidance'|'deterministic_chain';
   answer: string;
   steps: number;
   toolCalls: number;

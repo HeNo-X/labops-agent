@@ -1,3 +1,9 @@
+/**
+ * 【批3 归档定位（2026-11-11）】本模块实现段落级混合召回（CJK 双字 BM25 + 关键词），RRF 融合。
+ *  当前语料仅 3049 字——知识检索**默认走全量注入**（KNOWLEDGE_FULL_INJECT 缺省开），
+ *  本模块处于**归档维护态**：测试与回退口径仍可用（KNOWLEDGE_FULL_INJECT=0 启用），
+ *  语料增长到数万字前不要在生产启用检索路径（复杂度必须与数据规模匹配）。
+ */
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { KnowledgeDocument } from './knowledge.ts';

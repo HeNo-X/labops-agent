@@ -44,7 +44,9 @@ const SINGLE_PASS_TOOLS = new Set([
   'query_vision_status', 'query_free_rooms', 'query_lab_status',
   // 逐人明细与目录都是"一问一工具"，渲染器已有 records 分支；
   // 让它们走单轮可省掉第二次模型往返（实测同一问法 4.4s vs 15~30s/轮）
-  'query_checkin_records', 'query_openlab_records', 'query_key_records', 'query_user_directory'
+  'query_checkin_records', 'query_openlab_records', 'query_key_records', 'query_user_directory',
+  // 「今天下午谁值班」同理是一问一工具（term_schedule 渲染器已就绪）：彩排实测 23.3 s/2 轮
+  'query_term_schedule'
 ]);
 const MULTI_INTENT_RE = /然后|再|顺便|以及|对比|分别|哪个更/;
 

@@ -1,6 +1,7 @@
 import {scopeAnswer} from './domain.ts';
 import {routeTurn,type RouteResult} from './route-turn.ts';
 import { CHAIN_LABEL, detectChain, runChain } from './chain-plan.ts';
+import { detectReadComposition, READ_LABEL, runReadComposition } from './read-compose.ts';
 import {renderBusinessFacts} from '../business/fact-text.ts';
 import { planNativeDialogue, verifiedRecommendation } from '../tools/business.ts';
 import type { BusinessResult } from '../../shared/business.ts';
@@ -302,6 +303,30 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
         return;
       }
       log.info('chain_orchestration', { runId, kind: chainKind, steps: 0, handback: chain.stoppedReason });
+    }
+    // 只读组合编排（批次L）：两半各有固定接口契约的只读问句一次查完，不占模型轮。
+    // 依据是彩排实测——剩下的慢例（21~63 s）全是这种形态，而批J 证明换模型优先链只降 15.8%（未达判据）。
+    const readKind = isBusinessConnected() ? detectReadComposition({ question, mode: convMode, intent }) : null;
+    if (readKind) {
+      const composed = await runReadComposition(readKind, {
+        question, intent, ds, now, mode: convMode,
+        execute: (tool, args) => executeTool(tool, args, { dataset: ds, now, actor: input.actor, conversationId: input.sessionId, mode: convMode, signal: input.signal, allowedTools: input.allowedTools, autonomous: input.autonomous })
+      });
+      if (composed.steps.length) {
+        for (const [i, step] of composed.steps.entries()) {
+          yield emit('tool_started', { step: i + 1, toolCallId: `read-${i + 1}`, tool: step.tool, args: step.args, sourceType } satisfies ToolStartedPayload);
+          yield emit('tool_result', { step: i + 1, toolCallId: `read-${i + 1}`, tool: step.tool, ok: step.ok, ms: step.ms, sourceType, summary: step.summary ?? '', ...(step.ok ? { resultKind: step.resultKind, result: step.result } : { error: { code: step.code ?? 'read_compose_failed', message: step.message ?? '只读组合上一步失败' } }) } satisfies ToolResultPayload);
+        }
+        log.info('read_composition', { runId, kind: readKind, steps: composed.steps.length, stoppedReason: composed.stoppedReason });
+        const answer = composed.answer ?? (composed.partial
+          ? `${composed.partial}\n\n另一半未取得依据：${readKind ? composed.stoppedReason : '未知'}。已取到的部分如上，不据缺失的一半下结论。`
+          : `只读组合（${READ_LABEL[readKind]}）未取得依据：${composed.stoppedReason}。`);
+        commitContext();
+        yield* streamText(answer, emit, input.signal);
+        yield emit('run_completed', { answer, steps: composed.steps.length, toolCalls: composed.steps.length, ms: watch.ms, sourceType, engine: 'facts', strategy: 'deterministic_readonly' } satisfies RunCompletedPayload);
+        return;
+      }
+      log.info('read_composition', { runId, kind: readKind, steps: 0, handback: composed.stoppedReason });
     }
     if (engine === 'demo'||(convMode==='chat'&&isBusinessConnected()&&planNativeDialogue(question,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode}))) {
       yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode, allowedTools: input.allowedTools, autonomous: input.autonomous });

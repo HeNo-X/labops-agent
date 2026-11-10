@@ -43,7 +43,11 @@ const bridge = await import('./fixtures/bridge-stub.ts');
 type Ctx = Parameters<typeof prepareIncident>[1];
 
 const ctx = (): Ctx => ({
-  dataset: { sourceType: 'demo', labs: [{ id: 'fixture-e310', name: 'E310' }, { id: 'fixture-e312', name: 'E312' }] } as never,
+  dataset: {
+    sourceType: 'demo',
+    labs: [{ id: 'fixture-e310', name: 'E310' }, { id: 'lab-d517', name: 'D517' }],
+    openLabs: [{ id: 'ol-d501', name: 'D501' }, { id: 'ol-d517', name: 'D517' }]
+  } as never,
   now: { iso: new Date().toISOString(), date: '2026-11-10', time: '10:00:00', weekday: 2, weekdayLabel: '周二' },
   mode: 'task',
   conversationId: 'conv-stub',
@@ -113,20 +117,28 @@ test('房间名一次映射成 rooms[].id（实测里模型交 E310 被主系统
   assert.equal((bridge.calls[0]!.body as { roomId: string }).roomId, 'fixture-e310');
 });
 
-test('房间清单里没有或同名不唯一时报错并给出可选编号，不发请求', async () => {
+test('开放实验室房号同样能解析（只查 labs 会让 5 楼全部报找不到）', async () => {
+  bridge.setNextResponse({ incident: { id: 'incident-2' } });
+  const out = await prepareIncident({ ...complete, roomId: 'D501' }, ctx());
+  assert.equal(out.ok, true, out.ok ? '' : `${out.code} ${out.message}`);
+  assert.equal((bridge.calls[0]!.body as { roomId: string }).roomId, 'ol-d501');
+});
+
+test('房号在两处各登记一次时不自行挑选，要求向用户确认（D517 双身份）', async () => {
+  const out = await prepareIncident({ ...complete, roomId: 'D517' }, ctx());
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'lab_ambiguous');
+  assert.match(out.message || '', /lab-d517（D517）/);
+  assert.match(out.message || '', /ol-d517（D517）/);
+  assert.match(out.message || '', /不要自行挑选/);
+  assert.equal(bridge.calls.length, 0);
+});
+
+test('房间清单里没有时报错并给出可选编号，不发请求', async () => {
   const ghost = await prepareIncident({ ...complete, roomId: 'E999' }, ctx());
   assert.equal(ghost.ok, false);
   assert.equal(ghost.code, 'lab_not_found');
   assert.match(ghost.message || '', /fixture-e310（E310）/);
-
-  bridge.resetCalls();
-  const dup = await prepareIncident({ ...complete, roomId: 'E310' }, {
-    ...ctx(),
-    dataset: { sourceType: 'demo', labs: [{ id: 'x1', name: 'E310' }, { id: 'x2', name: 'e310' }] } as never
-  } as Ctx);
-  assert.equal(dup.ok, false);
-  assert.equal(dup.code, 'lab_not_found');
-  assert.match(dup.message || '', /同名房间 2 个/);
   assert.equal(bridge.calls.length, 0);
 });
 

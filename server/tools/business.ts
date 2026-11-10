@@ -132,13 +132,15 @@ export async function queryIncident(args:Record<string,unknown>,ctx:ToolContext)
 function assertIncidentDraftArgs(args:Record<string,unknown>,ctx:ToolContext):{roomId:string}{
   const bad=(code:string,message:string)=>Object.assign(new Error(message),{code});
   const rawRoom=typeof args['roomId']==='string'?args['roomId'].trim():'';
-  if(!rawRoom)throw bad('missing_room','登记故障事件需要 roomId：原系统房间编号（取 query_business_context 返回的 rooms[].id），不要用房间名。');
+  if(!rawRoom)throw bad('missing_room','登记故障事件需要 roomId：房间编号或房号都可（如 E310），建议取 query_business_context 返回的 rooms[].id。');
   // 主系统只认 rooms[].id，模型常交房间名（"E310"）→ 撞一句"请选择实验室"再回头查清单，
   // 一次演示要多烧两轮。服务端已有房间清单，这里做唯一映射：编号或名字都收，歧义才报错。
-  const labs=(ctx.dataset?.labs||[]) as Array<{id:string;name:string}>;
-  const byId=labs.find(l=>l.id===rawRoom);
-  const byName=byId?[]:labs.filter(l=>normalizeLabName(l.name)===normalizeLabName(rawRoom));
-  if(!byId&&byName.length!==1)throw bad('lab_not_found',`找不到唯一房间「${rawRoom}」${byName.length>1?'（同名房间 '+byName.length+' 个）':''}；请改用 rooms[].id，可选：${labs.slice(0,20).map(l=>l.id+'（'+l.name+'）').join('、')||'清单为空'}`);
+  // 清单必须同时含上机实验室与开放实验室——只查 labs 会让 5 楼 D5xx 全部报"找不到房间"。
+  const known=[...(ctx.dataset?.labs||[]),...(ctx.dataset?.openLabs||[])] as Array<{id:string;name:string}>;
+  const byId=known.find(l=>l.id===rawRoom);
+  const byName=byId?[]:known.filter(l=>normalizeLabName(l.name)===normalizeLabName(rawRoom));
+  if(byId===undefined&&byName.length===0)throw bad('lab_not_found',`系统里没有房间「${rawRoom}」；请改用 rooms[].id，可选：${known.slice(0,24).map(l=>l.id+'（'+l.name+'）').join('、')||'清单为空'}`);
+  if(!byId&&byName.length>1)throw bad('lab_ambiguous',`房号「${rawRoom}」在系统里有 ${byName.length} 条登记：${byName.map(l=>l.id+'（'+l.name+'）').join('、')}；请向用户确认指的是哪一条，不要自行挑选。`);
   const roomId=(byId||byName[0]!).id;
   const date=typeof args['date']==='string'?args['date'].trim():'';
   if(!isValidDateString(date))throw bad('bad_date',`登记故障事件需要合法 date（YYYY-MM-DD，用服务端给出的日期），收到：${date||'（未提供）'}。`);

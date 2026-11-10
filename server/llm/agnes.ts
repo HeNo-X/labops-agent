@@ -133,6 +133,9 @@ const DEGRADABLE_PARAMS = new Set([
   'enable_thinking'
 ]);
 
+/** 截断后翻倍输出预算的上限：再高就该改提示词，而不是无限加码输出 */
+const TRUNCATION_ESCALATION_CAP = 4000;
+
 export function unsupportedParam(body: string): string | null {
   const patterns = [
     /Parameter\s+'([A-Za-z0-9_]+)'\s*=/i,
@@ -192,12 +195,18 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
   }
 
   const url = `${c.baseUrl}/chat/completions`;
+  /**
+   * 输出预算。工具轮要写完"思考 + 工具名 + 参数 JSON"，预算不够时模型会被从中间剪断
+   * （finish_reason=length），上层只能判为整轮失败并换提供方——一次演示因此白烧两轮。
+   * 所以这里除了抬高默认值，还在截断时**就地翻倍重试一次**（见 catch 里的 escalation 分支）。
+   */
+  let maxTokens = c.maxTokens;
   const body: Record<string, unknown> = {
     model: c.model,
     messages: opts.messages,
     stream: true,
     temperature: c.temperature,
-    max_tokens: c.maxTokens
+    max_tokens: maxTokens
   };
   if (opts.tools && opts.tools.length) {
     body['tools'] = opts.tools.map((t) => ({
@@ -215,6 +224,8 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
   const logger = log ?? loggerFor('agnes');
   /** 已经因为"该模型不支持"而摘掉的参数（每个参数只摘一次，摘满 3 个就认命报错） */
   const degraded = new Set<string>();
+  /** 截断后翻倍输出预算的机会只用一次，避免在同一个提供方上无限加码 */
+  let escalated = false;
 
   let lastError: AgnesError | null = null;
   for (let attempt = 0; attempt <= c.maxRetries; attempt++) {
@@ -225,6 +236,7 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
     const timer = setTimeout(() => ac.abort(), c.timeoutMs);
 
     let started = false;
+    let yieldedText = false;
     try {
       const res = await fetch(url, {
         method: 'POST',
@@ -268,7 +280,10 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
       }
 
       started = true;
-      yield* parseSseStream(res.body, ac.signal);
+      for await (const ev of parseSseStream(res.body, ac.signal)) {
+        if (ev.type === 'text') yieldedText = true;
+        yield ev;
+      }
       clearTimeout(timer);
       opts.signal?.removeEventListener('abort', onOuterAbort);
       return;
@@ -289,6 +304,20 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
         e = new AgnesError('agnes_network_error', `${providerLabel(opts.provider?.name)}网络错误：${(err as Error).message}`, null, true);
       }
       e.provider = opts.provider?.name ?? 'agnes';
+
+      // 截断不是模型坏了，是输出预算不够：先在**同一个提供方**把预算翻倍重试一次，
+      // 仍截断才让链换提供方。否则 spark 截断 → glm → agnes 429 退避，同一问法耗时翻倍。
+      // 守既有不变量（router.ts:189「已经吐过内容就不换、不重发」）：只在尚未交付任何正文时升级，
+      // 否则重发会把已显示过的半句再接一遍。
+      if (e.code === 'truncated_response' && !outerAborted && !yieldedText && !escalated && maxTokens < TRUNCATION_ESCALATION_CAP) {
+        escalated = true;
+        maxTokens = Math.min(TRUNCATION_ESCALATION_CAP, maxTokens * 2);
+        body['max_tokens'] = maxTokens;
+        payload = JSON.stringify(body);
+        logger.warn('llm_max_tokens_escalated', { provider: e.provider, model: c.model, maxTokens });
+        attempt -= 1; // 抵消本轮自增：升级预算的重发不计入重试次数
+        continue;
+      }
 
       lastError = e;
       const canRetry = e.retryable && !started && !outerAborted && attempt < c.maxRetries;

@@ -163,5 +163,5 @@ test('系统提示含引用纪律：全量注入下每条结论要带 [N] 文档
   const src = fs.readFileSync(path.resolve('server/agent/prompts.ts'), 'utf8');
   assert.ok(src.includes('全量注入模式'), '稳定前缀声明注入模式');
   assert.ok(/出处 \[N\] 文档标题·版本·§段落号/.test(src), '引用格式写入系统提示');
-  assert.ok(src.includes('labops-1.0.6-stable-prefix-v5'), 'PROMPT_VERSION 递增');
+  assert.ok(src.includes('labops-1.0.6-stable-prefix-v6'), 'PROMPT_VERSION 递增');
 });

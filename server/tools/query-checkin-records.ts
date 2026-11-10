@@ -60,10 +60,13 @@ function fail(err: unknown): ToolExecution {
 export const QUERY_CHECKIN_RECORDS_SPEC = {
   name: 'query_checkin_records',
   description:
-    '查询**逐人签到明细**：某日（可按节次/类型过滤）每条签到签退记录的操作人、姓名、时间、节次，' +
-    '以及这条记录是按周值班模板匹配（dutySource=roster）还是替班（substitute）。' +
+    '查询**逐人签到明细**，三类签到是三张不同的表，先用 scope 分清：' +
+    'scope=student 是**学生上机课签到**（checkin_records，有房间、有课表关联，返回姓名+掩码学号+节次+课程+班级）；' +
+    'scope=duty 是**志愿者值班签到**（volunteer_records，只有节次，**不绑定房间**，含按模板/替班标注）；' +
+    '开放实验室的进出记录不在本工具，走 query_openlab_records。缺省 scope=all 同时给两类并逐条标注。' +
+    '口径常识：3 楼 E3xx 是学生上机的公共机房，问「某房间谁签到了」基本都是学生上机签到；志愿者值班不会在具体房间签到。' +
     '仅管理员与志愿者可用；**学号已由服务端掩码**（如 2023****12），不要尝试还原或推测真实学号。' +
-    '用户问「今天谁签到了」「这节谁值过班」「某人几点签的」时用本工具。' +
+    '用户问「今天谁签到了」「E310 下午有谁签到」「这节谁值过班」「某人几点签的」时用本工具。' +
     '红线：明细只陈述事实，**不要据此定性旷课或代签**；缺勤需现场核实。' +
     '未连接主系统或上游报错时如实说明，不编造记录。',
   parameters: {
@@ -71,7 +74,9 @@ export const QUERY_CHECKIN_RECORDS_SPEC = {
     properties: {
       date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'YYYY-MM-DD，缺省为服务端当天（上海时区）' },
       periodKey: { type: 'string', enum: ['am1', 'am2', 'pm1', 'pm2', 'eve_ab', 'eve_cd'], description: '只看某一节次' },
-      type: { type: 'string', enum: ['checkin', 'checkout'], description: '只看签到或只看签退' }
+      type: { type: 'string', enum: ['checkin', 'checkout'], description: '只看签到或只看签退' },
+      labId: { type: 'string', description: '只看某个房间：房号或主系统编号都可（如 E310）。**只能配 scope=student 或 all**；值班签到不绑房间，带房间查 duty 会被主系统拒。' },
+      scope: { type: 'string', enum: ['student', 'duty', 'all'], description: 'student=学生上机签到；duty=志愿者值班台账；all=两者（缺省）。问的是某个房间就用 student。' }
     },
     required: [],
     additionalProperties: false
@@ -84,15 +89,19 @@ export async function queryCheckinRecords(args: Record<string, unknown>, signal?
     const raw = await getJson('/checkin-records', {
       date: asStr(args['date']),
       periodKey: asStr(args['periodKey']),
-      type: asStr(args['type'])
+      type: asStr(args['type']),
+      labId: asStr(args['labId']),
+      scope: asStr(args['scope'])
     }, signal);
     const rows = (raw['records'] as unknown[]) || [];
     const day = String(raw['date'] || '');
+    const scope = String(raw['scope'] || 'all');
+    const room = asStr(args['labId']);
     return {
       ok: true,
       resultKind: 'records',
       result: raw,
-      summary: `${day} 共 ${rows.length} 条逐人签到记录（学号已掩码）`
+      summary: `${day}${room ? ' ' + room : ''} 共 ${rows.length} 条${scope === 'duty' ? '志愿者值班' : scope === 'student' ? '学生上机' : '逐人签到'}记录（学号已掩码）`
     };
   } catch (err) {
     return fail(err);
@@ -105,14 +114,16 @@ export const QUERY_OPENLAB_RECORDS_SPEC = {
   name: 'query_openlab_records',
   description:
     '查询**开放实验室的签到/签退记录**：某日（可按实验室过滤）有哪些人签入签出、各在何时。' +
+    '开放实验室（多为 5 楼 D5xx）记录的是**谁进了哪个房间**，与学生上机课签到、志愿者值班签到是三张不同的表。' +
     '仅管理员与志愿者可用；身份字段已由服务端掩码。' +
-    '用户问「今天开放实验室谁来过」「E310 开放时段进出情况」时用本工具。' +
+    '用户问「今天开放实验室谁来过」「D501 开放时段进出情况」时用本工具；' +
+    '若某个房号同时登记为上机实验室与开放实验室（如 D517），服务端会按两处编号一并检索并如实注记。' +
     '红线：明细只陈述事实，不做考勤定性；未连接主系统时如实说明，不编造。',
   parameters: {
     type: 'object',
     properties: {
       date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'YYYY-MM-DD，缺省为服务端当天' },
-      labId: { type: 'string', description: '只看某个实验室房号，如 E310' },
+      labId: { type: 'string', description: '只看某个房间：房号或主系统编号都可（如 D501）' },
       type: { type: 'string', description: '可选，按记录类型过滤（如 checkin / checkout）' }
     },
     required: [],

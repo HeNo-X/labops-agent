@@ -18,9 +18,15 @@ export let nextResponse: Record<string, unknown> = {};
 export function setNextResponse(v: Record<string, unknown>): void {
   nextResponse = v;
 }
+/** 让下一次 businessRequest 抛错（验服务端错误如何如实上抛） */
+export let nextError: Error | null = null;
+export function setNextError(e: Error | null): void {
+  nextError = e;
+}
 export function resetCalls(): void {
   calls.length = 0;
   nextResponse = {};
+  nextError = null;
 }
 
 export function businessScope(): { scopeKey: string; generation: number; principal: null } {
@@ -31,6 +37,7 @@ export function isBusinessConnected(): boolean {
 }
 export async function businessRequest(path: string, method = 'GET', body?: unknown): Promise<Record<string, unknown>> {
   calls.push({ path, method, body });
+  if (nextError) throw nextError;
   return nextResponse;
 }
 export function rememberBusinessTask(): void {

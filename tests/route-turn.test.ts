@@ -52,6 +52,12 @@ test('R4 单程往返白名单：只读单调用允许；多调用/多意图/写
   assert.equal(one.singlePassEligible('query_schedule', 1), true);
   assert.equal(one.singlePassEligible('query_schedule', 2), false, '多调用说明还要更多信息');
   assert.equal(one.singlePassEligible('prepare_issue_ticket', 1), false, '写类工具绝不单程定稿');
+  // 逐人明细与目录都是"一问一工具"的只读查询，渲染器已有 records 分支：
+  // 不给单程资格就等于每次多烧一轮模型往返（实测 4.4s 对 15~30s）。
+  for (const tool of ['query_checkin_records', 'query_openlab_records', 'query_key_records', 'query_user_directory']) {
+    assert.equal(one.singlePassEligible(tool, 1), true, `${tool} 应可单程定稿`);
+    assert.equal(one.singlePassEligible(tool, 2), false, `${tool} 多调用时仍需第二轮`);
+  }
   const multi = turn('查E310课表，再看看E312');
   assert.equal(multi.singlePassEligible('query_schedule', 1), false, '多意图标记命中就走第二轮');
   process.env.AGENT_SINGLE_PASS = '0';

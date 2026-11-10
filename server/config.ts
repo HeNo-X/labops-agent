@@ -249,7 +249,7 @@ export function getConfig(): AppConfig {
       maxCooloffMs: int('LLM_CIRCUIT_MAX_COOLLOFF_MS', 300000, 5000, 3600000)
     },
     agent: {
-      maxSteps: int('AGENT_MAX_STEPS', 6, 1, 12),
+      maxSteps: int('AGENT_MAX_STEPS', 8, 1, 12), // 批5 灰度 6→8（三段任务撞顶；计划联动见 run.ts）
       wallClockMs: int('AGENT_WALL_CLOCK_MS', 120000, 5000, 600000),
       /**
        * 上下文预算（确定性截断，不做 LLM 摘要压缩）。

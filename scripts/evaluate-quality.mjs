@@ -131,6 +131,10 @@ if (modelConfigured) {
         }
       : null;
     const refusedOrClarified = refusedOrClarifiedBase || Boolean(boundary?.refusalText);
+    // 批次5：多意图完成度——多意图标记（然后/再/顺便…）问句的每个分句都要有对应结论
+    const multiIntent = sc.expectMultiIntent
+      ? { toolCount: startedTools.length, mentions: (sc.expectMultiIntent.mentions ?? []).map((m) => ({ m, found: answer.includes(m) })) }
+      : null;
     rows.push({
       id: sc.id,
       note: sc.note,
@@ -147,12 +151,15 @@ if (modelConfigured) {
       completed: Boolean(done),
       routing,
       boundary,
-      slotCheck
+      slotCheck,
+      multiIntent
     });
     let flag = sc.expectRefusal ? (refusedOrClarified ? 'PASS' : 'FAIL') : hallucination.verdict === 'suspect' ? 'SUSPECT' : 'ok';
     if (routing && !routing.matched) flag = 'ROUTE-MISMATCH';
     if (boundary && (!boundary.zeroTools || !boundary.refusalText)) flag = 'BOUNDARY-FAIL';
     if (slotCheck && Object.values(slotCheck).some((v) => v === false)) flag = 'SLOT-MISMATCH';
+    // 多意图完成度只在 model 模式判定（demo 引擎内联计算不发射 tool_started，分句覆盖天然不全）
+    if (multiIntent && mode === 'model' && multiIntent.mentions.some((x) => !x.found)) flag = 'MULTI-INCOMPLETE';
     console.log(`${sc.id} ${flag}${hallucination.unsupported.length ? ` 无出处数字: ${hallucination.unsupported.join(',')}` : ''}`);
   }
 }
@@ -177,6 +184,10 @@ const metrics = {
     matched: routingRows.filter((r) => r.routing.matched).length,
     total: routingRows.length,
     boundaryOk: rows.filter((r) => r.boundary).every((r) => r.boundary.zeroTools && r.boundary.refusalText)
+  },
+  multiIntent: {
+    scenarios: rows.filter((r) => r.multiIntent).length,
+    complete: rows.filter((r) => r.multiIntent && r.multiIntent.mentions.every((x) => x.found)).length
   }
 };
 const summary = modelConfigured ? summarize(rows, refusal) : null;
@@ -235,6 +246,8 @@ ${
     <div><b>${report.metrics.latencyMs.p90 ?? '—'} ms</b><span>时延 P90（P50 ${report.metrics.latencyMs.p50 ?? '—'} ms · ${report.metrics.latencyMs.samples} 轮）</span></div>
     <div><b>${report.metrics.promptTokens.p50 ?? '—'}</b><span>提示体积 P50 tokens（P90 ${report.metrics.promptTokens.p90 ?? '—'}）</span></div>
     <div><b>${report.metrics.routing.total ? pct(report.metrics.routing.matched / report.metrics.routing.total) : '—'}</b><span>路由一致率（${report.metrics.routing.matched}/${report.metrics.routing.total}）· 边界婉拒 ${report.metrics.routing.boundaryOk ? '✓' : '<span class="bad">异常</span>'}</span></div>
+    <div><b>${report.metrics.multiIntent.scenarios ? report.metrics.multiIntent.complete + '/' + report.metrics.multiIntent.scenarios : '—'}</b><span>多意图完成度</span></div>
+    <div><b>${report.metrics.multiIntent.scenarios ? report.metrics.multiIntent.complete + '/' + report.metrics.multiIntent.scenarios : '—'}</b><span>多意图完成度</span></div>
   </div>`
     : `<p class="bad">未运行：${esc(report.reason)}</p>`
 }

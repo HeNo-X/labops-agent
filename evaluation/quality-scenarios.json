@@ -176,5 +176,24 @@
     "expectRefusal": true,
     "expectTools": [],
     "note": "错例回归③答非所问：代签类请求必须确定性婉拒且零工具调用"
+  },
+  {
+    "id": "Q16",
+    "turns": [
+      "E310 现在有多少人？顺便看看今天有什么课"
+    ],
+    "role": "admin",
+    "expectKind": "multi",
+    "expectTools": [
+      "query_lab_status",
+      "query_schedule"
+    ],
+    "expectMultiIntent": {
+      "mentions": [
+        "E310",
+        "课"
+      ]
+    },
+    "note": "多意图完成度：两个分句都必须有对应结论"
   }
 ]

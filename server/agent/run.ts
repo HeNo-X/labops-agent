@@ -667,6 +667,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
 
     /** 单程白名单命中标记：批次2 答案生成权回交对该路径豁免（渲染即答案） */
   let singlePassCandidate = false;
+// 批5：有效步数上限（多步计划联动可放宽 +2）；初始=配置值
+let effectiveMaxSteps = cfg.agent.maxSteps;
 while (steps < cfg.agent.maxSteps) {
     if (a.signal?.aborted) return;
     if (a.watch.ms > cfg.agent.wallClockMs) {
@@ -678,7 +680,7 @@ while (steps < cfg.agent.maxSteps) {
     // A4 收敛前复述：带失败进入最后一轮（或连续失败 ≥2）时，把失败摘要重新
     // 注入一条 system 消息——逼模型换路或如实交代，而不是用注定失败的重试
     // 耗尽步数（Manus「keep the wrong stuff in」）。
-    if (shouldReciteFailure({ steps, maxSteps: cfg.agent.maxSteps, hasFailure: lastToolFailure !== null, consecutiveToolFailures, recited: failureRecited })) {
+    if (shouldReciteFailure({ steps, maxSteps: effectiveMaxSteps, hasFailure: lastToolFailure !== null, consecutiveToolFailures, recited: failureRecited })) {
       failureRecited = true;
       a.log.warn('failure_recitation', { steps, tool: lastToolFailure?.tool, code: lastToolFailure?.code });
       messages.push({ role: 'system', content: failureRecitationText(lastToolFailure!) });
@@ -821,7 +823,7 @@ while (steps < cfg.agent.maxSteps) {
           role: 'system',
           content: '检测到你重复调用了同一个工具且参数相同。请立即停止调用工具，直接依据已有结果回答用户。'
         });
-        steps = cfg.agent.maxSteps; // 逼出循环
+        steps = effectiveMaxSteps; // 逼出循环
         break;
       }
 
@@ -857,7 +859,10 @@ while (steps < cfg.agent.maxSteps) {
         // 单独以 plan_updated 事件广播给界面（计划面板）。
         if(exec.resultKind!=='task_plan')verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result,summary:exec.summary},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label,question:a.question}));
         if(exec.resultKind==='task_plan'){
-          yield a.emit('plan_updated',{steps:(exec.result as {steps:import('../../shared/types.ts').TaskPlanStep[]}).steps,updatedAt:nowIso()} satisfies import('../../shared/types.ts').TaskPlanUpdatedPayload);
+          const planSteps=(exec.result as {steps:import('../../shared/types.ts').TaskPlanStep[]}).steps;
+          yield a.emit('plan_updated',{steps:planSteps,updatedAt:nowIso()} satisfies import('../../shared/types.ts').TaskPlanUpdatedPayload);
+          // 批5：多步计划联动放宽——模型规划 ≥3 步说明任务比默认预算长，自动 +2（封顶 12）
+          if (planSteps.length >= 3) effectiveMaxSteps = Math.min(12, cfg.agent.maxSteps + 2);
         }
         yield a.emit('tool_result', {
           step: steps,

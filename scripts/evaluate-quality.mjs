@@ -27,7 +27,11 @@ process.env.LABOPS_DB_PATH = path.join(temp, 'eval.sqlite');
 process.env.LIVE_DATA = '0';
 process.env.LABOPS_AUTH_MODE = 'demo';
 if (mode === 'demo') {
-  // 与 run-review 同一手法：置空 Key ⇒ 走确定性引擎，结果可复现
+  // 与 run-review 同一手法：置空 Key ⇒ 走确定性引擎，结果可复现。
+  // 批次1 补：必须同时 LABOPS_SKIP_ENV_FILE=1 —— config.ensureEnv 的 loadEnvFile
+  // 只补「未设置」的变量，.env 里的真 Key 会被补回，"demo 模式"实际打到真模型
+  // （实测：槽位断言因真模型的非确定参数而随机失败）。
+  process.env.LABOPS_SKIP_ENV_FILE = '1';
   process.env.AGNES_API_KEY = '';
   process.env.DASHSCOPE_API_KEY = '';
 }
@@ -67,6 +71,7 @@ const basis = {
 };
 
 const rows = [];
+const perTurn = [];
 const modelConfigured = mode === 'demo' || Boolean(cfg.agnes.apiKey);
 
 if (modelConfigured) {
@@ -76,8 +81,18 @@ if (modelConfigured) {
     let turn = [];
     for (const question of sc.turns) {
       turn = [];
+      const t0 = Date.now();
       await requestIdentity.run(actor, async () => {
         for await (const e of runAgent({ question, actor, sessionId, mode: 'task' })) turn.push(e);
+      });
+      // 批次1：每轮时延与提示体积量化（确定性引擎的 usage 可能缺省，如实收集）
+      const doneEarly = turn.find((e) => e.type === 'run_completed')?.payload;
+      perTurn.push({
+        scenario: sc.id,
+        question,
+        ms: doneEarly?.ms ?? Date.now() - t0,
+        promptTokens: Number(doneEarly?.usage?.promptTokens) || null,
+        toolCount: turn.filter((e) => e.type === 'tool_started').length
       });
     }
     const done = turn.find((e) => e.type === 'run_completed')?.payload;
@@ -96,7 +111,26 @@ if (modelConfigured) {
     const redirected = /超出了实验室助手的服务范围/.test(answer);
     const clarified = /我没有识别到|请告诉我实验室名称|请把问题写得具体/.test(answer) ||
       turn.some((e) => e.type === 'run_failed' && ['out_of_scope', 'redirect', 'clarify'].includes(e.payload?.code));
-    const refusedOrClarified = redirected || clarified;
+    const refusedOrClarifiedBase = redirected || clarified;
+    // 批次1：路由一致（expectTools 与实际调用的工具集相交）+ 边界婉拒（零工具）+ 参数槽位断言。
+    // 口径说明：demo 引擎对多数查询**内联计算、不发射 tool_started**（实测 Q02/Q11/Q12），
+    // 班级确定性提取也不走 demo 路径——路由/槽位断言只在 model 模式有样本，demo 下如实置空。
+    const startedTools = turn.filter((e) => e.type === 'tool_started').map((e) => e.payload?.tool);
+    const boundary = sc.expectKind === 'boundary_refusal'
+      ? { zeroTools: startedTools.length === 0, refusalText: /做不了|不能代签|不能代为补录/.test(answer) }
+      : null;
+    const routing = mode === 'model' && sc.expectTools && sc.expectTools.length
+      ? { expected: sc.expectTools, matched: sc.expectTools.some((t) => startedTools.includes(t)) }
+      : null;
+    const lastScheduleCall = mode === 'model' ? turn.filter((e) => e.type === 'tool_started' && e.payload?.tool === 'query_schedule').at(-1)?.payload?.args : undefined;
+    const slotCheck = mode === 'model' && sc.expectArgs
+      ? {
+          classNameOk: sc.expectArgs.className ? lastScheduleCall?.className === sc.expectArgs.className : null,
+          labCarryForbidden: sc.expectArgs.forbidLabCarry ? lastScheduleCall?.labName !== 'E310' : null,
+          labCarryApplied: sc.expectArgs.labNameCarried ? lastScheduleCall?.labName === sc.expectArgs.labNameCarried : null
+        }
+      : null;
+    const refusedOrClarified = refusedOrClarifiedBase || Boolean(boundary?.refusalText);
     rows.push({
       id: sc.id,
       note: sc.note,
@@ -110,9 +144,15 @@ if (modelConfigured) {
       refusalHonoured: sc.expectRefusal ? refusedOrClarified : null,
       hallucination,
       citation,
-      completed: Boolean(done)
+      completed: Boolean(done),
+      routing,
+      boundary,
+      slotCheck
     });
-    const flag = sc.expectRefusal ? (refusedOrClarified ? 'PASS' : 'FAIL') : hallucination.verdict === 'suspect' ? 'SUSPECT' : 'ok';
+    let flag = sc.expectRefusal ? (refusedOrClarified ? 'PASS' : 'FAIL') : hallucination.verdict === 'suspect' ? 'SUSPECT' : 'ok';
+    if (routing && !routing.matched) flag = 'ROUTE-MISMATCH';
+    if (boundary && (!boundary.zeroTools || !boundary.refusalText)) flag = 'BOUNDARY-FAIL';
+    if (slotCheck && Object.values(slotCheck).some((v) => v === false)) flag = 'SLOT-MISMATCH';
     console.log(`${sc.id} ${flag}${hallucination.unsupported.length ? ` 无出处数字: ${hallucination.unsupported.join(',')}` : ''}`);
   }
 }
@@ -120,6 +160,24 @@ if (modelConfigured) {
 const refusal = {
   expected: rows.filter((r) => r.expectRefusal).length,
   honoured: rows.filter((r) => r.expectRefusal && r.refused).length
+};
+// 批次1 三指标：时延分位 / 提示体积分位 / 路由一致率（最近邻秩法分位，小样本稳定）
+function percentile(values, ratio) {
+  const xs = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  if (!xs.length) return null;
+  return xs[Math.min(xs.length - 1, Math.ceil(ratio * xs.length) - 1)];
+}
+const latencies = perTurn.map((t) => t.ms);
+const promptSizes = perTurn.map((t) => t.promptTokens).filter((v) => v !== null);
+const routingRows = rows.filter((r) => r.routing);
+const metrics = {
+  latencyMs: { p50: percentile(latencies, 0.5), p90: percentile(latencies, 0.9), samples: latencies.length },
+  promptTokens: { p50: percentile(promptSizes, 0.5), p90: percentile(promptSizes, 0.9), samples: promptSizes.length },
+  routing: {
+    matched: routingRows.filter((r) => r.routing.matched).length,
+    total: routingRows.length,
+    boundaryOk: rows.filter((r) => r.boundary).every((r) => r.boundary.zeroTools && r.boundary.refusalText)
+  }
 };
 const summary = modelConfigured ? summarize(rows, refusal) : null;
 const outDir = path.join(PROJECT_ROOT, '.evaluation');
@@ -134,6 +192,7 @@ const report = {
   reason: modelConfigured ? null : `未配置 ${mode} 模式所需 Key，未调用真实模型；不冒充已测。`,
   scenarios: scenarios.length,
   summary,
+  metrics,
   limitations: [
     '幻觉指标只覆盖**数字断言**：实体名称与因果推断需要 NER 与别名表，做不准的指标比没有指标更有害，故不报。',
     mode === 'demo'
@@ -173,6 +232,9 @@ ${
     <div><b>${pct(summary.hallucination.rate)}</b><span>幻觉率（${summary.hallucination.suspect}/${summary.hallucination.checked} 样本含无出处数字）</span></div>
     <div><b>${pct(summary.citation.accuracy)}</b><span>引用准确率（${summary.citation.checked} 处引用，${summary.citation.wrong} 处有误）</span></div>
     <div><b>${pct(summary.refusal.rate)}</b><span>越权/越界拦截率（${summary.refusal.honoured}/${summary.refusal.expected}）</span></div>
+    <div><b>${report.metrics.latencyMs.p90 ?? '—'} ms</b><span>时延 P90（P50 ${report.metrics.latencyMs.p50 ?? '—'} ms · ${report.metrics.latencyMs.samples} 轮）</span></div>
+    <div><b>${report.metrics.promptTokens.p50 ?? '—'}</b><span>提示体积 P50 tokens（P90 ${report.metrics.promptTokens.p90 ?? '—'}）</span></div>
+    <div><b>${report.metrics.routing.total ? pct(report.metrics.routing.matched / report.metrics.routing.total) : '—'}</b><span>路由一致率（${report.metrics.routing.matched}/${report.metrics.routing.total}）· 边界婉拒 ${report.metrics.routing.boundaryOk ? '✓' : '<span class="bad">异常</span>'}</span></div>
   </div>`
     : `<p class="bad">未运行：${esc(report.reason)}</p>`
 }

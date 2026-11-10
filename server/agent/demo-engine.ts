@@ -794,8 +794,9 @@ function renderScheduleAnswer(
   // 来源徽章与结构化卡已经在界面承担，正文只留改变结论的例外说明。
   const lines: string[] = [];
   const lastLesson = result.lessons[result.lessons.length - 1]!;
+  const courseOf = (l: ScheduleQueryResult['lessons'][number]) => l.courseName || '课程名未录入';
   lines.push(
-    `**${head}共有 ${result.lessons.length} 条排课**，从 ${result.lessons[0]!.startTime} 的《${result.lessons[0]!.courseName}》到 ${lastLesson.endTime} 的《${lastLesson.courseName}》。`
+    `**${head}共有 ${result.lessons.length} 条排课**，从 ${result.lessons[0]!.startTime} 的《${courseOf(result.lessons[0]!)}》到 ${lastLesson.endTime} 的《${courseOf(lastLesson)}》。`
   );
   const byPeriod = result.byPeriod.filter((b) => b.count > 0);
   if (byPeriod.length) {

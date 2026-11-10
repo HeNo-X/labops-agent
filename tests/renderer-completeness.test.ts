@@ -315,3 +315,28 @@ test('空知识命中、空工作计划及未导入档案仍保留能力边界',
     assert.match(bothImported, /数据来自主系统独立只读档案/);
   }
 });
+
+test('线上真实形态：名单是姓名字符串数组，问"这节谁值班"要给出该节姓名', async () => {
+  const { normalizePersons } = await import('../server/tools/query-term-schedule.ts');
+  // 线上 /term-schedule 的 volunteerSchedule.persons 是 ["尉佳琳","于宏",…]，旧夹具才是对象数组；
+  // 只按对象取 name 会把 31 人整体丢成空表（2026-11-10 彩排实测到"0 名志愿者"）
+  const mixed = normalizePersons(['尉佳琳', '  ', { name: '周有蓉', className: '计本2401', group: 'A组' }, { name: '' }, null, 7]);
+  assert.deepEqual(mixed, [{ name: '尉佳琳', className: '', group: '' }, { name: '周有蓉', className: '计本2401', group: 'A组' }]);
+  assert.deepEqual(normalizePersons(undefined), []);
+
+  const rendered = renderDemoAnswer({ kind: 'term_schedule', payload: { ...termSchedule,
+    volunteerSchedule: { ...termSchedule.volunteerSchedule, days: [{ weekday: 2, slots: [] }], persons: [{ name: '尉佳琳', className: '', group: '' }], expected: { slotCode: '12', weekday: 2, names: ['尉佳琳'], vacantCount: 2 } } } }, { ...extras, textOnly: false });
+  assert.match(rendered, /周二 12 节应值班：尉佳琳/);
+  assert.match(rendered, /另有 2 个席位未在表上指名/);
+  const placeholder = renderDemoAnswer({ kind: 'term_schedule', payload: { ...termSchedule,
+    volunteerSchedule: { ...termSchedule.volunteerSchedule, persons: [{ name: '78节', className: '', group: '' }], expected: { slotCode: '78', weekday: 1, names: ['78节'], vacantCount: 0 } } } }, { ...extras, textOnly: false });
+  assert.doesNotMatch(placeholder, /应值班：78节/, '源表占位标签不能当人名念给用户');
+  assert.match(placeholder, /未填姓名/);
+  // 名单行同样不把占位标签当人名，也不给无班级的人打印空括号
+  const roster = renderDemoAnswer({ kind: 'term_schedule', payload: { ...termSchedule,
+    volunteerSchedule: { ...termSchedule.volunteerSchedule, persons: [{ name: '12节', className: '', group: '' }, { name: '尉佳琳', className: '', group: '' }, { name: '周有蓉', className: '计本2401', group: 'A组' }] } } }, { ...extras, textOnly: false });
+  assert.doesNotMatch(roster, /值班志愿者：12节/, '名单行同样要滤掉节次占位');
+  assert.match(roster, /尉佳琳、周有蓉（计本2401 · A组）/);
+  assert.doesNotMatch(roster, /尉佳琳（）/, '没有班级/组时不打印空括号');
+  assert.match(roster, /另有 1 个席位以节次标签占位、未填姓名/);
+});

@@ -246,8 +246,21 @@ test('E6 红线：调课链同样不许出现 plans/commit', async () => {
   assert.ok(spy.every(s => !('planId' in s.args)), '不许直接提交方案编号');
 });
 
-// ============================ 批次F：钥匙借还链 ============================
+test('E7 「原因是X」这种最自然的说法也要进链（彩排实测：正则少收「是」时整条链零执行，白烧 3 轮模型 81.5 s）', async () => {
+  const spy: Array<{ tool: string; args: Record<string, unknown> }> = [];
+  const q = '2026-11-16 第一大节 E310 的 Java 程序设计想换到 E312，原因是投影仪故障，帮我准备调课提案';
+  assert.equal(detectChain({ question: q, mode: 'task' }), 'schedule_move');
+  const out = await runChain('schedule_move', {
+    question: q, intent: intent({ labName: 'E310', periodKey: 'am1', periodKeys: null }), ds: { labs: [{ id: 'lab-e310', name: 'E310' }, { id: 'lab-e312', name: 'E312' }], openLabs: [] } as never, now, mode: 'task',
+    execute: moveHarness(spy, { lessons: [{ timetableId: 'tt-java', periodKey: 'am1', courseName: 'Java 程序设计', className: '智能本2501' }] })
+  });
+  assert.equal(spy.length, 2, '前置条件齐了就该执行，不该交回模型');
+  assert.equal(spy[1]!.args.reason, '投影仪故障');
+  assert.equal(spy[1]!.args.toLabId, 'lab-e312');
+  assert.equal(out.awaitingConfirmation, true);
+});
 
+// ============================ 批次F：钥匙借还链 ============================
 const keyDs = { labs: [{ id: 'lab-e310', name: 'E310' }], openLabs: [] } as never;
 function keyHarness(spy: Array<{ tool: string; args?: Record<string, unknown> }>, keys: Array<{ id: string; name: string; labName: string; holder: string; borrowed: boolean }>, prepareFail?: { code: string; message: string }) {
   return async (tool: string, args: Record<string, unknown>) => {
@@ -329,6 +342,19 @@ test('F5 借用人不存在等主系统拒绝如实上报；链里绝不出现�
   assert.equal(out.steps.length, 2);
   assert.match(String(out.stoppedReason), /holder_invalid/);
   assert.ok(!spy.some(s => /commit|confirm|apply/i.test(s.tool)));
+});
+
+test('F6 只给角色称谓（志愿者/学生）时零执行交回模型：不许先查台账再留一条注定失败的写步骤', async () => {
+  for (const to of ['志愿者', '学生', '管理员']) {
+    const spy: Array<{ tool: string }> = [];
+    const out = await runChain('key_transaction', {
+      question: `把 E312 的钥匙借给${to}，用于今天下午第一节，帮我准备借出提案`, intent: intent({ labName: 'E312' }), ds: keyDs, now, mode: 'task',
+      execute: async (tool) => { spy.push({ tool }); return { ok: true, resultKind: 'records', summary: '', result: { keys: [] } } as never; }
+    });
+    assert.equal(spy.length, 0, `${to}：不该执行任何步骤`);
+    assert.equal(out.answer, null);
+    assert.match(String(out.stoppedReason), /角色称谓/, `${to}：应说明要问具体哪一位`);
+  }
 });
 
 test('D9 接线守卫：run.ts 必须真的调用编排，且交回模型时不产生任何事件', async () => {

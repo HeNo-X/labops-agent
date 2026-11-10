@@ -216,7 +216,8 @@ function mentionedRooms(ds: Dataset, question: string): Array<{ id: string; name
 }
 
 function statedReason(question: string): string | null {
-  const m = /(?:因为|由于|原因[：:为])\s*([^。，,；;\n]+)/.exec(question);
+  // 「原因是投影仪故障」是最自然的说法，字符类里少了「是」会让整条链零执行交回模型（2026-11-10 彩排实测到）
+  const m = /(?:因为|由于|原因[：:是为])\s*([^。，,；;\n]+)/.exec(question);
   const v = m?.[1]?.trim();
   return v && v.length >= 2 ? v : null;
 }
@@ -312,7 +313,13 @@ async function runKeyTransaction(deps: ChainDeps): Promise<ChainOutcome> {
   if (!returning) {
     const to = KEY_LEND_RE.exec(q)?.[1]?.trim();
     if (!to) return stop('缺借给人（用户未说明借给谁，不能猜）');
-    if (!/^(我|本人|自己)$/.test(to)) holderUsername = to;
+    if (!/^(我|本人|自己)$/.test("") ) {
+      // 角色称谓不是账号：主系统一定回 holder_invalid，与其留一条失败的写步骤，不如零执行交回模型问用户
+      if (/^(志愿者|学生|管理员|老师|教师|同学|值班员|负责人|操作员)(们|同学)?$/.test(to)) {
+        return stop(`借用人只说了「${to}」这类角色称谓，不是具体账号或姓名——需先问清借给哪一位，我不替你挑人`);
+      }
+      holderUsername = to;
+    }
   }
 
   // —— ① 查台账定位钥匙（按房间名查，与全仓 id-or-name 口径一致） ——

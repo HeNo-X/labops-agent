@@ -689,9 +689,22 @@ function renderTermScheduleAnswer(r: TermScheduleResult): string {
   const t = r.termSchedule, v = r.volunteerSchedule;
   lines.push(`**学期安排**：${t.enabled ? `已导入 · ${t.term || '（学期名未填）'}${t.weeks ? ` · ${t.weeks} 周` : ''} · ${t.sessions.length} 条课时` : '尚未导入'}`);
   lines.push(`**志愿者周值班模板**：${v.enabled ? `已导入 · ${v.days.length} 天 · ${v.persons.length} 名志愿者` : '尚未导入'}`);
+  // 用户问的是「这一节谁值班」，只报总人数答不上问题；带节次查询时把该节应值班的人直接给出来
+  if (v.enabled && v.expected) {
+    // 源表里没填名字的席位用节次标签占位（如「78节」），不能当成人名念给用户
+    const named = v.expected.names.filter(n => n && !/^\d{1,2}节$/.test(n));
+    const unnamed = v.expected.names.length - named.length + v.expected.vacantCount;
+    const wd = '一二三四五六日'[Math.min(6, Math.max(0, v.expected.weekday - 1))];
+    lines.push(`- 本周${wd} ${v.expected.slotCode} 节应值班：${named.length ? named.join('、') : '（未填姓名）'}${unnamed > 0 ? ` · 另有 ${unnamed} 个席位未在表上指名` : ''}`);
+  }
   if (t.enabled && t.cancelled.length) lines.push(`- 已登记停课/取消 ${t.cancelled.length} 条`);
   if (v.enabled && v.persons.length) {
-    lines.push(`- 值班志愿者：${v.persons.slice(0, 10).map((p) => `${p.name}（${p.className}${p.group ? ` · ${p.group}` : ''}）`).join('、')}${v.persons.length > 10 ? ` 等共 ${v.persons.length} 人` : ''}`);
+    // 源表里没填名字的席位用节次标签占位（如「12节」「78节」），既不算人名，也不配一个空的「（）」
+    const named = v.persons.filter((p) => p.name && !/^\d{1,2}节$/.test(p.name));
+    const placeholderCount = v.persons.length - named.length;
+    const who = named.slice(0, 10).map((p) => `${p.name}${p.className || p.group ? `（${[p.className, p.group].filter(Boolean).join(' · ')}）` : ''}`);
+    const tail = named.length > 10 ? ` 等共 ${named.length} 人` : '';
+    lines.push(`- 值班志愿者：${who.length ? who.join('、') + tail : '（表上未填姓名）'}${placeholderCount > 0 ? ` · 另有 ${placeholderCount} 个席位以节次标签占位、未填姓名` : ''}`);
   }
   // hint 是**给模型的处置指引**（原文是"请如实告知用户并提示联系管理员"），
   // 原样印进正文会让用户读到一句对本机指令的复述（2026-11-10 真实数据实机实测到）。

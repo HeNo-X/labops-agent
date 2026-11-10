@@ -118,6 +118,23 @@ function objArray(v: unknown): Array<Record<string, unknown>> {
   return Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x)) : [];
 }
 
+/**
+ * 名单兼容两种真实形态：线上导入的是**姓名字符串数组**（31 人），旧夹具是对象数组。
+ * 只按对象取 name 会把线上名单整体丢成空表 → 用户读到"0 名志愿者"（2026-11-10 彩排实测到）。
+ */
+export function normalizePersons(v: unknown): Array<{ name: string; className: string; group: string }> {
+  if (!Array.isArray(v)) return [];
+  return v.map((p): { name: string; className: string; group: string } | null => {
+    if (typeof p === 'string') return p.trim() ? { name: p.trim(), className: '', group: '' } : null;
+    if (p && typeof p === 'object' && !Array.isArray(p)) {
+      const o = p as Record<string, unknown>;
+      const name = String(o['name'] || '').trim();
+      return name ? { name, className: String(o['className'] || ''), group: String(o['group'] || '') } : null;
+    }
+    return null;
+  }).filter((p): p is { name: string; className: string; group: string } => p !== null);
+}
+
 /** 未接入呈现：即便上游缺字段，也把「尚未导入」显式落到结果里，杜绝把空当事实 */
 export async function runQueryTermSchedule(args: TermScheduleArgs, signal?: AbortSignal): Promise<TermScheduleResult> {
   const q = new URLSearchParams();
@@ -153,9 +170,7 @@ export async function runQueryTermSchedule(args: TermScheduleArgs, signal?: Abor
       enabled: vImported,
       notImported: !vImported,
       days: objArray(v['days']),
-      persons: objArray(v['persons']).map(p => ({
-        name: String(p['name'] || ''), className: String(p['className'] || ''), group: String(p['group'] || '')
-      })),
+      persons: normalizePersons(v['persons']),
       personsMissingProfile: strArray(v['personsMissingProfile']),
       expected: (v['expected'] && typeof v['expected'] === 'object')
         ? v['expected'] as TermScheduleResult['volunteerSchedule']['expected'] : null,

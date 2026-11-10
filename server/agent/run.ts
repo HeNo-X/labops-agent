@@ -47,7 +47,7 @@ import type { ChatMessage, TokenUsage } from '../llm/agnes.ts';
 import { executeTool, toolSpecs, toolsForMode } from '../tools/registry.ts';
 import { availableRoomNames } from '../tools/query-schedule.ts';
 import { applyHintsToSlots, applySessionCarry, buildTimeContext, parseIntent } from './intent.ts';
-import { contextHintsEnabled } from '../config.ts';
+import { answerGeneration, contextHintsEnabled } from '../config.ts';
 import type { Intent } from './intent.ts';
 import { getSession, rememberSession } from './session.ts';
 import { loadContext } from '../persistence/db.ts';
@@ -412,6 +412,12 @@ export function shouldShiftModel(code: string | undefined, sawTool: boolean, saw
   return code !== undefined && MODEL_SHIFT_CODES.has(code) && !sawTool && !sawDelta;
 }
 
+/** 批次2 核对层：模型终稿里的数字 token，凡在本轮证据（工具结果+原话）中找不到的即「越界数字」 */
+export function unsupportedNumbers(text: string, evidence: string): string[] {
+  const tokens = [...new Set(text.match(/\d+(?:\.\d+)?/g) ?? [])];
+  return tokens.filter((nn) => !evidence.includes(nn));
+}
+
 interface DemoArgs {
   question: string;
   intent: Intent;
@@ -641,8 +647,11 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   let lastToolFailure: { tool: string; code: string; message: string; suggestions: string[] } | null = null;
   const verifiedAnswers: string[] = [];
   const businessFacts:BusinessResult[]=[];
-  let modelFinal='';
+  // 批次2：工具结果（成功）的 JSON 与 summary——模型终稿的**数字核对证据**
+  const toolEvidence: string[] = [];
+  let verificationRetried = false;
   let recommendationRetried = false;
+  let modelFinal='';
   /** A10：模型链中途死亡（配额/超时/网络）——已有确定性结果时用它作答并如实标注 */
   let modelUnavailable = false;
   /** 上下文预算的最近一次决策（随 run_completed 带出供界面展示，不参与任何业务判定） */
@@ -656,7 +665,9 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   let consecutiveToolFailures = 0;
   let failureRecited = false;
 
-  while (steps < cfg.agent.maxSteps) {
+    /** 单程白名单命中标记：批次2 答案生成权回交对该路径豁免（渲染即答案） */
+  let singlePassCandidate = false;
+while (steps < cfg.agent.maxSteps) {
     if (a.signal?.aborted) return;
     if (a.watch.ms > cfg.agent.wallClockMs) {
       a.log.warn('wall_clock_exceeded', { steps, ms: a.watch.ms });
@@ -757,7 +768,7 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
      *   · 工具属于只读查询白名单（不碰 prepare/提案/内部任务计划）；
      *   · 用户原话里没有"然后/再/顺便/以及/对比/分别"这类多步意图标记。
      */
-    let singlePassCandidate = false;
+    singlePassCandidate = false;
     for (let ci = 0; ci < calls.length; ci++) {
       const call = calls[ci]!;
       const name = call.function.name;
@@ -868,6 +879,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
             allowedDecisions: ['confirm', 'reject']
           } satisfies NeedConfirmPayload);
         }
+        // 批次2：核对层证据（结果 JSON + summary 里的派生计数，模型终稿的数字都要能在这里找到）
+        toolEvidence.push(JSON.stringify(exec.result ?? {}) + '\n' + (exec.summary ?? ''));
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -925,9 +938,38 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
 
   if (verifiedAnswers.length) {
     const explanation=verifiedRecommendation(modelFinal,businessFacts);
-    answer = verifiedAnswers.join('\n\n')+(explanation?'\n\n'+explanation:'');
-    // A10：模型链中途死亡时如实标注——答案是工具结果的确定性渲染，不是大模型润色稿
-    if (modelUnavailable) answer += '\n\n（模型链中途不可用：以上为工具结果的确定性渲染，未经大模型润色。）';
+    const rendered=verifiedAnswers.join('\n\n')+(explanation?'\n\n'+explanation:'');
+    // 批次2（答案生成权回交）：工具结果是**证据**，最终答复的表达权交回模型；
+    // verifiedAnswers/渲染器降为核对层与兜底。豁免：单程短路（无模型终稿）、链路中途死亡（残稿不可信）。
+    const modelDraft = answerGeneration() === 'model' && !modelUnavailable && !singlePassCandidate && modelFinal.trim()
+      ? modelFinal : null;
+    const evidence = toolEvidence.join('\n') + '\n' + a.question;
+    let modelAnswer: string | null = null;
+    if (modelDraft) {
+      const unsupported = unsupportedNumbers(modelDraft, evidence);
+      if (!unsupported.length) {
+        modelAnswer = modelDraft;
+      } else if (!verificationRetried && !a.signal?.aborted) {
+        // 核对失败：打回重写一次（禁工具、指明越界数字）；再不过→降级渲染并如实标注
+        verificationRetried = true;
+        a.log.warn('answer_number_check_failed', { unsupported, reason: '模型终稿出现工具结果中不存在的数字——打回重写一次' });
+        messages.push({ role:'system', content: `你上一条回答里出现了本轮工具结果中不存在的数字：${unsupported.join('、')}。请重写最终回答：所有数字与名称必须逐字来自本轮工具结果；结果里没有的信息如实写"未提供/查不到"；不要调用工具；中文简洁。` });
+        let retryText = '';
+        for await (const ev of streamChatWithFallback({ messages, tools: [], signal: a.signal }, a.mode ?? 'task', a.log, (spec) => { usedModel = spec.model; }, a.providerShift ?? 0)) {
+          if (ev.type === 'text') retryText += ev.text;
+          if (ev.type === 'usage') usage = {promptTokens:(usage?.promptTokens ?? 0)+ev.usage.promptTokens,completionTokens:(usage?.completionTokens ?? 0)+ev.usage.completionTokens,totalTokens:(usage?.totalTokens ?? 0)+ev.usage.totalTokens};
+        }
+        const unsupported2 = unsupportedNumbers(retryText, evidence);
+        if (retryText.trim() && !unsupported2.length) modelAnswer = retryText;
+      }
+    }
+    if (modelAnswer !== null) {
+      answer = modelAnswer + (explanation ? '\n\n' + explanation : '');
+    } else {
+      answer = rendered;
+      if (modelDraft && modelAnswer === null && !modelUnavailable) answer += '\n\n（模型表述未通过数字核对：出现了工具结果中不存在的数字，已退回工具结果的确定性渲染。）';
+      if (modelUnavailable) answer += '\n\n（模型链中途不可用：以上为工具结果的确定性渲染，未经大模型润色。）';
+    }
   } else if (!lastToolFailure && !a.route.smalltalk) {
     answer='我还需要更明确的实验室查询条件。请说明房间、日期或要办理的事项，例如“E310 今天有哪些课？”。';
   } else if (!a.route.smalltalk) {

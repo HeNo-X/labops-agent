@@ -315,3 +315,11 @@ export function describeConfig(c: AppConfig): string[] {
 export function contextHintsEnabled(): boolean {
   return bool('CONTEXT_HINTS', true);
 }
+
+/** 批次2（答案生成权回交）：模型基于工具证据组织最终答复（核对层校验数字）。
+ *  默认 render：核对层目前只覆盖**数字**，编造的课程名等实体尚无机械校验
+ *  （stream-facts 回归钉死该契约）——待实体核对扩展+真模型评测后切 model。 */
+export function answerGeneration(): 'model' | 'render' {
+  ensureEnv();
+  return process.env['ANSWER_GENERATION'] === 'model' ? 'model' : 'render';
+}

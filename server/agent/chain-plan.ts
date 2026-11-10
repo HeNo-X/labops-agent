@@ -28,6 +28,13 @@ import { resolvePeriodKey } from './intent.ts';
 
 export type ChainKind = 'incident_joint' | 'schedule_move' | 'key_transaction';
 
+/** 停下时要说清是哪条链，不能三条都报"联合处置链"（2026-11-10 真实数据实测到文案错位） */
+export const CHAIN_LABEL: Record<ChainKind, string> = {
+  incident_joint: '故障事件联合处置链',
+  schedule_move: '调课提案链',
+  key_transaction: '钥匙借还链'
+};
+
 export interface ChainStepResult {
   tool: string;
   args: Record<string, unknown>;

@@ -1,6 +1,6 @@
 import {scopeAnswer} from './domain.ts';
 import {routeTurn,type RouteResult} from './route-turn.ts';
-import { detectChain, runChain } from './chain-plan.ts';
+import { CHAIN_LABEL, detectChain, runChain } from './chain-plan.ts';
 import {renderBusinessFacts} from '../business/fact-text.ts';
 import { planNativeDialogue, verifiedRecommendation } from '../tools/business.ts';
 import type { BusinessResult } from '../../shared/business.ts';
@@ -295,7 +295,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
           yield emit('tool_result', { step: i + 1, toolCallId: `chain-${i + 1}`, tool: step.tool, ok: step.ok, ms: step.ms, sourceType, summary: step.summary ?? '', ...(step.ok ? { resultKind: step.resultKind, result: step.result } : { error: { code: step.code ?? 'chain_failed', message: step.message ?? '链上一步失败' } }) } satisfies ToolResultPayload);
         }
         log.info('chain_orchestration', { runId, kind: chainKind, steps: chain.steps.length, awaitingConfirmation: chain.awaitingConfirmation, stoppedReason: chain.stoppedReason });
-        const answer = chain.answer ?? `联合处置链在第 ${chain.steps.length} 步停下：${chain.stoppedReason}。已完成的步骤见方案卡；未经你确认的不会写入主系统。`;
+        const answer = chain.answer ?? `${CHAIN_LABEL[chainKind]}在第 ${chain.steps.length} 步停下：${chain.stoppedReason}。已完成的步骤见方案卡；未经你确认的不会写入主系统。`;
         commitContext();
         yield* streamText(answer, emit, input.signal);
         yield emit('run_completed', { answer, steps: chain.steps.length, toolCalls: chain.steps.length, ms: watch.ms, sourceType, engine: 'facts', strategy: 'deterministic_chain', ...(chain.awaitingConfirmation ? { taskStatus: 'awaiting_confirmation' as const } : {}) } satisfies RunCompletedPayload);

@@ -334,7 +334,7 @@ test('F5 借用人不存在等主系统拒绝如实上报；链里绝不出现�
 test('D9 接线守卫：run.ts 必须真的调用编排，且交回模型时不产生任何事件', async () => {
   const fs = await import('node:fs');
   const src = fs.readFileSync(new URL('../server/agent/run.ts', import.meta.url), 'utf8');
-  assert.match(src, /import \{ detectChain, runChain \} from '\.\/chain-plan\.ts'/, 'run.ts 未接入 chain-plan');
+  assert.match(src, /import \{[^}]*\bdetectChain\b[^}]*\brunChain\b[^}]*\} from '\.\/chain-plan\.ts'/, 'run.ts 未接入 chain-plan');
   assert.match(src, /strategy: 'deterministic_chain'/, 'run_completed 未标注确定性链策略');
   assert.match(src, /handback/, '缺少"零执行交回模型"的分支');
   // 交回分支只在 steps 为 0 时打日志，不许 emit 事件（否则界面会看到半截回答）
@@ -342,4 +342,17 @@ test('D9 接线守卫：run.ts 必须真的调用编排，且交回模型时不�
   assert.ok(!/yield emit/.test(handback), '交回模型前不该 emit 任何事件');
   const env = fs.readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
   assert.match(env, /AGENT_CHAIN_ORCHESTRATION/, '.env.example 应写明这个开关');
+});
+
+test('D10 停下时的文案要说清是哪条链（真实数据实测到三条链都写成"联合处置链"）', async () => {
+  const { CHAIN_LABEL } = await import('../server/agent/chain-plan.ts');
+  assert.deepEqual(CHAIN_LABEL, {
+    incident_joint: '故障事件联合处置链',
+    schedule_move: '调课提案链',
+    key_transaction: '钥匙借还链'
+  });
+  const fs = await import('node:fs');
+  const src = fs.readFileSync(new URL('../server/agent/run.ts', import.meta.url), 'utf8');
+  assert.ok(src.includes('${CHAIN_LABEL[chainKind]}在第'), 'run.ts 兜底文案仍写死某一条链');
+  assert.ok(!src.includes('`联合处置链在第'), '仍有硬编码文案');
 });

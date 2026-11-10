@@ -305,5 +305,13 @@ test('空知识命中、空工作计划及未导入档案仍保留能力边界',
     assert.match(out, /学期安排.*尚未导入/);
     assert.match(out, /周值班模板.*尚未导入/);
     assert.doesNotMatch(out, /没有课|无人值班/);
+    // 未导入时 hint 是给模型的处置指引，不许被原样印进用户正文（2026-11-10 真实数据实机实测到泄漏）
+    const withRealHint: TermScheduleResult = { ...term, hint: '学期安排或志愿者值班表尚未导入，请如实告知用户并提示联系管理员；不得把空数组表述为「无课/无人值班」。' };
+    const leaked = renderDemoAnswer({ kind: 'term_schedule', payload: withRealHint }, options);
+    assert.doesNotMatch(leaked, /请如实告知用户|不得把空数组表述为/, '模型侧指引文本泄漏进用户正文');
+    assert.match(leaked, /联系管理员/);
+    // 两侧都已导入时，中性的出处说明仍应保留
+    const bothImported = renderDemoAnswer({ kind: 'term_schedule', payload: { ...termSchedule, hint: '数据来自主系统独立只读档案' } }, options);
+    assert.match(bothImported, /数据来自主系统独立只读档案/);
   }
 });

@@ -693,7 +693,12 @@ function renderTermScheduleAnswer(r: TermScheduleResult): string {
   if (v.enabled && v.persons.length) {
     lines.push(`- 值班志愿者：${v.persons.slice(0, 10).map((p) => `${p.name}（${p.className}${p.group ? ` · ${p.group}` : ''}）`).join('、')}${v.persons.length > 10 ? ` 等共 ${v.persons.length} 人` : ''}`);
   }
-  if (r.hint) lines.push(`- ${r.hint}`);
+  // hint 是**给模型的处置指引**（原文是"请如实告知用户并提示联系管理员"），
+  // 原样印进正文会让用户读到一句对本机指令的复述（2026-11-10 真实数据实机实测到）。
+  // 用户侧只给事实与下一步：哪一侧没导入、该找谁；两侧都在时才保留中性出处说明。
+  const notImported = [!t.enabled && '学期安排', !v.enabled && '志愿者周值班模板'].filter(Boolean) as string[];
+  if (notImported.length) lines.push(`- ${notImported.join('、')}尚未导入，请联系管理员在学期数据接入里补齐后再查询。`);
+  else if (r.hint) lines.push(`- ${r.hint}`);
   return lines.join('\n');
 }
 

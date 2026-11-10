@@ -44,7 +44,7 @@ interface RouteCommon {
 /** 可辨识联合：kind 收窄后各分支只暴露该分支保证存在的字段（scopeAnswer/signRefusal 免断言） */
 export type RouteResult =
   | { kind: 'scope'; domain: Exclude<DomainDecision, 'query'>; signRefusal: null } & RouteCommon
-  | { kind: 'sign_refusal'; domain: 'query'; signRefusal: string } & RouteCommon
+  | { kind: 'sign_refusal'; domain: DomainDecision; signRefusal: string } & RouteCommon
   | { kind: 'agent'; domain: 'query'; signRefusal: null } & RouteCommon;
 
 const SINGLE_PASS_TOOLS = new Set([

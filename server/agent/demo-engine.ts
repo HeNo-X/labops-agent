@@ -541,7 +541,7 @@ export const DEMO_RESULT_RENDERERS: DemoRendererMap = {
   vision_field: renderVisionFieldAnswer,
   task_plan: renderTaskPlanAnswer,
   // 注册表此项仍为 Record<string, unknown>，具体契约取自工具定义。
-  term_schedule: (payload) => renderTermScheduleAnswer(payload as unknown as TermScheduleResult),
+  term_schedule: (payload, extras) => renderTermScheduleAnswer(payload as unknown as TermScheduleResult, extras),
   term_schedule_applied: renderTermScheduleAppliedAnswer,
   records: renderRecordsAnswer
 };
@@ -683,35 +683,57 @@ function renderDirectoryAnswer(r: ResultPayload<'records'>): string {
   return lines.join('\n');
 }
 
-/** 学期安排/值班模板（只读档案）：只读档案与课表解算无关——如实呈现导入状态与规模，空数组不得说成"无课/无人" */
-function renderTermScheduleAnswer(r: TermScheduleResult): string {
+/**
+ * 学期安排/值班模板（只读档案）：只读档案与课表解算无关——空数组不得说成"无课/无人"。
+ *
+ * 只答问到的那一半（11-11 用户实机反馈）：问「周三下午56节哪个志愿者在值班」，
+ * 旧呈现把「学期安排：尚未导入」+ 整张 27 人名单 + 出处说明一起倒出来，
+ * 用户要的一行被埋在无关内容里。这里按问句取要回答的面：
+ *   · 只问值班 → 该节应值班的人；不附整张名单，也不提学期安排；
+ *   · 问名单/多少人 → 才列名单；
+ *   · 只问课/学期安排 → 只给学期安排；
+ *   · 两类都问到（或都问不到，保守起见）→ 两块都给。
+ * 「尚未导入」的提醒也只针对被问到的那一侧，不再顺带催另一侧。
+ */
+function renderTermScheduleAnswer(r: TermScheduleResult, extras: DemoRenderExtras): string {
   const lines: string[] = [];
   const t = r.termSchedule, v = r.volunteerSchedule;
-  lines.push(`**学期安排**：${t.enabled ? `已导入 · ${t.term || '（学期名未填）'}${t.weeks ? ` · ${t.weeks} 周` : ''} · ${t.sessions.length} 条课时` : '尚未导入'}`);
-  lines.push(`**志愿者周值班模板**：${v.enabled ? `已导入 · ${v.days.length} 天 · ${v.persons.length} 名志愿者` : '尚未导入'}`);
-  // 用户问的是「这一节谁值班」，只报总人数答不上问题；带节次查询时把该节应值班的人直接给出来
-  if (v.enabled && v.expected) {
-    // 源表里没填名字的席位用节次标签占位（如「78节」），不能当成人名念给用户
-    const named = v.expected.names.filter(n => n && !/^\d{1,2}节$/.test(n));
-    const unnamed = v.expected.names.length - named.length + v.expected.vacantCount;
-    const wd = '一二三四五六日'[Math.min(6, Math.max(0, v.expected.weekday - 1))];
-    lines.push(`- 本周${wd} ${v.expected.slotCode} 节应值班：${named.length ? named.join('、') : '（未填姓名）'}${unnamed > 0 ? ` · 另有 ${unnamed} 个席位未在表上指名` : ''}`);
+  const q = String(extras.question ?? '');
+  // 问句缺失（旧调用方/单元测试）时按完整档案呈现，不猜用户只想要哪一半
+  const noQuestion = !q.trim();
+  const asksDuty = noQuestion || /值班|值守|志愿者|谁在/.test(q);
+  const asksTerm = noQuestion || /课|排课|学期|实验|停课|取消|档案/.test(q);
+  const wantsRoster = noQuestion || /名单|哪些志愿者|几个志愿者|多少(名)?志愿者|全员|值班表|排班表|轮班/.test(q);
+  const both = (asksDuty && asksTerm) || noQuestion;
+  const wdOf = (n: number) => '一二三四五六日'[Math.min(6, Math.max(0, n - 1))];
+
+  if (both || asksTerm) {
+    lines.push(`**学期安排**：${t.enabled ? `已导入 · ${t.term || '（学期名未填）'}${t.weeks ? ` · ${t.weeks} 周` : ''} · ${t.sessions.length} 条课时` : '尚未导入'}`);
+    if (t.enabled && t.cancelled.length) lines.push(`- 已登记停课/取消 ${t.cancelled.length} 条`);
   }
-  if (t.enabled && t.cancelled.length) lines.push(`- 已登记停课/取消 ${t.cancelled.length} 条`);
-  if (v.enabled && v.persons.length) {
-    // 源表里没填名字的席位用节次标签占位（如「12节」「78节」），既不算人名，也不配一个空的「（）」
-    const named = v.persons.filter((p) => p.name && !/^\d{1,2}节$/.test(p.name));
-    const placeholderCount = v.persons.length - named.length;
-    const who = named.slice(0, 10).map((p) => `${p.name}${p.className || p.group ? `（${[p.className, p.group].filter(Boolean).join(' · ')}）` : ''}`);
-    const tail = named.length > 10 ? ` 等共 ${named.length} 人` : '';
-    lines.push(`- 值班志愿者：${who.length ? who.join('、') + tail : '（表上未填姓名）'}${placeholderCount > 0 ? ` · 另有 ${placeholderCount} 个席位以节次标签占位、未填姓名` : ''}`);
+  if (both || asksDuty) {
+    if (v.expected) {
+      // 源表里没填名字的席位用节次标签占位（如「78节」），不能当成人名念给用户
+      const named = v.expected.names.filter(n => n && !/^\d{1,2}节$/.test(n));
+      const unnamed = v.expected.names.length - named.length + v.expected.vacantCount;
+      lines.push(`**周${wdOf(v.expected.weekday)} ${v.expected.slotCode} 节值班**：${named.length ? named.join('、') : '（表上这一格未填姓名）'}${unnamed > 0 ? ` · 另有 ${unnamed} 个席位未指名` : ''}`);
+    } else {
+      lines.push(`**志愿者周值班模板**：${v.enabled ? `已导入 · ${v.days.length} 天 · ${v.persons.length} 名志愿者` : '尚未导入'}`);
+    }
+    if (wantsRoster && v.enabled && v.persons.length) {
+      const named = v.persons.filter((p) => p.name && !/^\d{1,2}节$/.test(p.name));
+      const placeholderCount = v.persons.length - named.length;
+      const who = named.slice(0, 10).map((p) => `${p.name}${p.className || p.group ? `（${[p.className, p.group].filter(Boolean).join(' · ')}）` : ''}`);
+      const tail = named.length > 10 ? ` 等共 ${named.length} 人` : '';
+      lines.push(`- 名单：${who.length ? who.join('、') + tail : '（表上未填姓名）'}${placeholderCount > 0 ? ` · 另有 ${placeholderCount} 个席位以节次标签占位、未填姓名` : ''}`);
+    }
   }
   // hint 是**给模型的处置指引**（原文是"请如实告知用户并提示联系管理员"），
   // 原样印进正文会让用户读到一句对本机指令的复述（2026-11-10 真实数据实机实测到）。
   // 用户侧只给事实与下一步：哪一侧没导入、该找谁；两侧都在时才保留中性出处说明。
-  const notImported = [!t.enabled && '学期安排', !v.enabled && '志愿者周值班模板'].filter(Boolean) as string[];
-  if (notImported.length) lines.push(`- ${notImported.join('、')}尚未导入，请联系管理员在学期数据接入里补齐后再查询。`);
-  else if (r.hint) lines.push(`- ${r.hint}`);
+  const missing = [(!t.enabled && (both || asksTerm)) && '学期安排', (!v.enabled && (both || asksDuty)) && '志愿者周值班模板'].filter(Boolean) as string[];
+  if (missing.length) lines.push(`- ${missing.join('、')}尚未导入，请联系管理员在学期数据接入里补齐后再查询。`);
+  else if (both && r.hint) lines.push(`- ${r.hint}`);
   return lines.join('\n');
 }
 

@@ -316,6 +316,46 @@ test('空知识命中、空工作计划及未导入档案仍保留能力边界',
   }
 });
 
+test('只答问到的那一半：问一格值班不得附带学期安排与整张名单（11-11 用户实机反馈）', () => {
+  const duty = (names: string[], weekday: number, slotCode: string) => ({
+    ...termSchedule,
+    termSchedule: { ...termSchedule.termSchedule, enabled: false, notImported: true, sessions: [] },
+    volunteerSchedule: {
+      enabled: true, notImported: false, days: [{ weekday: 1 }, { weekday: 2 }, { weekday: 3 }],
+      persons: [{ name: '熊海诺', className: '', group: '' }, { name: '韩硕', className: '', group: '' }, { name: '尉佳琳', className: '', group: '' }],
+      personsMissingProfile: [], expected: { slotCode, weekday, names, vacantCount: 0 }, dutyRoom: null
+    },
+    hint: '数据来自主系统独立只读档案，不参与课表实时解算；如与现场不一致，以管理员确认后的数据为准。'
+  });
+  const ask = (p: TermScheduleResult, question: string) => renderDemoAnswer({ kind: 'term_schedule', payload: p }, { dateWasDefaulted: false, periodFiltered: true, textOnly: false, question });
+
+  const wed = ask(duty(['熊海诺', '韩硕'], 3, '56'), '周三下午56节哪个志愿者在值班？') as string;
+  assert.match(wed, /周三 56 节值班\*\*：熊海诺、韩硕/);
+  assert.doesNotMatch(wed, /学期安排/, '没问学期安排就不该附带');
+  assert.doesNotMatch(wed, /名单：/, '问一格不吐整张名单');
+  assert.doesNotMatch(wed, /尚未导入，请联系管理员/, '学期安排未导入与本题无关，不催');
+  assert.ok(wed.length < 90, `答案应短：${wed}`);
+
+  const roster = ask(duty(['熊海诺'], 3, '56'), '志愿者名单都有哪些人？') as string;
+  assert.match(roster, /名单：熊海诺/);
+  assert.doesNotMatch(roster, /学期安排/);
+
+  const termOnly = ask({ ...termSchedule, volunteerSchedule: { ...termSchedule.volunteerSchedule, expected: null } } as TermScheduleResult, '这学期 E310 有什么实验课？') as string;
+  assert.match(termOnly, /学期安排/);
+  assert.doesNotMatch(termOnly, /值班/);
+
+  const bothPayload = { ...duty(['熊海诺', '韩硕'], 3, '56'), termSchedule: { ...termSchedule.termSchedule, sessions: [{ sourceRow: 1 }] } } as TermScheduleResult;
+  const bothHalves = ask(bothPayload, '周三56节谁值班？那天学期安排里有什么课？') as string;
+  assert.match(bothHalves, /学期安排/);
+  assert.match(bothHalves, /熊海诺/);
+  assert.match(bothHalves, /数据来自主系统独立只读档案/);
+
+  // 占位标签那一格：如实说"未填姓名"，不把「56节」当人名
+  const placeholder = ask(duty(['56节'], 1, '56'), '周一下午56节谁值班？') as string;
+  assert.doesNotMatch(placeholder, /值班：56节/);
+  assert.match(placeholder, /未填姓名/);
+});
+
 test('线上真实形态：名单是姓名字符串数组，问"这节谁值班"要给出该节姓名', async () => {
   const { normalizePersons } = await import('../server/tools/query-term-schedule.ts');
   // 线上 /term-schedule 的 volunteerSchedule.persons 是 ["尉佳琳","于宏",…]，旧夹具才是对象数组；
@@ -326,8 +366,8 @@ test('线上真实形态：名单是姓名字符串数组，问"这节谁值班"
 
   const rendered = renderDemoAnswer({ kind: 'term_schedule', payload: { ...termSchedule,
     volunteerSchedule: { ...termSchedule.volunteerSchedule, days: [{ weekday: 2, slots: [] }], persons: [{ name: '尉佳琳', className: '', group: '' }], expected: { slotCode: '12', weekday: 2, names: ['尉佳琳'], vacantCount: 2 } } } }, { ...extras, textOnly: false });
-  assert.match(rendered, /周二 12 节应值班：尉佳琳/);
-  assert.match(rendered, /另有 2 个席位未在表上指名/);
+  assert.match(rendered, /周二 12 节值班\*\*：尉佳琳/);
+  assert.match(rendered, /另有 2 个席位未在表上指名|另有 2 个席位未指名/);
   const placeholder = renderDemoAnswer({ kind: 'term_schedule', payload: { ...termSchedule,
     volunteerSchedule: { ...termSchedule.volunteerSchedule, persons: [{ name: '78节', className: '', group: '' }], expected: { slotCode: '78', weekday: 1, names: ['78节'], vacantCount: 0 } } } }, { ...extras, textOnly: false });
   assert.doesNotMatch(placeholder, /应值班：78节/, '源表占位标签不能当人名念给用户');

@@ -4,7 +4,7 @@
  *  用假 agnes SSE 服务驱动真工具链（query_knowledge 离线可跑）：
  *    · T1 模型终稿忠实（无越界数字）→ 采纳模型话术，不用渲染模板；
  *    · T2 模型终稿出现越界数字（999/500）→ 核对层打回一次（禁工具重写）→ 采纳重写稿；
- *    · T3 重写仍越界 → 降级渲染稿并如实标注「未通过数字核对」。
+ *    · T3 重写仍越界 → 降级渲染稿并如实标注「未通过数字与名称核对」。
  *  假服务按「最后一条用户消息」选择场景脚本；按 body.tools 是否存在区分
  *  「首轮（带工具，第 1 次回 tool_calls、第 2 次回该场景的终稿文本）」与
  *  「核对重写轮（禁工具）」。
@@ -45,7 +45,11 @@ const CORRECTED = '根据知识库：一学年两个学期，每学期 20 个教
 const SCRIPTS: Record<string, { final: string; retry: string }> = {
   faithful: { final: FAITHFUL, retry: CORRECTED },
   hallucinated: { final: HALLUCINATED, retry: CORRECTED },
-  stillbad: { final: HALLUCINATED, retry: HALLUCINATED }
+  stillbad: { final: HALLUCINATED, retry: HALLUCINATED },
+  // 批次N：编造的**名称/代号**——数字核对挡不住（11-11 真实数据实测漏过 "T47"，只因证据里恰好没有 47 才碰巧被数字层拦住）。
+  // 这里刻意用不含数字的人名，确保只有实体核对这一层能挡住它。
+  entitybad: { final: '知识库未给出具体人名，排班由任课教师 章无名 负责。', retry: FAITHFUL },
+  entitystillbad: { final: '知识库未给出具体人名，排班由任课教师 章无名 负责。', retry: '重写后仍写：任课教师 章无名 负责。' }
 };
 let toolsReqCount = 0;
 const toolsReqPerKey: Record<string, number> = {};
@@ -55,7 +59,8 @@ const stub = http.createServer((req, res) => {
   req.on('end', () => {
     const parsed = JSON.parse(body) as { tools?: unknown[]; messages: Array<{ role: string; content: string }> };
     const lastUser = [...parsed.messages].reverse().find((m) => m.role === 'user')?.content ?? '';
-    const key = lastUser.includes('stillbad') ? 'stillbad' : lastUser.includes('hallucinated') ? 'hallucinated' : 'faithful';
+    const key = lastUser.includes('entitystillbad') ? 'entitystillbad' : lastUser.includes('entitybad') ? 'entitybad'
+      : lastUser.includes('stillbad') ? 'stillbad' : lastUser.includes('hallucinated') ? 'hallucinated' : 'faithful';
     res.writeHead(200, { 'Content-Type': 'text/event-stream' });
     if (Array.isArray(parsed.tools) && parsed.tools.length) {
       toolsReqCount += 1;
@@ -80,7 +85,8 @@ const { runAgent } = await import('../server/agent/run.ts');
 const actor = { id: 'batch2-owner', role: 'admin' as const, label: '批2' };
 
 async function run(q: string, s: string) {
-  const key = q.includes('stillbad') ? 'stillbad' : q.includes('hallucinated') ? 'hallucinated' : 'faithful';
+  const key = q.includes('entitystillbad') ? 'entitystillbad' : q.includes('entitybad') ? 'entitybad'
+    : q.includes('stillbad') ? 'stillbad' : q.includes('hallucinated') ? 'hallucinated' : 'faithful';
   toolsReqPerKey[key] = 0;
   const ev = [];
   for await (const e of runAgent({ question: q, sessionId: s, actor, mode: 'task' })) ev.push(e);
@@ -98,7 +104,7 @@ test('T1 模型终稿忠实：采纳模型话术（不是渲染模板）', async
   assert.deepEqual(toolCalls, ['query_knowledge'], '工具链路真实执行');
   assert.equal(toolsReqCount, 2, '首轮工具调用 + 第二轮模型终稿');
   assert.equal(answer, FAITHFUL, `终稿=模型话术：${answer.slice(0, 80)}`);
-  assert.doesNotMatch(answer, /未通过数字核对/);
+  assert.doesNotMatch(answer, /未通过数字与名称核对/);
 });
 
 test('T2 模型终稿越界（999/500）：打回重写一次，采纳重写稿', async () => {
@@ -107,14 +113,41 @@ test('T2 模型终稿越界（999/500）：打回重写一次，采纳重写稿'
   if (/999|500 元/.test(answer)) console.log('T2DBG:', JSON.stringify(answer.slice(0, 200)));
   assert.doesNotMatch(answer, /999|500 元/, '越界数字必须被打回清除');
   assert.match(answer, /知识库/, '重写稿仍是模型话术');
-  assert.doesNotMatch(answer, /未通过数字核对/, '重写通过则不降级');
+  assert.doesNotMatch(answer, /未通过数字与名称核对/, '重写通过则不降级');
 });
 
 test('T3 重写仍越界：降级渲染稿并如实标注', async () => {
   const { answer, toolCalls } = await run('学校的学期与教学周是怎么规定的 stillbad', 'b2-t3');
   assert.deepEqual(toolCalls, ['query_knowledge']);
-  if (!/未通过数字核对/.test(answer)) console.log('T3DBG:', JSON.stringify(answer.slice(0, 200)));
-  assert.match(answer, /未通过数字核对/, '必须如实标注降级');
+  if (!/未通过数字与名称核对/.test(answer)) console.log('T3DBG:', JSON.stringify(answer.slice(0, 200)));
+  assert.match(answer, /未通过数字与名称核对/, '必须如实标注降级');
   assert.doesNotMatch(answer, /999 学分/, '越界数字不得进入最终答案');
   assert.ok(answer.length > 20, '降级稿是渲染器产出（含依据说明）');
+});
+
+test('T4 模型终稿编造人名（数字核对管不着的那种）：实体核对打回，采纳重写稿', async () => {
+  const { answer, toolCalls } = await run('学校的学期与教学周是怎么规定的 entitybad', 'b2-t4');
+  assert.deepEqual(toolCalls, ['query_knowledge']);
+  assert.doesNotMatch(answer, /章无名/, '证据里没有的人名不得进入答案');
+  assert.match(answer, /一学年|教学周/, '重写稿是模型话术');
+  assert.doesNotMatch(answer, /未通过数字与名称核对/, '重写通过则不降级');
+});
+
+test('T5 重写仍带编造人名：降级渲染并如实标注未通过名称核对', async () => {
+  const { answer } = await run('学校的学期与教学周是怎么规定的 entitystillbad', 'b2-t5');
+  assert.doesNotMatch(answer, /章无名/, '编造人名必须被挡住');
+  assert.match(answer, /未通过数字与名称核对/, '降级要如实标注');
+});
+
+test('T6 实体核对不误伤正常表述（真实数据里漏过的那一句现在必须挡住）', async () => {
+  const { unsupportedReferences } = await import('../server/agent/run.ts');
+  const evidence = JSON.stringify({
+    lessons: [{ courseName: '机器学习与模式识别', teacher: '王建', classNames: ['物联本2401'], periodKey: 'pm1', labName: 'E312' }],
+    keys: [{ id: 'key_lab_2', name: 'E312钥匙', location: '在E316钥匙柜' }],
+    date: '2026-11-11', weekNo: 10, start: '14:00', end: '15:30'
+  });
+  // 11-11 实测漏过的那句：教师被写成 T47
+  assert.deepEqual(unsupportedReferences('今天下午第一大节（14:00–15:30），E312 排有《机器学习与模式识别》，任课教师 T47，班级为物联本2401，本周是第 10 教学周。', evidence), ['T47']);
+  // 逐字来自依据的正常表述不得误伤
+  assert.deepEqual(unsupportedReferences('今天下午第一大节（14:00–15:30），E312 排有《机器学习与模式识别》，任课教师王建，班级为物联本2401，本周是第 10 教学周（双周），钥匙 key_lab_2 在E316钥匙柜。', evidence), []);
 });

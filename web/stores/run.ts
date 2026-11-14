@@ -1,3 +1,4 @@
+import { useSessionStore } from './session';
 import {clientFetch} from '../client';
 /**
  * 任务状态机 —— 「运行生命周期」与「结果类型」正交拆分（工作台改造 P0 修复）
@@ -174,7 +175,14 @@ export const useRunStore = defineStore('run', () => {
   // ------------------------------ 运行生命周期 ------------------------------
   const runStatus = ref<RunStatus>('idle');
   /** 输入锁定 = 任务还在跑。只有终态事件 + 流收尾才解锁（P0 修复） */
-  const inputLocked = computed(() => runStatus.value === 'running');
+  /** 正在跑的那个会话 id（跨会话并发第一片：锁从全局改成只锁当前会话） */
+const runningConversationId = ref<string | null>(null);
+const inputLocked = computed(() => {
+  if (runStatus.value !== 'running') return false;
+  // 旧数据/未带 convId 的 run 保守地全锁
+  if (!runningConversationId.value) return true;
+  return runningConversationId.value === useSessionStore().currentId;
+});
   /**
    * 运行相位（T1）：只用于展示与计时口径，**不接入 inputLocked 判断** ——
    * 锁的语义保持 RunStatus 原样，避免 6 处消费点行为漂移。
@@ -575,6 +583,7 @@ export const useRunStore = defineStore('run', () => {
 
   function resetRun(): void {
     runStatus.value = 'idle';
+    runningConversationId.value = null;
     phase.value = 'idle'; // 初始化直赋值：不是事件驱动的转移，不走白名单
     question.value = '';
     runId.value = null;
@@ -602,6 +611,8 @@ export const useRunStore = defineStore('run', () => {
     question.value = q;
     runId.value = newRunId();
     runStatus.value = 'running';
+    // 跨会话并发第一片：记住谁在跑，输出锁只锁这个会话
+    runningConversationId.value = useSessionStore().currentId;
     movePhase('planning'); // 乐观相位：run_started 到达后重申（同态重入幂等）
     ensureSessionId();
     stopTimer();
@@ -764,6 +775,7 @@ export const useRunStore = defineStore('run', () => {
     }
     error.value = err;
     runStatus.value = 'failed';
+    runningConversationId.value = null;
     movePhase('failed');
     appendEvent({
       seq: 100000 + events.value.length,
@@ -865,6 +877,7 @@ export const useRunStore = defineStore('run', () => {
     runStatus,
     phase,
     inputLocked,
+    runningConversationId,
     question,
     runId,
     sessionId,

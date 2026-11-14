@@ -463,12 +463,16 @@ export function unsupportedReferences(text: string, evidence: string, known?: Se
     if (!has(value)) bad.push(value);
   }
   // 课程名裸写（无书名号、无「课程：」前缀）：默认口径改 model 后，模型转述事实时最容易
-  // 在这里编造。判断依据不是字符串猜词，而是**结构化事实里的真实取值集合**（known）——
-  // 由 collectStrings 从工具结果递归收集，命中即合法，未命中才判为编造。
-  if (known && known.size) {
+  // 在这里编造。判断依据是**结构化事实里的真实取值集合**（known，由 collectStrings 收集）。
+  // 两个收敛条件缺一不可（2026-11-14 生产事故后加）：
+  //   ① 只在**证据里确实有课程数据**时才启用 —— 否则「需要管理员在主系统改」这种正常答复里
+  //      的「…系统」「…技术」会被当成编造课程名，导致正确答案被打回、退化成确定性渲染；
+  //   ② 后缀只保留**日常叙述里罕见**的词 —— 系统/技术/设计/分析/基础/工程/网络/结构/
+  //      实践/实验/编程 在普通中文里太常见，不能作为课程名判据。
+  if (known && known.size && /(?:courseName|课程名|课程名称)/.test(evidence)) {
     const knownText = [...known].join('\u0001').replace(/\s+/g, '');
     const inKnown = (v: string) => knownText.includes(v.replace(/\s+/g, ''));
-    const COURSE_SUFFIX = /([\u4e00-\u9fa5]{2,12}?(?:原理|算法|设计|分析|导论|技术|基础|系统|结构|概论|实践|实验|编程|网络|工程))/g;
+    const COURSE_SUFFIX = /([\u4e00-\u9fa5]{2,12}?(?:原理|算法|导论|概论))/g;
     // 先把**已知**取值从答案里抹掉，再找残留的课程名形态；这样避开「叙述前缀被吞进课程名」
     let residue = text;
     for (const k of known) if (k.length >= 3) residue = residue.split(k).join('\u0000');

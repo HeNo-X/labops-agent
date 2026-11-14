@@ -62,8 +62,7 @@ const phaseLabel = computed(() => {
   if (p === 'answering') return '正在写答案…';
   return '正在执行…';
 });
-/** 运行中的本地秒数（服务端权威耗时另在 run_completed.payload.ms） */
-const runningSeconds = computed(() => Math.max(0, Math.floor((run.elapsedMs || 0) / 1000)));
+// 秒数显示已按要求移除（不再显示"已思考 N 秒"）；服务端权威耗时仍随 run_completed 带出，仅用于内部核对
 const session=useSessionStore();
 const copied = ref(false);
 const textOnly=computed(()=>session.currentMode()==='chat'||props.msg.responseMode==='chat');
@@ -379,7 +378,7 @@ const engineTitle = computed(() => {
       </details>
 
       <MarkdownText v-if="msg.text" :text="msg.text" />
-      <p v-else-if="msg.status === 'streaming'" class="msg__pending"><span class="msg__dot"></span>{{tr(phaseLabel)}}<span v-if="runningSeconds>0" class="msg__elapsed">已 {{ runningSeconds }}s</span></p>
+      <p v-else-if="msg.status === 'streaming'" class="msg__pending">{{tr(phaseLabel)}}</p>
       <p v-else-if="msg.status === 'failed'" class="msg__pending">{{tr("本轮执行失败，未生成回答。")}}</p>
       <p v-else-if="msg.status === 'interrupted'" class="msg__pending">{{tr("本轮执行被中断，部分内容可能未生成。")}}</p>
       <div v-for="(k,i) in knowledgeArtifacts" :key="'knowledge-'+i"><p v-for="h in k.hits" :key="h.id"><a :href="h.url" target="_blank" rel="noopener">{{h.title}} · v{{h.version}} {{tr("· 段落依据")}}</a></p></div>

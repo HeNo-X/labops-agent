@@ -81,27 +81,24 @@ test('聊天链 = DASHSCOPE_MODELS，顺序一致，且全部是 dashscope 提�
   assert.ok(r.chat.every((p) => p.baseUrl.includes('dashscope')), '聊天链必须打百炼端点');
 });
 
-test('工作链只有 Agnes 一个模型，与聊天链无交集', () => {
+test('工作链首位是 qwen3.8-flash（2026-11-14 口径：有意跨链取用百炼端点）', () => {
   const r = probe({ ...DASHSCOPE, ...AGNES });
-  assert.equal(r.task.length, 1, '工作模式只有一个提供方，不做多模型 fallback');
-  assert.equal(r.task[0]!.name, 'agnes');
-  assert.equal(r.task[0]!.model, 'agnes-3.0-flash');
-  assert.deepEqual(r.plan.task, ['agnes-3.0-flash']);
-  assert.equal(r.engineTask, 'agnes');
-  assert.ok(r.task[0]!.baseUrl.includes('agnes-ai'), '工作链必须打 Agnes 端点');
-
-  const chatModels = new Set(r.plan.chat);
-  for (const t of r.plan.task) {
-    assert.ok(!chatModels.has(t), `聊天模型 ${t} 不得出现在工作链里`);
-  }
+  // 旧不变量「工作链只有 Agnes、与聊天链无交集」已被用户推翻：
+  // 工作模式首位改为 qwen3.8-flash，目的是它能返回 reasoning_content，
+  // 展示时同时看得到思维链与工具调用。Agnes 退到第二位。
+  assert.deepEqual(r.plan.task, ['qwen3.8-flash', 'agnes-3.0-flash']);
+  assert.equal(r.task[0]!.model, 'qwen3.8-flash');
+  assert.ok(r.task[0]!.baseUrl.includes('dashscope'), '首位必须打百炼端点');
+  assert.ok(r.task[1]!.baseUrl.includes('agnes-ai'), 'Agnes 保留为第二顺位');
 });
 
-test('密钥不串：聊天链只拿百炼 Key，工作链只拿 Agnes Key', () => {
+test('每条链都带 Key；工作链首位与聊天链可共用百炼端点（2026-11-14 口径）', () => {
   const r = probe({ ...DASHSCOPE, ...AGNES });
   assert.ok(r.chat.every((p) => p.hasKey), '聊天链每个模型都要带上 Key');
   assert.ok(r.task.every((p) => p.hasKey), '工作链要带上 Key');
-  // 探针不输出密钥本体，这里靠端点隔离间接验证：两条链 baseUrl 不同域
-  assert.notEqual(r.chat[0]!.baseUrl, r.task[0]!.baseUrl, '两条链不能共用同一个端点');
+  // 旧断言「两条链不能共用同一个端点」已不成立：工作链首位就是百炼 qwen。
+  // 改为验证工作链里仍有一个**非百炼**的独立端点（Agnes），避免整链单点。
+  assert.ok(r.task.some((p) => p.baseUrl.includes('agnes-ai')), '工作链需保留 Agnes 作为独立端点');
 });
 
 test('只配了 Agnes：聊天链必须为空，不借 Agnes 顶上', () => {
@@ -112,12 +109,11 @@ test('只配了 Agnes：聊天链必须为空，不借 Agnes 顶上', () => {
   assert.equal(r.task.length, 1, '工作链不受聊天链为空的影响');
 });
 
-test('只配了百炼：工作链必须为空，不借聊天模型顶上', () => {
+test('只配了百炼：工作链首位是 qwen3.8-flash，不再为空（2026-11-14 口径）', () => {
   const r = probe({ ...DASHSCOPE, AGNES_API_KEY: '' });
-  assert.equal(r.configured.task, false);
-  assert.deepEqual(r.task, [], '没有 AGNES_API_KEY 时工作链必须为空');
-  assert.equal(r.engineTask, 'demo', '工作模式的 engine 不能变成 dashscope');
-  assert.equal(r.chat.length, 3, '聊天链不受工作链为空的影响');
+  // 旧口径要求工作链为空、回落规则引擎；新口径允许百炼的 qwen 顶上工作链。
+  assert.deepEqual(r.plan.task, ['qwen3.8-flash']);
+  assert.equal(r.chat.length, 3, '聊天链不受工作链影响');
 });
 
 // ---------------------------------------------------------------------------
@@ -137,22 +133,19 @@ const XFYUN = {
 
 test('全配置：两条链都是"主链在前、备用在后"，且备用顺序符合约定', () => {
   const r = probe({ ...DASHSCOPE, ...AGNES, ...BIGMODEL, ...XFYUN });
+  // 2026-11-14 口径：聊天链里原来的 qwen3.8-flash 位换成星火 spark-x2.6
   assert.deepEqual(
     r.chat.map((p) => p.model),
-    ['kimi-k3', 'qwen3.8-flash', 'qwen3.8-max-0902', 'glm-4.7-flash', 'spark-x2.6-4b'],
-    '聊天链：DashScope 五模型 → BigModel → 星火(chat)'
+    ['kimi-k3', 'spark-x2.6', 'qwen3.8-max-0902', 'glm-4.7-flash', 'spark-x2.6-4b'],
+    '聊天链：kimi → 星火(spark-x2.6，接替原 qwen3.8-flash 位) → qwen-max → BigModel → 星火(chat)'
   );
-  // 2026-11-09 e860f40 起工作链默认 spark→glm→agnes（agnes 首字 35~47s，先让快的顶上），
-  // 断言同步为现状，顺序仍可用 TASK_CHAIN_ORDER 覆盖回旧口径。
+  // 2026-11-14 口径：工作链首位改为 qwen3.8-flash（能出思维链），其后 spark → glm → agnes
   assert.deepEqual(
     r.task.map((p) => p.model),
-    ['spark-x2.6', 'glm-4.7-flash', 'agnes-3.0-flash', 'spark-x2.6-4b'],
-    '工作链：星火(task，主链) → BigModel → Agnes → 星火(chat)'
+    ['qwen3.8-flash', 'spark-x2.6', 'glm-4.7-flash', 'agnes-3.0-flash', 'spark-x2.6-4b'],
+    '工作链：qwen3.8-flash（主链） → 星火(task) → BigModel → Agnes → 星火(chat)'
   );
-  assert.deepEqual(r.task.map((p) => p.name), ['xfyun', 'bigmodel', 'agnes', 'xfyun']);
   assert.ok(r.chat.every((p) => p.hasKey) && r.task.every((p) => p.hasKey), '每条都要带 Key');
-  // 两条链各自的端点必须不同域，防止 Key 串用
-  assert.equal(new Set(r.task.map((p) => p.baseUrl)).size, 3, 'Agnes / 星火 / BigModel 三个端点');
 });
 
 test('Agnes 不可用时：工作链第一位必须是星火 spark-x2.6（第一备用）', () => {
@@ -169,7 +162,7 @@ test('Agnes 不可用时：工作链第一位必须是星火 spark-x2.6（第一
 test('备用 Key 留空：链回落到原样，不留空壳 provider', () => {
   const r = probe({ ...DASHSCOPE, ...AGNES });
   assert.equal(r.chat.length, 3, '只有 DashScope，不该凭空多出备用');
-  assert.equal(r.task.length, 1, '只有 Agnes');
+  assert.equal(r.task.length, 2, 'qwen3.8-flash + Agnes（2026-11-14 口径）');
   const names = [...r.chat, ...r.task].map((p) => p.name);
   assert.ok(!names.includes('bigmodel') && !names.includes('xfyun'), '没 Key 的提供方不得进链');
 });

@@ -418,12 +418,38 @@ function scrollFollow(): void {
   if (!el) return;
   if(nearBottom.value)el.scrollTop = el.scrollHeight;else newMessages.value=true;
 }
+// ---- 打字机：把 store.stream 的增量按节奏逐字放出 ----
+// 目的：模型一次性吐出几十字时，界面像"整段跳出"，读起来生硬。这里维持一个字一个字的节奏；
+// 落后越多补得越快，长回答不会播几分钟。终态（非 running）直接对齐全文，避免收尾还慢慢播。
+const revealedText = ref('');
+let revealTimer: ReturnType<typeof setInterval> | null = null;
+function stopReveal(): void {
+  if (revealTimer) { clearInterval(revealTimer); revealTimer = null; }
+}
+function revealTyping(target: string, live: { text: string }): void {
+  if (revealedText.value.length > target.length) revealedText.value = '';   // 新一轮回答
+  if (revealedText.value.length >= target.length) { stopReveal(); return; }
+  stopReveal();
+  revealTimer = setInterval(() => {
+    const gap = target.length - revealedText.value.length;
+    const step = gap > 400 ? Math.ceil(gap / 40) : gap > 80 ? 3 : 1;
+    revealedText.value = target.slice(0, revealedText.value.length + step);
+    live.text = revealedText.value;
+    if (revealedText.value.length >= target.length) stopReveal();
+  }, 16);
+}
 watch(
   () => [store.stream, store.toolCalls, store.runStatus, store.elapsedMs] as const,
   () => {
     const live = resolveLive();
     if (!live) return;
-    live.text = store.stream;
+    if (store.runStatus === 'running') {
+      revealTyping(store.stream, live);
+    } else {
+      stopReveal();
+      revealedText.value = store.stream;
+      live.text = store.stream;
+    }
     live.toolCalls = [...store.toolCalls];
     live.status =
       store.runStatus === 'running'

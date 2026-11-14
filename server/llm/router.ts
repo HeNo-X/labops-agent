@@ -69,20 +69,37 @@ export function providersForMode(mode: 'chat' | 'task'): LlmProviderSpec[] {
           model
         }))
       : [];
-    return [...primary, ...fallbackSpecs('chat')];
+    const chain = [...primary, ...fallbackSpecs('chat')];
+    // 2026-11-14 用户口径：聊天链里原来的 qwen3.8-flash 位换成星火 spark-x2.6
+    if (c.xfyun.apiKey) {
+      const idx = chain.findIndex((p) => /^qwen-?3\.8-?flash$/i.test(p.model));
+      if (idx >= 0) {
+        chain[idx] = { name: 'xfyun', apiKey: c.xfyun.apiKey, baseUrl: c.xfyun.baseUrl, model: c.xfyun.taskModel };
+      }
+    }
+    return chain;
   }
+
   /**
    * 2026-11-09 用户口径：工作模式改为 **spark → glm → agnes**（agnes 实测单次首字
    * 35~47s，spark 约 4s、glm 约 1s，先让它顶上去）。
    * 仍然**不串用聊天链模型**：这里只用 task 链的 spark 槽位 + bigmodel + agnes。
    * 顺序可用 TASK_CHAIN_ORDER 覆盖（如 "agnes,spark,glm" 一键回到旧口径）。
    */
-  const order = (process.env['TASK_CHAIN_ORDER'] ?? 'spark,glm,agnes')
+  const order = (process.env['TASK_CHAIN_ORDER'] ?? 'qwen,spark,glm,agnes')
     .split(',')
     .map((v) => v.trim().toLowerCase())
     .filter(Boolean);
-  const byName: Record<string, LlmProviderSpec | null> = {
-    agnes: c.agnes.apiKey ? { name: TASK_ENGINE, apiKey: c.agnes.apiKey, baseUrl: c.agnes.baseUrl, model: c.agnes.model } : null,
+    const byName: Record<string, LlmProviderSpec | null> = {
+      // 2026-11-14 用户口径：工作模式首位改为 qwen3.8-flash（它返回 reasoning_content，
+      // 展示时能同时看到思维链与工具调用）；这是**有意**跨链取用聊天链的 dashscope 端点。
+      qwen: c.dashscope.apiKey ? {
+        name: CHAT_ENGINE as ProviderName,
+        apiKey: c.dashscope.apiKey,
+        baseUrl: c.dashscope.baseUrl,
+        model: c.dashscope.models.find((m) => /^qwen-?3\.8-?flash$/i.test(m)) ?? 'qwen3.8-flash'
+      } : null,
+      agnes: c.agnes.apiKey ? { name: TASK_ENGINE, apiKey: c.agnes.apiKey, baseUrl: c.agnes.baseUrl, model: c.agnes.model } : null,
     glm: c.bigmodel.apiKey ? { name: 'bigmodel', apiKey: c.bigmodel.apiKey, baseUrl: c.bigmodel.baseUrl, model: c.bigmodel.model } : null,
     spark: c.xfyun.apiKey ? { name: 'xfyun', apiKey: c.xfyun.apiKey, baseUrl: c.xfyun.baseUrl, model: c.xfyun.taskModel } : null
   };

@@ -321,5 +321,7 @@ export function contextHintsEnabled(): boolean {
  *  （stream-facts 回归钉死该契约）——待实体核对扩展+真模型评测后切 model。 */
 export function answerGeneration(): 'model' | 'render' {
   ensureEnv();
-  return process.env['ANSWER_GENERATION'] === 'model' ? 'model' : 'render';
+  // 2026-11-14 用户裁定：**禁止系统直接给答案**。默认改 model——工具结果只作为证据，
+  // 由模型组织答复；系统只做数字/名称核对与兜底。要退回旧行为显式设 ANSWER_GENERATION=render。
+  return process.env['ANSWER_GENERATION'] === 'render' ? 'render' : 'model';
 }

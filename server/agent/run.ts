@@ -910,7 +910,9 @@ while (steps < cfg.agent.maxSteps) {
       if (exec.ok) {
         consecutiveToolFailures = 0;
         // 单程往返白名单与多意图标记的裁决都在 routeTurn.singlePassEligible（整合方案 §4）。
-        if (a.route.singlePassEligible(name, calls.length)) {
+        // 2026-11-14 用户裁定：不允许"系统直接给答案"。单程短路会让本轮不经模型成稿，
+        // 因此改为**显式开启**（AGENT_SINGLE_PASS=1）才生效，默认关闭。
+        if (process.env['AGENT_SINGLE_PASS'] === '1' && a.route.singlePassEligible(name, calls.length)) {
           singlePassCandidate = true;
         }
         if(exec.resultKind==='business_plan')businessFacts.push(exec.result);

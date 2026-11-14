@@ -672,9 +672,13 @@ function renderRecordsAnswer(r: ResultPayload<'records'>): string {
   }
   if (!rows.length) lines.push('本次查询未返回记录，不据此推断现场状态。');
   if (rows.length > 30) lines.push('正文仅显示前 30 条，请缩小查询范围查看其余记录。');
+  // 口径注释只在**本轮真的有记录**时给，且最多两句：0 条时用户只需要"没有记录"这一句，
+  // 长篇隐私/口径声明是在应付审计，不是在回答用户（2026-11-14 用户明确否掉这类噪音）。
   const meta = r['meta'];
-  if (meta && typeof meta === 'object' && 'note' in meta && typeof meta.note === 'string') lines.push(meta.note);
-  lines.push('（身份字段按服务端返回原样展示，不还原掩码；仅陈述记录事实，不作考勤定性。）');
+  if (rows.length && meta && typeof meta === 'object' && 'note' in meta && typeof meta.note === 'string') {
+    const brief = String(meta.note).split(/[；;]/).filter(Boolean).slice(0, 2).join('；');
+    if (brief) lines.push(`- ${brief}`);
+  }
   return lines.join('\n');
 }
 

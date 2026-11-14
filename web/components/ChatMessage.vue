@@ -52,6 +52,18 @@ const emit = defineEmits<{
   (e: 'round-delete'): void;
 }>();
 const run = useRunStore();
+/** 运行相位 → 人话标签。目的：长任务期间让用户看到"正在干什么"而不是一句静态的"正在执行…" */
+const phaseLabel = computed(() => {
+  const p = run.phase;
+  if (p === 'planning') return '正在规划…';
+  if (p === 'model') return '正在思考…';
+  if (p === 'tool') return '正在调用工具…';
+  if (p === 'awaiting_confirm') return '等待你确认…';
+  if (p === 'answering') return '正在写答案…';
+  return '正在执行…';
+});
+/** 运行中的本地秒数（服务端权威耗时另在 run_completed.payload.ms） */
+const runningSeconds = computed(() => Math.max(0, Math.floor((run.elapsedMs || 0) / 1000)));
 const session=useSessionStore();
 const copied = ref(false);
 const textOnly=computed(()=>session.currentMode()==='chat'||props.msg.responseMode==='chat');
@@ -299,7 +311,8 @@ const engineTitle = computed(() => {
     <template v-else>
       <div class="msg__ahead">
         <span class="msg__who">Agent</span>
-        <StatusTag :tone="statusMeta.tone" :glyph="statusMeta.glyph" :label="statusMeta.label" />
+        <!-- 正常完成不再挂"本轮回答已保存"这类系统状态；生成中/失败/中断仍需可见 -->
+        <StatusTag v-if="msg.status !== 'completed'" :tone="statusMeta.tone" :glyph="statusMeta.glyph" :label="statusMeta.label" />
         <!-- PC-4：引擎与耗时收敛为一枚徽标，细节移入 hover 提示 -->
         <span v-if="engineLabel || msg.ms" class="msg__engine" :title="engineTitle + (msg.ms ? ` · ${msg.ms} ms` : '')">i</span>
       </div>
@@ -366,7 +379,7 @@ const engineTitle = computed(() => {
       </details>
 
       <MarkdownText v-if="msg.text" :text="msg.text" />
-      <p v-else-if="msg.status === 'streaming'" class="msg__pending">{{tr("正在执行…")}}</p>
+      <p v-else-if="msg.status === 'streaming'" class="msg__pending"><span class="msg__dot"></span>{{tr(phaseLabel)}}<span v-if="runningSeconds>0" class="msg__elapsed">已 {{ runningSeconds }}s</span></p>
       <p v-else-if="msg.status === 'failed'" class="msg__pending">{{tr("本轮执行失败，未生成回答。")}}</p>
       <p v-else-if="msg.status === 'interrupted'" class="msg__pending">{{tr("本轮执行被中断，部分内容可能未生成。")}}</p>
       <div v-for="(k,i) in knowledgeArtifacts" :key="'knowledge-'+i"><p v-for="h in k.hits" :key="h.id"><a :href="h.url" target="_blank" rel="noopener">{{h.title}} · v{{h.version}} {{tr("· 段落依据")}}</a></p></div>
@@ -630,4 +643,9 @@ const engineTitle = computed(() => {
   color: var(--text);
   background: var(--surface-3);
 }
+
+/* 运行中：脉冲点 + 秒数，让长任务看起来"在干活"而不是卡住 */
+.msg__dot { display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:6px;vertical-align:middle;animation:qz-pulse 1.1s ease-in-out infinite; }
+.msg__elapsed { margin-left:8px;opacity:.55;font-variant-numeric:tabular-nums; }
+@keyframes qz-pulse { 0%,100%{opacity:.25;transform:scale(.85)} 50%{opacity:1;transform:scale(1.15)} }
 </style>

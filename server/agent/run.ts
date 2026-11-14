@@ -437,7 +437,21 @@ export function unsupportedNumbers(text: string, evidence: string): string[] {
  * 只核对有明确标记的形态（房间/钥匙代号、《课程名》、「教师/班级/编号：X」的紧邻词），
  * 不做中文分词，免得把正常句子误判成编造。
  */
-export function unsupportedReferences(text: string, evidence: string): string[] {
+export function collectStrings(v: unknown, out: Set<string>, depth = 0): void {
+  if (depth > 6 || out.size > 5000) return;
+  if (typeof v === 'string') {
+    if (v.length >= 2 && v.length <= 60) out.add(v);
+    return;
+  }
+  if (Array.isArray(v)) {
+    for (const x of v) collectStrings(x, out, depth + 1);
+    return;
+  }
+  if (v && typeof v === 'object') {
+    for (const x of Object.values(v as Record<string, unknown>)) collectStrings(x, out, depth + 1);
+  }
+}
+export function unsupportedReferences(text: string, evidence: string, known?: Set<string>): string[] {
   const hay = evidence.replace(/\s+/g, '');
   const has = (v: string) => v.length > 0 && hay.includes(v.replace(/\s+/g, ''));
   const bad: string[] = [];
@@ -447,6 +461,21 @@ export function unsupportedReferences(text: string, evidence: string): string[] 
     // 「班级为物联本2401」这类无冒号写法，连接词不是名字的一部分
     const value = m[1].replace(/^[为是在由即的]+/, '');
     if (!has(value)) bad.push(value);
+  }
+  // 课程名裸写（无书名号、无「课程：」前缀）：默认口径改 model 后，模型转述事实时最容易
+  // 在这里编造。判断依据不是字符串猜词，而是**结构化事实里的真实取值集合**（known）——
+  // 由 collectStrings 从工具结果递归收集，命中即合法，未命中才判为编造。
+  if (known && known.size) {
+    const knownText = [...known].join('\u0001').replace(/\s+/g, '');
+    const inKnown = (v: string) => knownText.includes(v.replace(/\s+/g, ''));
+    const COURSE_SUFFIX = /([\u4e00-\u9fa5]{2,12}?(?:原理|算法|设计|分析|导论|技术|基础|系统|结构|概论|实践|实验|编程|网络|工程))/g;
+    // 先把**已知**取值从答案里抹掉，再找残留的课程名形态；这样避开「叙述前缀被吞进课程名」
+    let residue = text;
+    for (const k of known) if (k.length >= 3) residue = residue.split(k).join('\u0000');
+    for (const m of residue.matchAll(COURSE_SUFFIX)) {
+      const v = m[1].replace(/^\u0000+/, '');
+      if (v.length >= 3 && !inKnown(v) && !has(v)) bad.push(v);
+    }
   }
   return [...new Set(bad)];
 }
@@ -701,6 +730,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   const businessFacts:BusinessResult[]=[];
   // 批次2：工具结果（成功）的 JSON 与 summary——模型终稿的**数字核对证据**
   const toolEvidence: string[] = [];
+  // 结构化工具结果（与 toolEvidence 同源），供实体核对取「真实取值集合」
+  const toolResults: unknown[] = [];
   let verificationRetried = false;
   let recommendationRetried = false;
   let modelFinal='';
@@ -738,6 +769,7 @@ let effectiveMaxSteps = cfg.agent.maxSteps;
     for (const [i, s] of a.prefetched.entries()) {
       messages.push({ role: 'tool', tool_call_id: `read-${i + 1}`, content: JSON.stringify({ ok: true, summary: s.summary, data: stripPolicyText(s.result), dataSource: a.ds.sourceLabel }) });
       toolEvidence.push(JSON.stringify(s.result ?? {}) + '\n' + (s.summary ?? ''));
+      toolResults.push(s.result ?? {});
       verifiedAnswers.push(renderDemoAnswer({ kind: s.resultKind!, payload: s.result, summary: s.summary }, { dateWasDefaulted: !a.intent.date, periodFiltered: Boolean(a.intent.periodKey), textOnly: a.mode === 'chat', scopeLabel: businessScope().principal?.username || a.actor?.label, question: a.question }));
       // 预取过的调用记入指纹表：模型再调同一工具会被停止条件④拦下，不白烧一轮重查
       seenCalls.set(`${s.tool}::${fnKey(s.args)}`, 1);
@@ -964,6 +996,7 @@ while (steps < cfg.agent.maxSteps) {
         }
         // 批次2：核对层证据（结果 JSON + summary 里的派生计数，模型终稿的数字都要能在这里找到）
         toolEvidence.push(JSON.stringify(exec.result ?? {}) + '\n' + (exec.summary ?? ''));
+        toolResults.push(exec.result ?? {});
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -1027,9 +1060,12 @@ while (steps < cfg.agent.maxSteps) {
     const modelDraft = answerGeneration() === 'model' && !modelUnavailable && !singlePassCandidate && modelFinal.trim()
       ? modelFinal : null;
     const evidence = toolEvidence.join('\n') + '\n' + a.question;
+    // 结构化事实里的真实取值集合（课程名/房间/教师/班级…），实体核对的唯一判据
+    const knownEntities = new Set<string>();
+    for (const r of toolResults) collectStrings(r, knownEntities);
     let modelAnswer: string | null = null;
     if (modelDraft) {
-      const unsupported = [...unsupportedNumbers(modelDraft, evidence), ...unsupportedReferences(modelDraft, evidence)];
+      const unsupported = [...unsupportedNumbers(modelDraft, evidence), ...unsupportedReferences(modelDraft, evidence, knownEntities)];
       if (!unsupported.length) {
         modelAnswer = modelDraft;
       } else if (!verificationRetried && !a.signal?.aborted) {
@@ -1042,7 +1078,7 @@ while (steps < cfg.agent.maxSteps) {
           if (ev.type === 'text') retryText += ev.text;
           if (ev.type === 'usage') usage = {promptTokens:(usage?.promptTokens ?? 0)+ev.usage.promptTokens,completionTokens:(usage?.completionTokens ?? 0)+ev.usage.completionTokens,totalTokens:(usage?.totalTokens ?? 0)+ev.usage.totalTokens};
         }
-        const unsupported2 = [...unsupportedNumbers(retryText, evidence), ...unsupportedReferences(retryText, evidence)];
+        const unsupported2 = [...unsupportedNumbers(retryText, evidence), ...unsupportedReferences(retryText, evidence, knownEntities)];
         if (retryText.trim() && !unsupported2.length) modelAnswer = retryText;
       }
     }

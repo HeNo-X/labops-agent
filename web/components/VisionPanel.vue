@@ -18,6 +18,8 @@ import UiIcon from './UiIcon.vue';
 import BuiltInCamera from './BuiltInCamera.vue';
 import { useModal } from '../composables/useModal';
 import { useBusinessStore } from '../stores/business';
+import { clientFetch } from '../client';
+
 import { useVision, type VisionEvent } from '../composables/useVision';
 import type { Target } from '@shared/labops-targets.js';
 
@@ -35,6 +37,38 @@ let feedRetryTimer: number | null = null;
 const failedSnapshots = ref<Set<string>>(new Set());
 const feedbackError = ref('');
 const guideOpen = ref(false);
+/**
+ * 实时画面识别结果（2026-11-14）：边缘没在上报时，卡片会显示"离线"，
+ * 但画面本身是通的。这里直接向后端要"从当前画面现识别一次"的人数，
+ * 20 秒刷新一次，抽屉关闭时不请求。
+ */
+const liveCount = ref<{ count: number; at: number } | null>(null);
+const liveCountText = computed(() => {
+  const c = liveCount.value;
+  if (!c) return '';
+  const sec = Math.max(0, Math.round((Date.now() - c.at) / 1000));
+  return tr('{n} 人（{s} 秒前识别）', { n: String(c.count), s: String(sec) });
+});
+let liveTimer: number | null = null;
+async function refreshLiveCount(): Promise<void> {
+  if (!open.value) return;
+  try {
+    const res = await clientFetch('/api/vision/live-count');
+    if (!res.ok) { liveCount.value = null; return; }
+    const data = (await res.json()) as { ok?: boolean; count?: number };
+    liveCount.value = data?.ok && typeof data.count === 'number' ? { count: data.count, at: Date.now() } : null;
+  } catch { liveCount.value = null; }
+}
+watch(open, (v) => {
+  if (v) { void refreshLiveCount(); if (liveTimer === null) liveTimer = window.setInterval(() => void refreshLiveCount(), 20000); }
+  else if (liveTimer !== null) { window.clearInterval(liveTimer); liveTimer = null; }
+});
+onUnmounted(() => { if (liveTimer !== null) window.clearInterval(liveTimer); });
+/**
+ * 实时画面识别结果（2026-11-14）：边缘没在上报时，卡片会显示"离线"，
+ * 但画面本身是通的。这里直接向后端要"从当前画面现识别一次"的人数，
+ * 20 秒刷新一次，抽屉关闭时不请求。
+ */
 
 useModal(open, '.vision-panel');
 
@@ -242,6 +276,8 @@ onUnmounted(() => {
                       <div v-if="lab.recognized !== null"><dt>{{ tr('已录入人脸') }}</dt><dd>{{ tr('{n} 人命中（不含姓名）', { n: lab.recognized }) }}</dd></div>
                       <div v-if="lab.sceneState"><dt>{{ tr('场景') }}</dt><dd>{{ tr(sceneText(lab.sceneState)) }}</dd></div>
                       <div v-if="lab.library.length"><dt>{{ tr('底库命中') }}</dt><dd>{{ lab.library.map(hitText).join('、') }}</dd></div>
+                      <div v-if="liveCount"><dt>{{ tr('当前画面') }}</dt><dd>{{ liveCountText }}</dd></div>
+                      <div v-if="liveCount"><dt>{{ tr('当前画面') }}</dt><dd>{{ liveCountText }}</dd></div>
                       <div><dt>{{ tr('更新') }}</dt><dd>{{ tr(vision.staleLabel(lab)) }}</dd></div>
                     </dl>
                     <img
@@ -262,6 +298,10 @@ onUnmounted(() => {
 
               <aside class="vision-events">
                 <h3>{{ tr('事件流水') }} <small>{{ vision.events.value.length }}</small></h3>
+                <!-- 边缘上报断了也要让用户看到"当前画面里是什么"：这条来自实时帧识别，不是历史事件 -->
+                <p v-if="liveCount" class="vision-events__live">
+                  <span aria-hidden="true">●</span>{{ tr('当前画面识别') }}：{{ liveCountText }}
+                </p>
                 <p v-if="!vision.events.value.length" class="vision-empty">{{ tr('暂无上报事件。') }}</p>
                 <ul>
                   <li
@@ -715,4 +755,22 @@ onUnmounted(() => {
   color: var(--text);
 }
 
+
+/* 事件流水顶部的"当前画面识别"行：与历史事件区分（实心点 + 主色），不抢列表注意力 */
+.vision-events__live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.vision-events__live span {
+  color: var(--primary);
+  font-size: 10px;
+  line-height: 1;
+}
 </style>

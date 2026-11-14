@@ -125,6 +125,18 @@ async function handleReport(req: IncomingMessage, res: ServerResponse): Promise<
   reply(res, 200, { ok: true, alert: ingested.event.alert, snapshotIgnored: ingested.snapshotIgnored ?? null });
 }
 
+// ---- 展示口径（2026-11-11 用户裁定）------------------------------------------
+// 检测结果区只呈现**真实 vision 侧上报**的房间结果（按房间分卡）：
+//   · DEMO（本机演示摄像头）房间的结果不进结果展示——其原画面仍在实时画面卡照常展示；
+//   · mock-vision-feed 的模拟上报（quality.det 前缀 "mock"）不是真实现场数据，不展示。
+// 仅作用于展示端点（status/events）；上报接收、落盘与 Agent 工具口径不受影响。
+const DEMO_LAB_ID = 'DEMO';
+
+/** 展示过滤谓词（导出供单测）：真实 vision 侧上报的结果才进结果展示 */
+export function isDisplayable(labId: string, det: string | null | undefined): boolean {
+  return labId !== DEMO_LAB_ID && !(det ?? '').toLowerCase().startsWith('mock');
+}
+
 // ---- 登录态查询端点 ---------------------------------------------------------
 
 function handleStatus(res: ServerResponse): void {
@@ -133,6 +145,7 @@ function handleStatus(res: ServerResponse): void {
     ok: true,
     configured: visionIngestConfigured(),
     ...status,
+    labs: status.labs.filter((lab) => isDisplayable(lab.labId, lab.det)),
     retentionNote: '事件 JSONL 保留最近 5MB；快照只保留各房间最新一张且不落盘'
   });
 }
@@ -145,17 +158,19 @@ function handleEvents(query: URLSearchParams, res: ServerResponse): void {
     labId,
     limit: Number.isFinite(limit) ? limit : 50,
     sinceEpochMs: Number.isFinite(sinceRaw) ? sinceRaw : undefined
-  }).map((event) => {
-    const feedback = visionEventFeedback(event.lab_id, event.receivedAt);
-    return {
-      labId: event.lab_id, ts: event.ts, receivedAt: event.receivedAt, alert: event.alert,
-      count: event.count, recognized: event.faces ? event.faces.recognized : null,
-      library: event.library,
-      sceneState: event.sceneState, sceneReason: event.sceneReason,
-      cameraOnline: event.camera_online,
-      feedback: feedback ? { verdict: feedback.verdict, by: feedback.by, at: feedback.at } : null
-    };
-  });
+  })
+    .filter((event) => isDisplayable(event.lab_id, event.quality.det))
+    .map((event) => {
+      const feedback = visionEventFeedback(event.lab_id, event.receivedAt);
+      return {
+        labId: event.lab_id, ts: event.ts, receivedAt: event.receivedAt, alert: event.alert,
+        count: event.count, recognized: event.faces ? event.faces.recognized : null,
+        library: event.library,
+        sceneState: event.sceneState, sceneReason: event.sceneReason,
+        cameraOnline: event.camera_online,
+        feedback: feedback ? { verdict: feedback.verdict, by: feedback.by, at: feedback.at } : null
+      };
+    });
   reply(res, 200, { ok: true, events });
 }
 
@@ -226,6 +241,71 @@ async function handleLiveProbe(res: ServerResponse): Promise<void> {
   reply(res, 200, { ok: true, available, upstream: available ? 'reachable' : 'unreachable' });
 }
 
+
+/**
+ * 实时画面识别结果（2026-11-14）
+ * ---------------------------------------------------------------
+ * 背景：卡片上的"人数/已录入/更新"过去只认**边缘上报**（ingest），
+ * 一旦边缘没推、显示就是"离线"，但实际画面是通的（feed 能拉到）。
+ * 这条端点补上"从**当前画面**现取一次识别结果"：抓 MJPEG 的一帧 →
+ * 交给边缘视觉服务的 /api/count → 返回人数。15 秒内复用结果，避免每次刷新都推理。
+ */
+let liveCountCache: { at: number; count: number; people: number; ms: number } | null = null;
+
+async function readJpegFrame(body: ReadableStream<Uint8Array>, timeoutMs: number): Promise<Buffer | null> {
+  const reader = body.getReader();
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const deadline = Date.now() + timeoutMs;
+  try {
+    while (Date.now() < deadline) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) { chunks.push(Buffer.from(value)); total += value.length; }
+      const buf = Buffer.concat(chunks, total);
+      const start = buf.indexOf(Buffer.from([0xff, 0xd8]));
+      if (start >= 0) {
+        const end = buf.indexOf(Buffer.from([0xff, 0xd9]), start + 2);
+        if (end > start) return buf.subarray(start, end + 2);
+      }
+      if (total > 4 * 1024 * 1024) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return null;
+}
+
+async function handleLiveCount(res: ServerResponse): Promise<void> {
+  const nowMs = Date.now();
+  if (liveCountCache && nowMs - liveCountCache.at < 15000) {
+    reply(res, 200, { ok: true, source: 'live', cached: true, ...liveCountCache, ageMs: nowMs - liveCountCache.at });
+    return;
+  }
+  const upstream = await fetchLiveFeed(6000);
+  if (!upstream?.ok || !upstream.body) {
+    if (upstream) await upstream.body?.cancel().catch(() => undefined);
+    reply(res, 502, { ok: false, error: 'vision_feed_unreachable', message: '当前拉不到实时画面（内网视觉服务不可达）' });
+    return;
+  }
+  const frame = await readJpegFrame(upstream.body as ReadableStream<Uint8Array>, 5000);
+  if (!frame) { reply(res, 502, { ok: false, error: 'no_frame', message: '10 秒内没有拿到画面帧' }); return; }
+  const base = LIVE_FEED_URL.replace(/\/live\/.*$/, '');
+  const form = new FormData();
+  form.append('image', new Blob([new Uint8Array(frame)], { type: 'image/jpeg' }), 'frame.jpg');
+  const t0 = Date.now();
+  const counted = await fetch(base + '/api/count', { method: 'POST', body: form, signal: AbortSignal.timeout(9000) }).catch(() => null);
+  if (!counted || !counted.ok) {
+    reply(res, 502, { ok: false, error: 'vision_count_failed', message: '视觉服务未返回识别结果' });
+    return;
+  }
+  const data = (await counted.json().catch(() => null)) as { count?: number; objects?: unknown[] } | null;
+  const count = typeof data?.count === 'number' ? data.count : null;
+  if (count === null) { reply(res, 502, { ok: false, error: 'bad_count_payload', message: '识别结果里没有人数字段' }); return; }
+  liveCountCache = { at: nowMs, count, people: Array.isArray(data?.objects) ? data.objects.length : count, ms: Date.now() - t0 };
+  reply(res, 200, { ok: true, source: 'live', cached: false, ...liveCountCache, ageMs: 0 });
+}
+
 async function handleFeed(res: ServerResponse): Promise<void> {
   // 超时 10s：live/start 后模型预热期（约 2s）内生成器不产帧、Werkzeug 不发响应头，
   // 4s 超时会在预热窗口内 502（2026-11-07 实测）——放宽到 10s 等过预热
@@ -271,5 +351,6 @@ export async function handleVisionApi(req: IncomingMessage, res: ServerResponse,
   if (pathname === '/api/vision/feedback' && req.method === 'POST') { handleFeedback(req, res); return; }
   if (pathname === '/api/vision/live-probe' && req.method === 'GET') { await handleLiveProbe(res); return; }
   if (pathname === '/api/vision/feed' && req.method === 'GET') { await handleFeed(res); return; }
+  if (pathname === '/api/vision/live-count' && req.method === 'GET') { await handleLiveCount(res); return; }
   reply(res, 404, { error: 'unknown_endpoint', message: `未实现的视觉接口：${req.method} ${pathname}` });
 }

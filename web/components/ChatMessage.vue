@@ -387,7 +387,6 @@ const engineTitle = computed(() => {
           <summary>{{ tr("知识依据") }} {{ knowledgeArtifacts.reduce((n,k)=>n+(k.hits?.length||0),0) }} 条</summary>
           <div v-for="(k,i) in knowledgeArtifacts" :key="'knowledge-'+i"><p v-for="h in (k.hits||[]).slice(0,5)" :key="h.id"><a :href="h.url" target="_blank" rel="noopener">{{h.title}} · v{{h.version}}</a></p></div>
         </details>
-      </details>
       <template v-if="!textOnly"><BusinessPlanCard v-for="b in businessArtifacts" :key="b.key" :result="b.result" :card-id="msg.id+':'+b.key" :readonly="session.currentMode()==='chat'" />
       <!-- N03：本条消息自己的结构化结果卡（实时与历史同一渲染器） -->
       <OperationCard

@@ -195,8 +195,67 @@ function consumePendingOnTerminal(convId: string | null): void {
 }
 const msgsEl = ref<HTMLElement | null>(null);
 const nearBottom=ref(true),newMessages=ref(false);
-function trackScroll(){const el=msgsEl.value;if(el){nearBottom.value=el.scrollHeight-el.scrollTop-el.clientHeight<100;if(nearBottom.value)newMessages.value=false;}}
-function showLatest(){nearBottom.value=true;newMessages.value=false;scrollFollow();}
+/** 打开会话后要落到底部的目标会话；消息异步载入时继续跟随，稳定后清除 */
+let pendingConvJump: string | null = null;
+let jumpHoldTimer: number | null = null;
+let jumpHoldUntil = 0;
+/** 用户是否主动滚过（wheel/触摸）：只有主动滚动才停止贴底，避免渲染抖动把 pending 清掉 */
+let userScrolled = false;
+function markUserScroll(): void { userScrolled = true; }
+function jumpToBottom(): void {
+  nearBottom.value = true;
+  newMessages.value = false;
+  const el = msgsEl.value;
+  if (el) el.scrollTop = el.scrollHeight;
+}
+/**
+ * 打开会话时内容往往分几拍才渲染完（消息 → 结果卡 → 字体/图片），
+ * 只在载入回调里跳一次会停在半截。这里在短时间内持续贴底；
+ * 用户主动上翻（trackScroll 清 pending）或时间到就停，不会和用户抢滚动。
+ */
+function holdBottomFor(ms: number): void {
+  jumpHoldUntil = Math.max(jumpHoldUntil, Date.now() + ms);
+  if (jumpHoldTimer !== null) return;
+  const tick = (): void => {
+    if (!pendingConvJump) { jumpHoldTimer = null; return; }
+    jumpToBottom();
+    if (Date.now() < jumpHoldUntil) {
+      jumpHoldTimer = window.setTimeout(tick, 80);
+    } else {
+      pendingConvJump = null;
+      jumpHoldTimer = null;
+    }
+  };
+  tick();
+}
+function trackScroll(){
+  const el=msgsEl.value;
+  if(!el)return;
+  nearBottom.value=el.scrollHeight-el.scrollTop-el.clientHeight<100;
+  if(nearBottom.value)newMessages.value=false;
+  // 用户主动往上翻时，停止"打开会话落到底部"的后续跟随，避免和用户抢滚动
+  else if (userScrolled) pendingConvJump=null;
+}
+function showLatest(){jumpToBottom();}
+// 打开/切换会话：消息可能是异步载入的，先立即到底，载入过程中继续贴底，载入完成再校一次
+watch(() => session.currentId, async (id) => {
+  pendingConvJump = id;
+  userScrolled = false;
+  nearBottom.value = true;
+  newMessages.value = false;
+  await nextTick();
+  holdBottomFor(3000);
+}, { immediate: true });
+watch(() => session.currentMessages.length, async () => {
+  if (!pendingConvJump || pendingConvJump !== session.currentId) return;
+  await nextTick();
+  holdBottomFor(600);
+});
+watch(() => session.messagesLoading, async (loading) => {
+  if (loading || !pendingConvJump || pendingConvJump !== session.currentId) return;
+  await nextTick();
+  holdBottomFor(800);
+});
 
 const navOpen = ref(false);
 /** 右侧房间侧边栏：宽屏默认展开，窄屏默认收起；用户选择持久化（停靠式，可收起为窄轨） */
@@ -526,7 +585,8 @@ async function onSubmit(q: string): Promise<void> {
   });
   liveMsgId = `live-${rid}`;
   await nextTick();
-  scrollFollow();
+  // 发送新消息是明确动作：无论此前是否在看历史，都落到最新消息
+  jumpToBottom();
 
   void start({
     message: q,
@@ -658,6 +718,33 @@ const rounds = computed<Round[]>(() => session.currentRounds);
 /** 操作结果横幅：回档/删除之后必须让用户看到"到底发生了什么"，而不是只弹一个"成功" */
 const roundNotice = ref<{ tone: 'ok' | 'warn' | 'danger'; lines: string[] } | null>(null);
 
+// ---- 顶部提示自动收起（2026-11-11 用户反馈）----
+// 回档结果、断线回查结果都是"过程提示"，不该一直占着会话顶部。
+// 成功类 6 秒后自动消失；失败/危险提示保留，等用户手动关闭。
+let roundNoticeTimer: number | null = null;
+let recoverNoticeTimer: number | null = null;
+function clearNoticeTimers(): void {
+  if (roundNoticeTimer !== null) { window.clearTimeout(roundNoticeTimer); roundNoticeTimer = null; }
+  if (recoverNoticeTimer !== null) { window.clearTimeout(recoverNoticeTimer); recoverNoticeTimer = null; }
+}
+watch(roundNotice, (v) => {
+  if (roundNoticeTimer !== null) { window.clearTimeout(roundNoticeTimer); roundNoticeTimer = null; }
+  if (v && v.tone !== 'danger') {
+    roundNoticeTimer = window.setTimeout(() => { roundNotice.value = null; roundNoticeTimer = null; }, 6000);
+  }
+});
+watch(recoverNotice, (v) => {
+  if (recoverNoticeTimer !== null) { window.clearTimeout(recoverNoticeTimer); recoverNoticeTimer = null; }
+  // 只收起终态文案；"正在回查/仍在执行"要继续显示，让用户知道系统还没结束
+  if (v && /^(已按|未能确认)/.test(v)) {
+    recoverNoticeTimer = window.setTimeout(() => { recoverNotice.value = null; recoverNoticeTimer = null; }, 6000);
+  }
+});
+onUnmounted(() => {
+  clearNoticeTimers();
+  if (jumpHoldTimer !== null) { window.clearTimeout(jumpHoldTimer); jumpHoldTimer = null; }
+});
+
 /**
  * 该轮是否牵涉业务办理 —— 决定弹窗提示强度。
  * ⚠️ 只看"这一轮有没有产出业务单/原系统方案"，不看结果里的 state：
@@ -723,6 +810,8 @@ function onDeleteRound(r: Round): void {
       ? { tone: 'ok', lines: [`已删除第 ${index} 轮（移除 ${res.removedCount ?? 0} 条消息）。`, ...effectsLines(res.effects)] }
       : { tone: 'danger', lines: [res.message ?? '删除失败'] };
     if (res.ok) void loadTasks();
+    // 消息变短后原来的 scrollTop 可能悬在中间，重新贴底
+    if (res.ok) void nextTick().then(jumpToBottom);
   })();
 }
 
@@ -738,6 +827,8 @@ function showRollbackNotice(userMessageId: string, result: RoundActionResult): v
     tone: 'ok',
     lines: [`${where}（移除 ${result.removedCount ?? 0} 条消息）。`, ...effectsLines(result.effects)]
   };
+  // 回档会截断消息，滚动位置可能悬空；回档后仍应看到最新（最后一轮）内容
+  void nextTick().then(jumpToBottom);
 }
 
 async function afterRoundEdit(payload: { userMessageId: string; text: string; revertEffects: boolean }): Promise<void> {
@@ -853,7 +944,7 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
         <p v-if="modeNotice" class="chat__err" role="status">{{ modeNotice }}</p>
         <p v-if="session.currentMessagesError" class="chat__err" role="alert">{{ session.currentMessagesError }}</p>
 
-        <div ref="msgsEl" @scroll.passive="trackScroll" class="chat__msgs">
+        <div ref="msgsEl" @scroll.passive="trackScroll" @wheel.passive="markUserScroll" @touchmove.passive="markUserScroll" class="chat__msgs">
           <div v-for="(r, i) in rounds" :key="r.key" class="round" :data-round="i + 1">
             <RoundToolbar :index="i + 1" />
             <ChatMessage

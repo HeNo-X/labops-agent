@@ -20,7 +20,7 @@ import { useModal } from '../composables/useModal';
 import { useBusinessStore } from '../stores/business';
 import { clientFetch } from '../client';
 
-import { useVision, type VisionEvent } from '../composables/useVision';
+import { useVision } from '../composables/useVision';
 import type { Target } from '@shared/labops-targets.js';
 
 const props = defineProps<{ navigation?: boolean; iconOnly?: boolean }>();
@@ -35,7 +35,6 @@ const feedFailed = ref(false);
 const feedBust = ref(Date.now());
 let feedRetryTimer: number | null = null;
 const failedSnapshots = ref<Set<string>>(new Set());
-const feedbackError = ref('');
 const guideOpen = ref(false);
 /**
  * 实时画面识别结果（2026-11-14）：边缘没在上报时，卡片会显示"离线"，
@@ -52,6 +51,10 @@ const liveCountText = computed(() => {
   return tr('{n} 人（{s} 秒前）', { n: String(c.count), s: String(sec) });
 });
 let liveTimer: number | null = null;
+async function refreshAll(): Promise<void> {
+  // 2026-11-14：刷新按钮此前只重拉"边缘上报"，实时卡片/事件不动 → 用户点它没反应
+  await Promise.allSettled([vision.refresh(), refreshLiveCount()]);
+}
 async function refreshLiveCount(): Promise<void> {
   if (!open.value) return;
   try {
@@ -151,26 +154,6 @@ function draftIssue(lab: { labId: string; count: number; capacity: number | null
 }
 
 /** 事件误报/确认回流（批C）；失败给出行内提示，下一轮轮询还原服务端口径 */
-async function sendFeedback(row: VisionEvent, verdict: 'false_alarm' | 'confirmed'): Promise<void> {
-  const ok = await vision.sendFeedback(row, verdict);
-  feedbackError.value = ok ? '' : tr('标注未保存，请重试');
-}
-
-function eventTime(row: VisionEvent): string {
-  const stamp = row.ts > 1e12 ? row.ts : row.ts * 1000;
-  const date = new Date(stamp);
-  if (Number.isNaN(date.getTime())) return String(row.ts);
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
-  }).format(date);
-}
-
 function show(): void {
   open.value = true;
   // 无条件启动轮询：未配置密钥时 status 也会如实返回 configured=false（带接入指引），
@@ -222,7 +205,7 @@ onUnmounted(() => {
         <header class="vision-head">
           <h1>{{ tr('实验室监控') }}</h1>
           <span class="vision-meta">{{ vision.configured.value ? tr(edgeMeta) : tr('仅本机摄像头可用') }}</span>
-          <button v-if="vision.configured.value" type="button" :disabled="vision.loading.value" @click="vision.refresh">
+          <button type="button" :disabled="vision.loading.value" @click="refreshAll">
             {{ tr('刷新') }}
           </button>
           <button type="button" :aria-label="tr('关闭实验室监控')" @click="close">{{ tr('关闭') }}</button>
@@ -270,10 +253,16 @@ onUnmounted(() => {
                 <ul v-if="vision.labs.value.length" class="vision-grid">
                   <li v-for="lab in vision.labs.value" :key="lab.labId" class="vision-card" :class="{ 'is-alert': lab.alert }">
                     <header class="vision-card__head">
-                      <b>{{ lab.labId }}</b>
-                      <span class="vision-badge" :class="lab.online ? 'vision-badge--ok' : 'vision-badge--muted'">
-                        <span aria-hidden="true">{{ lab.online ? '✓' : '○' }}</span>{{ tr(lab.online ? '在线' : '离线') }}
-                      </span>
+                      <template v-if="liveCount">
+                        <b>{{ liveCount.room || tr('实时画面') }}</b>
+                        <span class="vision-badge vision-badge--ok"><span aria-hidden="true">✓</span>{{ tr('实时') }}</span>
+                      </template>
+                      <template v-else>
+                        <b>{{ lab.labId }}</b>
+                        <span class="vision-badge" :class="lab.online ? 'vision-badge--ok' : 'vision-badge--muted'">
+                          <span aria-hidden="true">{{ lab.online ? '✓' : '○' }}</span>{{ tr(lab.online ? '在线' : '离线') }}
+                        </span>
+                      </template>
                       <span v-if="lab.alert" class="vision-badge vision-badge--danger">
                         <span aria-hidden="true">✕</span>{{ tr('告警') }}
                       </span>
@@ -327,29 +316,6 @@ onUnmounted(() => {
                     <span>{{ ev.prev === null ? tr('当前 {n} 人', { n: String(ev.count) }) : tr('{a} → {b} 人', { a: String(ev.prev), b: String(ev.count) }) }}</span>
                   </li>
                 </ul>
-                <details v-if="vision.events.value.length" class="vision-events__history">
-                  <summary>{{ tr('边缘上报历史（已停止更新 · {n} 条）', { n: String(vision.events.value.length) }) }}</summary>
-                <ul>
-                  <li
-                    v-for="row in vision.events.value"
-                    :key="`${row.labId}-${row.receivedAt}`"
-                    :class="{ 'is-alert': row.alert, 'is-offline': !row.cameraOnline }"
-                  >
-                    <span class="vision-events__time">{{ eventTime(row) }}</span>
-                    <b>{{ row.labId }}</b>
-                    <span>{{ row.count }}{{ tr(' 人') }}</span>
-                    <span v-if="row.recognized !== null">{{ tr('人脸命中 {n}', { n: row.recognized }) }}</span>
-                    <span v-for="(hit, hi) in row.library" :key="hi">{{ hitText(hit) }}</span>
-                    <span v-if="row.sceneState">{{ tr(sceneText(row.sceneState)) }}</span>
-                    <span v-if="!row.cameraOnline" class="vision-events__off">{{ tr('摄像头离线') }}</span>
-                    <span v-if="row.feedback" class="vision-events__feedback" :class="row.feedback.verdict === 'false_alarm' ? 'is-fa' : 'is-ok'">{{ tr(row.feedback.verdict === 'false_alarm' ? '已标误报' : '已确认') }}</span>
-                    <span v-else-if="row.alert" class="vision-events__actions">
-                      <button type="button" @click="sendFeedback(row, 'false_alarm')">{{ tr('误报') }}</button>
-                      <button type="button" @click="sendFeedback(row, 'confirmed')">{{ tr('确认') }}</button>
-                    </span>
-                  </li>
-                </ul>
-                </details>
               </aside>
             </div>
           </template>

@@ -487,7 +487,7 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
     const native=await nativePlan.execute();
     if(a.mode==='chat'&&native.ok&&native.resultKind==='business_plan'&&native.result.plan){yield a.emit('run_failed',{code:'mode_forbidden',message:'聊天模式仅可查询，准备办理单请切换任务模式'});return;}
     yield a.emit('tool_result',{step:1,toolCallId:'native-dialogue',tool:nativePlan.tool,ok:native.ok,ms:Date.now()-startedAt,sourceType:a.sourceType,summary:native.summary,...(native.ok?{resultKind:native.resultKind,result:native.result}:{error:{code:native.code,message:native.message}})});
-    const answer=native.ok?native.resultKind==='business_plan'?renderBusinessFacts(native.result):(native.resultKind==='checkin_status'||native.resultKind==='checkin_summary')?renderDemoAnswer({kind:native.resultKind,payload:native.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label,question:a.question}):native.summary:native.message;yield* streamText(answer,a.emit,a.signal);yield a.emit('run_completed',{answer,steps:1,toolCalls:1,ms:a.watch.ms,sourceType:a.sourceType,engine:'demo',...(native.ok&&native.resultKind==='business_plan'&&native.result.plan?{taskStatus:'awaiting_confirmation'}:{})});return;
+    const answer=native.ok?native.resultKind==='business_plan'?renderBusinessFacts(native.result):(native.resultKind==='checkin_status'||native.resultKind==='checkin_summary')?renderDemoAnswer({kind:native.resultKind,payload:native.result},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label,question:a.question,today:a.now.date}):native.summary:native.message;yield* streamText(answer,a.emit,a.signal);yield a.emit('run_completed',{answer,steps:1,toolCalls:1,ms:a.watch.ms,sourceType:a.sourceType,engine:'demo',...(native.ok&&native.resultKind==='business_plan'&&native.result.plan?{taskStatus:'awaiting_confirmation'}:{})});return;
   }
   const plan = planDemo(a.question, a.intent, a.ds);
   a.log.info('demo_plan', { callTool: plan.callTool, args: plan.args, disclosures: plan.needsDisclosure, mode: a.mode });
@@ -916,7 +916,7 @@ while (steps < cfg.agent.maxSteps) {
         if(exec.resultKind==='business_plan')businessFacts.push(exec.result);
         // A5：计划是模型自己的工作记录，不是业务答案——不进 verifiedAnswers，
         // 单独以 plan_updated 事件广播给界面（计划面板）。
-        if(exec.resultKind!=='task_plan')verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result,summary:exec.summary},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label,question:a.question}));
+        if(exec.resultKind!=='task_plan')verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result,summary:exec.summary},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label,question:a.question,today:a.now.date}));
         if(exec.resultKind==='task_plan'){
           const planSteps=(exec.result as {steps:import('../../shared/types.ts').TaskPlanStep[]}).steps;
           yield a.emit('plan_updated',{steps:planSteps,updatedAt:nowIso()} satisfies import('../../shared/types.ts').TaskPlanUpdatedPayload);

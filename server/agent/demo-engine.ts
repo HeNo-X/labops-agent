@@ -521,7 +521,7 @@ export async function runDemoTool(tool: string, args: Record<string, unknown>, c
 type SuccessfulToolExecution = Extract<ToolExecution, { ok: true }>;
 type SuccessfulResultKind = SuccessfulToolExecution['resultKind'];
 type ResultPayload<K extends SuccessfulResultKind> = Extract<SuccessfulToolExecution, { resultKind: K }>['result'];
-type DemoRenderExtras = { dateWasDefaulted: boolean; periodFiltered: boolean; textOnly?: boolean; scopeLabel?: string; question?: string };
+type DemoRenderExtras = { dateWasDefaulted: boolean; periodFiltered: boolean; textOnly?: boolean; scopeLabel?: string; question?: string; today?: string };
 type DemoRendererMap = {
   [K in SuccessfulResultKind]: (payload: ResultPayload<K>, extras: DemoRenderExtras) => string;
 };
@@ -611,6 +611,32 @@ function renderTaskPlanAnswer(r: ResultPayload<'task_plan'>): string {
   return lines.join('\n');
 }
 
+/**
+ * 钥匙台账：只回答用户真正要的三件事——哪把钥匙、借没借出、在谁手里/在哪。
+ * 内部编号、labType（student/open）、以及"借用人已掩码"这类口径说明都不进正文。
+ */
+function renderKeyRecordsAnswer(rows: unknown[], date: string, total: number): string {
+  const scalar = (v: unknown): string => typeof v === 'string' || typeof v === 'number' ? String(v) : '';
+  const labelOf = (key: Record<string, unknown>): string =>
+    scalar(key['name']) || `${scalar(key['labName']) || scalar(key['labId']) || '未命名'}钥匙`;
+  const lineOf = (row: unknown): string => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) return '记录字段不可用，无法呈现。';
+    const key = row as Record<string, unknown>;
+    const holder = scalar(key['holder']);
+    const location = scalar(key['location']);
+    const remark = scalar(key['remark']);
+    const status = key['borrowed'] === true ? `已借出${holder ? `（借用人 ${holder}）` : ''}` : '未借出';
+    return `${labelOf(key)}：${status}${location ? `，位置：${location}` : ''}${remark ? `，备注：${remark}` : ''}。`;
+  };
+  if (!rows.length) return `**${date ? date + ' ' : ''}没有查到钥匙记录。**`;
+  // 一把钥匙直接给结论，不要"台账共 1 条"再列一行字段
+  if (rows.length === 1) return `**${lineOf(rows[0])}**`;
+  const lines = [`**${date ? date + ' ' : ''}钥匙台账：共 ${total} 条**`];
+  for (const row of rows.slice(0, 30)) lines.push(`- ${lineOf(row)}`);
+  if (rows.length > 30) lines.push('正文仅显示前 30 条，请缩小查询范围。');
+  return lines.join('\n');
+}
+
 /** records 来自主系统三类明细接口；仅展示已知字段，身份掩码原样保留，不推断考勤。 */
 function renderRecordsAnswer(r: ResultPayload<'records'>): string {
   if (r['directory'] === true) return renderDirectoryAnswer(r);
@@ -618,12 +644,14 @@ function renderRecordsAnswer(r: ResultPayload<'records'>): string {
   const rows = isKey ? r['keys'] : r['records'];
   if (!Array.isArray(rows)) return '暂无可呈现的明细数据，不能据此判断没有记录。';
   const scalar = (v: unknown): string => typeof v === 'string' || typeof v === 'number' ? String(v) : '';
-  const fields: Array<[string, string[]]> = isKey
-    ? [['编号', ['id']], ['钥匙', ['name']], ['实验室', ['labName', 'labId']], ['类型', ['labType']], ['位置', ['location']], ['借用人', ['holder']], ['备注', ['remark']]]
-    : [['姓名', ['name']], ['账号', ['user', 'username', 'actorId']], ['时间', ['at', 'time', 'ts']], ['实验室', ['labName', 'labId']], ['节次', ['periodKey']], ['替班对象', ['substituteFor']]];
   const date = scalar(r['date']);
   const total = typeof r['total'] === 'number' && Number.isFinite(r['total']) ? r['total'] : rows.length;
-  const lines = [`**${date ? date + ' ' : ''}${isKey ? '钥匙台账' : '签到签退明细'}：共 ${total} 条**${total !== rows.length ? `（本次返回 ${rows.length} 条）` : ''}。`];
+  if (isKey) return renderKeyRecordsAnswer(rows, date, total);
+  const fields: Array<[string, string[]]> = [
+    ['姓名', ['name']], ['账号', ['user', 'username', 'actorId']], ['时间', ['at', 'time', 'ts']],
+    ['实验室', ['labName', 'labId']], ['节次', ['periodKey']], ['替班对象', ['substituteFor']]
+  ];
+  const lines = [`**${date ? date + ' ' : ''}签到签退明细：共 ${total} 条**${total !== rows.length ? `（本次返回 ${rows.length} 条）` : ''}。`];
   for (const row of rows.slice(0, 30)) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) {
       lines.push('- 记录字段不可用，无法呈现。');
@@ -634,16 +662,12 @@ function renderRecordsAnswer(r: ResultPayload<'records'>): string {
       const value = keys.map((key) => scalar(row[key])).find(Boolean);
       if (value) values.push(`${label}：${value}`);
     }
-    if (isKey) {
-      values.push(`借用状态：${row.borrowed === true ? '已借出' : row.borrowed === false ? '未借出' : '未知'}`);
-    } else {
-      const type = scalar(row.type);
-      if (type) values.push(`类型：${type === 'checkin' ? '签到' : type === 'checkout' ? '签退' : type}`);
-      const dutySource = scalar(row.dutySource);
-      if (dutySource) values.push(`值班来源：${dutySource === 'roster' ? '周值班模板' : dutySource === 'substitute' ? '替班' : dutySource}`);
-      if (typeof row.dutyMatched === 'boolean') values.push(`模板匹配：${row.dutyMatched ? '是' : '否'}`);
-      if (scalar(row.rosterSlot)) values.push(`模板席位：${scalar(row.rosterSlot)}`);
-    }
+    const type = scalar(row.type);
+    if (type) values.push(`类型：${type === 'checkin' ? '签到' : type === 'checkout' ? '签退' : type}`);
+    const dutySource = scalar(row.dutySource);
+    if (dutySource) values.push(`值班来源：${dutySource === 'roster' ? '周值班模板' : dutySource === 'substitute' ? '替班' : dutySource}`);
+    if (typeof row.dutyMatched === 'boolean') values.push(`模板匹配：${row.dutyMatched ? '是' : '否'}`);
+    if (scalar(row.rosterSlot)) values.push(`模板席位：${scalar(row.rosterSlot)}`);
     lines.push(`- ${values.join('｜') || '暂无可呈现的明细字段'}`);
   }
   if (!rows.length) lines.push('本次查询未返回记录，不据此推断现场状态。');
@@ -695,6 +719,29 @@ function renderDirectoryAnswer(r: ResultPayload<'records'>): string {
  *   · 两类都问到（或都问不到，保守起见）→ 两块都给。
  * 「尚未导入」的提醒也只针对被问到的那一侧，不再顺带催另一侧。
  */
+
+/** 从问句解析用户想要哪一天的值班（今天/明天/后天/周X/星期X）；解析不出返回 null，不猜 */
+function resolveTargetWeekday(question: string, today?: string): number | null {
+  const q = String(question ?? '');
+  const wdOfIso = (iso?: string): number | null => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso ?? ''));
+    if (!m) return null;
+    const dt = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    return ((dt.getUTCDay() + 6) % 7) + 1; // 周一=1 … 周日=7
+  };
+  const base = wdOfIso(today);
+  if (base) {
+    const shift = /今天|今日|本日/.test(q) ? 0 : /明天|明日/.test(q) ? 1 : /后天/.test(q) ? 2 : NaN;
+    if (!Number.isNaN(shift)) return ((base - 1 + shift) % 7) + 1;
+  }
+  const m = /(?:周|星期|礼拜)([一二三四五六日天])/.exec(q);
+  if (m) {
+    const map: Record<string, number> = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 };
+    return map[m[1]!] ?? null;
+  }
+  return null;
+}
+
 function renderTermScheduleAnswer(r: TermScheduleResult, extras: DemoRenderExtras): string {
   const lines: string[] = [];
   const t = r.termSchedule, v = r.volunteerSchedule;
@@ -703,7 +750,7 @@ function renderTermScheduleAnswer(r: TermScheduleResult, extras: DemoRenderExtra
   const noQuestion = !q.trim();
   const asksDuty = noQuestion || /值班|值守|志愿者|谁在/.test(q);
   const asksTerm = noQuestion || /课|排课|学期|实验|停课|取消|档案/.test(q);
-  const wantsRoster = noQuestion || /名单|哪些志愿者|几个志愿者|多少(名)?志愿者|全员|值班表|排班表|轮班/.test(q);
+  const wantsRoster = noQuestion || /名单|哪些志愿者|几个志愿者|多少(名)?志愿者|全员/.test(q);
   const both = (asksDuty && asksTerm) || noQuestion;
   const wdOf = (n: number) => '一二三四五六日'[Math.min(6, Math.max(0, n - 1))];
 
@@ -718,7 +765,25 @@ function renderTermScheduleAnswer(r: TermScheduleResult, extras: DemoRenderExtra
       const unnamed = v.expected.names.length - named.length + v.expected.vacantCount;
       lines.push(`**周${wdOf(v.expected.weekday)} ${v.expected.slotCode} 节值班**：${named.length ? named.join('、') : '（表上这一格未填姓名）'}${unnamed > 0 ? ` · 另有 ${unnamed} 个席位未指名` : ''}`);
     } else {
-      lines.push(`**志愿者周值班模板**：${v.enabled ? `已导入 · ${v.days.length} 天 · ${v.persons.length} 名志愿者` : '尚未导入'}`);
+      // 问"今天/明天/周X 的值班表"但没有指定节次时，用户要的是**那一天**的排班，
+      // 不是"模板已导入 + 全员名单"（2026-11-14 实机就是在这里答非所问）。
+      const targetWd = resolveTargetWeekday(q, extras.today);
+      const day = targetWd ? (v.days as Array<{ weekday?: number; slots?: Array<{ slotCode?: string; seats?: Array<{ name?: string; vacant?: boolean }> }> }>)
+        .find((d) => Number(d.weekday) === targetWd) : null;
+      if (day && Array.isArray(day.slots) && day.slots.length) {
+        lines.push(`**周${wdOf(targetWd!)} 值班安排**：`);
+        for (const slot of day.slots) {
+          const names = (slot.seats || []).filter((x) => x && !x.vacant && x.name).map((x) => x.name as string);
+          const vacant = (slot.seats || []).filter((x) => x && x.vacant).length;
+          lines.push(`- ${slot.slotCode} 节：${names.length ? names.join('、') : '（未填姓名）'}${vacant > 0 ? ` · 空缺 ${vacant} 席` : ''}`);
+        }
+      } else if (targetWd) {
+        // 说到了具体某天但模板里没有这天（如周日），要如实说"不在排班范围"，不能回落成模板概况
+        const covered = (v.days as Array<{ weekday?: number }>).map((d) => `周${wdOf(Number(d.weekday))}`).join('、');
+        lines.push(`**周${wdOf(targetWd)} 值班安排**：这一天不在排班范围内${covered ? `（当前模板覆盖 ${covered}）` : ''}。`);
+      } else {
+        lines.push(`**志愿者周值班模板**：${v.enabled ? `已导入 · ${v.days.length} 天 · ${v.persons.length} 名志愿者` : '尚未导入'}`);
+      }
     }
     if (wantsRoster && v.enabled && v.persons.length) {
       const named = v.persons.filter((p) => p.name && !/^\d{1,2}节$/.test(p.name));
@@ -803,13 +868,11 @@ function renderScheduleAnswer(
     if (result.reason === 'timetable_empty') {
       return `**${head}无法判断是否有课**：系统内课表数据为空。本结果不构成"该房间没课"的结论。`;
     }
-    const why =
-      result.reason === 'no_class_in_that_period'
-        ? '该节次没有课'
-        : result.reason === 'lab_not_active'
-          ? '该房间当前状态不是「开放」，且当天没有排课'
-          : '当天没有排课';
-    return `**${head}没有课。**原因：${why}。明细见下方结果卡。`;
+    // 用户口径（2026-11-11）：查到没课就只回"没有课"，不解释"系统没编造"这类开发细节，
+    // 也不再引导"看下方结果卡"——空结果不再渲染结果卡。
+    if (result.reason === 'no_class_in_that_period') return `**${head}本节没有课。**`;
+    if (result.reason === 'lab_not_active') return `**${head}当前不是开放状态，当天也没有排课。**`;
+    return `**${head}没有课。**`;
   }
 
   // A8：重点先行（加粗结论句），明细列表化；数据来源/常规口径不上正文——

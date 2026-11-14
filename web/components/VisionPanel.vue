@@ -773,4 +773,22 @@ onUnmounted(() => {
   font-size: 10px;
   line-height: 1;
 }
+
+/* 事件流水顶部的"当前画面识别"行：与历史事件区分（实心点 + 主色），不抢列表注意力 */
+.vision-events__live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.vision-events__live span {
+  color: var(--primary);
+  font-size: 10px;
+  line-height: 1;
+}
 </style>

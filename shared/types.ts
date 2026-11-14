@@ -36,6 +36,8 @@ export const RUN_EVENT_TYPES = [
   /** 消息接受确认（会话端点专用）：payload 携带全部正式 ID（N01/N17） */
   'run_accepted',
   'run_started',
+  /** 执行过程可见性：模型思维链增量（reasoning_content）或相位提示，只用于展示，不进答案 */
+  'thinking',
   'tool_started',
   'tool_result',
   'answer_delta',
@@ -68,7 +70,7 @@ export const RUN_EVENT_TYPES = [
  *   thinking      —— 内部推理步骤。注意：绝不把模型内部思维链展示给用户，
  *                    该事件若启用也只承载\"正在查询课表\"这类可观察的步骤摘要。
  */
-export const RESERVED_RUN_EVENT_TYPES = ['run_cancelled', 'thinking'] as const;
+export const RESERVED_RUN_EVENT_TYPES = ['run_cancelled'] as const;
 
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number] | (typeof RESERVED_RUN_EVENT_TYPES)[number];
 

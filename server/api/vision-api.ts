@@ -250,60 +250,66 @@ async function handleLiveProbe(res: ServerResponse): Promise<void> {
  * 这条端点补上"从**当前画面**现取一次识别结果"：抓 MJPEG 的一帧 →
  * 交给边缘视觉服务的 /api/count → 返回人数。15 秒内复用结果，避免每次刷新都推理。
  */
-let liveCountCache: { at: number; count: number; people: number; ms: number } | null = null;
+let liveCountCache: {
+  at: number; count: number; room: string | null; sourceKind: string | null;
+  inferFps: number | null; frameAgeMs: number | null; p95Ms: number | null;
+} | null = null;
+/** 实时事件流：人数变化就记一条（只来自 vision 侧，不看边缘上报历史） */
+const liveEvents: Array<{ at: number; room: string | null; count: number; prev: number | null }> = [];
+let lastLiveCount: number | null = null;
 
-async function readJpegFrame(body: ReadableStream<Uint8Array>, timeoutMs: number): Promise<Buffer | null> {
-  const reader = body.getReader();
-  const chunks: Buffer[] = [];
-  let total = 0;
-  const deadline = Date.now() + timeoutMs;
-  try {
-    while (Date.now() < deadline) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) { chunks.push(Buffer.from(value)); total += value.length; }
-      const buf = Buffer.concat(chunks, total);
-      const start = buf.indexOf(Buffer.from([0xff, 0xd8]));
-      if (start >= 0) {
-        const end = buf.indexOf(Buffer.from([0xff, 0xd9]), start + 2);
-        if (end > start) return buf.subarray(start, end + 2);
-      }
-      if (total > 4 * 1024 * 1024) break;
-    }
-  } finally {
-    await reader.cancel().catch(() => undefined);
-  }
-  return null;
-}
-
+/**
+ * 实时画面识别结果（2026-11-14 修正版）
+ * ---------------------------------------------------------------
+ * 上一版抓帧后调 /api/count（单帧重推理），与**画面上的检测框**不是同一套参数：
+ * 同一帧 live 会话检出 23 人、单帧重推理只给 3 人，于是卡片数字与画面矛盾。
+ * 现改为直接读边缘的 `/api/live/status`——那是画框的那个循环自己的结论
+ * （count / counts / detected / frame_age_ms / infer_fps），与画面天然一致。
+ */
 async function handleLiveCount(res: ServerResponse): Promise<void> {
   const nowMs = Date.now();
-  if (liveCountCache && nowMs - liveCountCache.at < 15000) {
+  if (liveCountCache && nowMs - liveCountCache.at < 5000) {
     reply(res, 200, { ok: true, source: 'live', cached: true, ...liveCountCache, ageMs: nowMs - liveCountCache.at });
     return;
   }
-  const upstream = await fetchLiveFeed(6000);
-  if (!upstream?.ok || !upstream.body) {
-    if (upstream) await upstream.body?.cancel().catch(() => undefined);
-    reply(res, 502, { ok: false, error: 'vision_feed_unreachable', message: '当前拉不到实时画面（内网视觉服务不可达）' });
-    return;
-  }
-  const frame = await readJpegFrame(upstream.body as ReadableStream<Uint8Array>, 5000);
-  if (!frame) { reply(res, 502, { ok: false, error: 'no_frame', message: '10 秒内没有拿到画面帧' }); return; }
   const base = LIVE_FEED_URL.replace(/\/live\/.*$/, '');
-  const form = new FormData();
-  form.append('image', new Blob([new Uint8Array(frame)], { type: 'image/jpeg' }), 'frame.jpg');
-  const t0 = Date.now();
-  const counted = await fetch(base + '/api/count', { method: 'POST', body: form, signal: AbortSignal.timeout(9000) }).catch(() => null);
-  if (!counted || !counted.ok) {
-    reply(res, 502, { ok: false, error: 'vision_count_failed', message: '视觉服务未返回识别结果' });
+  const r = await fetch(base + '/api/live/status', { signal: AbortSignal.timeout(5000) }).catch(() => null);
+  if (!r || !r.ok) {
+    reply(res, 502, { ok: false, error: 'vision_live_unreachable', message: '读不到边缘实时识别状态（画面可能未开始或服务未运行）' });
     return;
   }
-  const data = (await counted.json().catch(() => null)) as { count?: number; objects?: unknown[] } | null;
-  const count = typeof data?.count === 'number' ? data.count : null;
-  if (count === null) { reply(res, 502, { ok: false, error: 'bad_count_payload', message: '识别结果里没有人数字段' }); return; }
-  liveCountCache = { at: nowMs, count, people: Array.isArray(data?.objects) ? data.objects.length : count, ms: Date.now() - t0 };
-  reply(res, 200, { ok: true, source: 'live', cached: false, ...liveCountCache, ageMs: 0 });
+  const st = (await r.json().catch(() => null)) as {
+    running?: boolean; count?: number; detected?: number; counts?: Record<string, number>;
+    infer_fps?: number; frame_age_ms?: number; p95_ms?: number;
+    room?: string | null; source_kind?: string | null;
+    error?: string | null; note?: string | null;
+  } | null;
+  if (!st) { reply(res, 502, { ok: false, error: 'bad_live_status', message: '边缘返回的实时状态不是 JSON' }); return; }
+  if (st.running === false) {
+    reply(res, 200, { ok: false, error: 'live_not_running', message: st.note || '实时识别未开始（请在实验室现场端启动）' });
+    return;
+  }
+  const count = typeof st.count === 'number' ? st.count : typeof st.detected === 'number' ? st.detected : null;
+  if (count === null) { reply(res, 502, { ok: false, error: 'bad_live_status', message: '实时状态里没有人数字段' }); return; }
+  if (count !== lastLiveCount) {
+    liveEvents.unshift({ at: nowMs, room: st.room ?? null, count, prev: lastLiveCount });
+    if (liveEvents.length > 60) liveEvents.length = 60;
+    lastLiveCount = count;
+  }
+  liveCountCache = {
+    at: nowMs,
+    count,
+    room: st.room ?? null,
+    sourceKind: st.source_kind ?? null,
+    inferFps: typeof st.infer_fps === 'number' ? st.infer_fps : null,
+    frameAgeMs: typeof st.frame_age_ms === 'number' ? st.frame_age_ms : null,
+    p95Ms: typeof st.p95_ms === 'number' ? st.p95_ms : null
+  };
+  reply(res, 200, {
+    ok: true, source: 'live', cached: false, ...liveCountCache, ageMs: 0,
+    counts: st.counts ?? null,
+    note: st.error ?? st.note ?? null
+  });
 }
 
 async function handleFeed(res: ServerResponse): Promise<void> {
@@ -352,5 +358,9 @@ export async function handleVisionApi(req: IncomingMessage, res: ServerResponse,
   if (pathname === '/api/vision/live-probe' && req.method === 'GET') { await handleLiveProbe(res); return; }
   if (pathname === '/api/vision/feed' && req.method === 'GET') { await handleFeed(res); return; }
   if (pathname === '/api/vision/live-count' && req.method === 'GET') { await handleLiveCount(res); return; }
+  if (pathname === '/api/vision/live-events' && req.method === 'GET') {
+    reply(res, 200, { ok: true, source: 'live', room: liveCountCache?.room ?? null, events: liveEvents });
+    return;
+  }
   reply(res, 404, { error: 'unknown_endpoint', message: `未实现的视觉接口：${req.method} ${pathname}` });
 }

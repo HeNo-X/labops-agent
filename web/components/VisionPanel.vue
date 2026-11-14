@@ -42,21 +42,32 @@ const guideOpen = ref(false);
  * 但画面本身是通的。这里直接向后端要"从当前画面现识别一次"的人数，
  * 20 秒刷新一次，抽屉关闭时不请求。
  */
-const liveCount = ref<{ count: number; at: number } | null>(null);
+const liveCount = ref<{ count: number; at: number; room: string | null; inferFps: number | null; frameAgeMs: number | null } | null>(null);
+/** 实时事件：人数变化（只来自 vision 侧），替代"边缘上报历史"作为默认视图 */
+const liveEvents = ref<Array<{ at: number; room: string | null; count: number; prev: number | null }>>([]);
 const liveCountText = computed(() => {
   const c = liveCount.value;
   if (!c) return '';
   const sec = Math.max(0, Math.round((Date.now() - c.at) / 1000));
-  return tr('{n} 人（{s} 秒前识别）', { n: String(c.count), s: String(sec) });
+  return tr('{n} 人（{s} 秒前）', { n: String(c.count), s: String(sec) });
 });
 let liveTimer: number | null = null;
 async function refreshLiveCount(): Promise<void> {
   if (!open.value) return;
   try {
-    const res = await clientFetch('/api/vision/live-count');
+    const [res, ev] = await Promise.all([
+      clientFetch('/api/vision/live-count'),
+      clientFetch('/api/vision/live-events')
+    ]);
     if (!res.ok) { liveCount.value = null; return; }
-    const data = (await res.json()) as { ok?: boolean; count?: number };
-    liveCount.value = data?.ok && typeof data.count === 'number' ? { count: data.count, at: Date.now() } : null;
+    const data = (await res.json()) as { ok?: boolean; count?: number; room?: string | null; inferFps?: number | null; frameAgeMs?: number | null };
+    liveCount.value = data?.ok && typeof data.count === 'number'
+      ? { count: data.count, at: Date.now(), room: data.room ?? null, inferFps: data.inferFps ?? null, frameAgeMs: data.frameAgeMs ?? null }
+      : null;
+    if (ev.ok) {
+      const e = (await ev.json()) as { events?: Array<{ at: number; room: string | null; count: number; prev: number | null }> };
+      liveEvents.value = Array.isArray(e.events) ? e.events : [];
+    }
   } catch { liveCount.value = null; }
 }
 watch(open, (v) => {
@@ -249,7 +260,7 @@ onUnmounted(() => {
                   <h3>{{ tr('待核查 {n} 处', { n: vision.alertLabs.value.length }) }}</h3>
                   <ul>
                     <li v-for="lab in vision.alertLabs.value" :key="`todo-${lab.labId}`">
-                      <b>{{ lab.labId }}</b>
+                      <b>{{ liveCount?.room || lab.labId }}</b>
                       <span>{{ tr('计数 {n} 人', { n: lab.count }) }}</span>
                       <button type="button" @click="draftIssue(lab)">{{ tr('让 Agent 起草工单') }}</button>
                     </li>
@@ -268,16 +279,22 @@ onUnmounted(() => {
                       </span>
                     </header>
                     <p class="vision-card__count">
-                      <span class="vision-card__num">{{ lab.online ? lab.count : '—' }}</span>
-                      <span class="vision-card__unit">{{ tr('AI 计数') }}</span>
+                      <span class="vision-card__num">{{ liveCount ? liveCount.count : (lab.online ? lab.count : '—') }}</span>
+                      <span class="vision-card__unit">{{ tr(liveCount ? '画面人数' : 'AI 计数') }}</span>
                     </p>
-                    <dl class="vision-card__facts">
+                    <!-- 实时来源优先：有实时会话时，卡片只显示画面侧的事实，不掺入边缘上报的旧值 -->
+                    <dl v-if="liveCount" class="vision-card__facts">
+                      <div><dt>{{ tr('房间') }}</dt><dd>{{ liveCount.room || tr('画面未标注房间') }}</dd></div>
+                      <div><dt>{{ tr('画面人数') }}</dt><dd>{{ liveCountText }}</dd></div>
+                      <div v-if="liveCount.inferFps !== null"><dt>{{ tr('推理帧率') }}</dt><dd>{{ liveCount.inferFps }} fps</dd></div>
+                      <div v-if="liveCount.frameAgeMs !== null"><dt>{{ tr('画面延迟') }}</dt><dd>{{ Math.round(liveCount.frameAgeMs) }} ms</dd></div>
+                      <div><dt>{{ tr('更新') }}</dt><dd>{{ tr('实时') }}</dd></div>
+                    </dl>
+                    <dl v-else class="vision-card__facts">
                       <div><dt>{{ tr('人数/容量') }}</dt><dd>{{ lab.capacity !== null ? `${lab.count} / ${lab.capacity}` : `${lab.count}` }}</dd></div>
                       <div v-if="lab.recognized !== null"><dt>{{ tr('已录入人脸') }}</dt><dd>{{ tr('{n} 人命中（不含姓名）', { n: lab.recognized }) }}</dd></div>
                       <div v-if="lab.sceneState"><dt>{{ tr('场景') }}</dt><dd>{{ tr(sceneText(lab.sceneState)) }}</dd></div>
                       <div v-if="lab.library.length"><dt>{{ tr('底库命中') }}</dt><dd>{{ lab.library.map(hitText).join('、') }}</dd></div>
-                      <div v-if="liveCount"><dt>{{ tr('当前画面') }}</dt><dd>{{ liveCountText }}</dd></div>
-                      <div v-if="liveCount"><dt>{{ tr('当前画面') }}</dt><dd>{{ liveCountText }}</dd></div>
                       <div><dt>{{ tr('更新') }}</dt><dd>{{ tr(vision.staleLabel(lab)) }}</dd></div>
                     </dl>
                     <img
@@ -297,12 +314,21 @@ onUnmounted(() => {
               </div>
 
               <aside class="vision-events">
-                <h3>{{ tr('事件流水') }} <small>{{ vision.events.value.length }}</small></h3>
+                <h3>{{ tr('实时事件') }} <small>{{ liveEvents.length }}</small></h3>
                 <!-- 边缘上报断了也要让用户看到"当前画面里是什么"：这条来自实时帧识别，不是历史事件 -->
                 <p v-if="liveCount" class="vision-events__live">
                   <span aria-hidden="true">●</span>{{ tr('当前画面识别') }}：{{ liveCountText }}
                 </p>
-                <p v-if="!vision.events.value.length" class="vision-empty">{{ tr('暂无上报事件。') }}</p>
+                <p v-if="!liveEvents.length" class="vision-empty">{{ tr('实时画面暂无人数变化。') }}</p>
+                <ul>
+                  <li v-for="ev in liveEvents" :key="ev.at">
+                    <span class="vision-events__time">{{ new Date(ev.at).toLocaleTimeString('zh-CN', { hour12: false }) }}</span>
+                    <b>{{ ev.room || tr('未标注') }}</b>
+                    <span>{{ ev.prev === null ? tr('当前 {n} 人', { n: String(ev.count) }) : tr('{a} → {b} 人', { a: String(ev.prev), b: String(ev.count) }) }}</span>
+                  </li>
+                </ul>
+                <details v-if="vision.events.value.length" class="vision-events__history">
+                  <summary>{{ tr('边缘上报历史（已停止更新 · {n} 条）', { n: String(vision.events.value.length) }) }}</summary>
                 <ul>
                   <li
                     v-for="row in vision.events.value"
@@ -323,6 +349,7 @@ onUnmounted(() => {
                     </span>
                   </li>
                 </ul>
+                </details>
               </aside>
             </div>
           </template>

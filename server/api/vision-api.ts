@@ -343,6 +343,9 @@ async function handleFeed(res: ServerResponse): Promise<void> {
 // ---- 总分发 -----------------------------------------------------------------
 
 export async function handleVisionApi(req: IncomingMessage, res: ServerResponse, pathname: string, query: URLSearchParams): Promise<void> {
+  // VISION_DISABLED: 实验室监控模块暂不提供（2026-11-14 裁定）
+  res.writeHead(404, {'Content-Type':'application/json'}); res.end(JSON.stringify({error:'vision_disabled'})); return;
+
   if (pathname === '/api/vision/report') {
     if (req.method !== 'POST') {
       reply(res, 405, { error: 'method_not_allowed', message: '上报请用 POST' });

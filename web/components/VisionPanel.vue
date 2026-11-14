@@ -186,7 +186,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div v-if="business.connected" class="vision-entry">
+  <!-- vision-off -->
+  <div v-show="false && business.connected" class="vision-entry">
     <button
       type="button"
       :class="{ 'nav-tool': navigation }"

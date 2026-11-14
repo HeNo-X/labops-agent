@@ -186,7 +186,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="vision-view">
+  <!-- vision-off -->
+  <section v-show="false" class="vision-view">
     <!-- ① 通道状态 -->
     <header class="vision-top" :class="`is-${channelTone}`">
       <span class="vision-pulse" aria-hidden="true"></span>

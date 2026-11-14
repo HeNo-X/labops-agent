@@ -228,37 +228,37 @@ async function execute(body: ValidBody, runIdHint: string, conversationId: strin
     throw err;
   });
   try {
-  for await (const ev of runAgent({
-    question: body.prompt,
-    sessionId: conversationId || body.sessionId,
-    runId: runIdHint,
-    mode,
-    actor: body.owner,
-    allowedTools: allowed,
-    autonomous: body.autonomous,
-    signal
-  })) {
-    runId = ev.runId || runId;
-    const p = ev.payload as Record<string, unknown>;
-    if (ev.type === 'run_started') {
-      engine = String(p['engine'] ?? '');
-      model = String(p['model'] ?? '');
-    } else if (ev.type === 'answer_delta') {
-      answer += String(p['text'] ?? '');
-    } else if (ev.type === 'tool_started') {
-      toolCalls += 1;
-    } else if (ev.type === 'tool_result') {
-      traces.push({ tool: String(p['tool'] ?? ''), ok: Boolean(p['ok']), summary: typeof p['summary'] === 'string' ? p['summary'].slice(0, 200) : undefined });
-    } else if (ev.type === 'run_completed') {
-      if (typeof p['answer'] === 'string' && p['answer']) answer = p['answer'];
-      if (p['model']) model = String(p['model']);
-      usage = p['usage'] ?? usage;
-    } else if (ev.type === 'run_failed') {
-      const err = new Error(String(p['message'] ?? '本轮执行失败'));
-      (err as Error & { code?: string }).code = String(p['code'] ?? 'run_failed');
-      throw err;
+    for await (const ev of runAgent({
+      question: body.prompt,
+      sessionId: conversationId || body.sessionId,
+      runId: runIdHint,
+      mode,
+      actor: body.owner,
+      allowedTools: allowed,
+      autonomous: body.autonomous,
+      signal
+    })) {
+      runId = ev.runId || runId;
+      const p = ev.payload as Record<string, unknown>;
+      if (ev.type === 'run_started') {
+        engine = String(p['engine'] ?? '');
+        model = String(p['model'] ?? '');
+      } else if (ev.type === 'answer_delta') {
+        answer += String(p['text'] ?? '');
+      } else if (ev.type === 'tool_started') {
+        toolCalls += 1;
+      } else if (ev.type === 'tool_result') {
+        traces.push({ tool: String(p['tool'] ?? ''), ok: Boolean(p['ok']), summary: typeof p['summary'] === 'string' ? p['summary'].slice(0, 200) : undefined });
+      } else if (ev.type === 'run_completed') {
+        if (typeof p['answer'] === 'string' && p['answer']) answer = p['answer'];
+        if (p['model']) model = String(p['model']);
+        usage = p['usage'] ?? usage;
+      } else if (ev.type === 'run_failed') {
+        const err = new Error(String(p['message'] ?? '本轮执行失败'));
+        (err as Error & { code?: string }).code = String(p['code'] ?? 'run_failed');
+        throw err;
+      }
     }
-  }
   } finally {
     slot.release();
   }

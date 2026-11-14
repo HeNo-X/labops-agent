@@ -315,7 +315,7 @@ const engineTitle = computed(() => {
         <!-- 正常完成不再挂"本轮回答已保存"这类系统状态；生成中/失败/中断仍需可见 -->
         <StatusTag v-if="msg.status !== 'completed'" :tone="statusMeta.tone" :glyph="statusMeta.glyph" :label="statusMeta.label" />
         <!-- PC-4：引擎与耗时收敛为一枚徽标，细节移入 hover 提示 -->
-        <span v-if="engineLabel || msg.ms" class="msg__engine" :title="engineTitle + (msg.ms ? ` · ${msg.ms} ms` : '')">i</span>
+        <span v-if="engineLabel || msg.ms" class="msg__engine" :title="engineTitle">i</span>
       </div>
 
       <!-- A5 任务计划面板：活跃轮来自 plan_updated 事件（run store），历史轮来自
@@ -383,8 +383,6 @@ const engineTitle = computed(() => {
       <p v-else-if="msg.status === 'streaming'" class="msg__pending">{{tr(phaseLabel)}}</p>
       <p v-else-if="msg.status === 'failed'" class="msg__pending">{{tr("本轮执行失败，未生成回答。")}}</p>
       <p v-else-if="msg.status === 'interrupted'" class="msg__pending">{{tr("本轮执行被中断，部分内容可能未生成。")}}</p>
-      <details v-if="knowledgeArtifacts.length" class="msg__kb">
-        <summary>{{ tr("知识依据") }} {{ knowledgeArtifacts.reduce((n,k)=>n+(k.hits?.length||0),0) }} 条</summary>
         <details v-if="knowledgeArtifacts.length" class="msg__kb">
           <summary>{{ tr("知识依据") }} {{ knowledgeArtifacts.reduce((n,k)=>n+(k.hits?.length||0),0) }} 条</summary>
           <div v-for="(k,i) in knowledgeArtifacts" :key="'knowledge-'+i"><p v-for="h in (k.hits||[]).slice(0,5)" :key="h.id"><a :href="h.url" target="_blank" rel="noopener">{{h.title}} · v{{h.version}}</a></p></div>

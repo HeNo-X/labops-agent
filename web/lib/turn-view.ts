@@ -40,9 +40,6 @@ export interface BuildTurnUnitOptions {
 }
 
 /** 秒数取整（向下），只在有服务端事实时才有数字 */
-function secondsLabel(ms: number): string {
-  return `${Math.max(1, Math.round(ms / 1000))} 秒`;
-}
 
 export function buildTurnRenderUnit(steps: TraceStep[], opts: BuildTurnUnitOptions): TurnRenderUnit {
   const toolSteps = steps.filter((s) => s.kind === 'tool');
@@ -57,12 +54,12 @@ export function buildTurnRenderUnit(steps: TraceStep[], opts: BuildTurnUnitOptio
   let workStatus: TurnRenderUnit['workStatus'];
   if (opts.running) {
     // 运行中：有服务端耗时就用它累积（如取消前的已运行时间），没有就只说"工作中"
-    workStatus = { state: 'running', label: opts.serverMs !== null ? `工作中 ${secondsLabel(opts.serverMs)}` : '工作中' };
+    workStatus = { state: 'running', label: '工作中' };
   } else if (interrupted) {
     // 中断/取消：**不带耗时**（ZCode orphan 归一化口径）
     workStatus = { state: 'interrupted', label: '已停止' };
   } else if (opts.serverMs !== null) {
-    workStatus = { state: 'completed', label: `已工作 ${secondsLabel(opts.serverMs)}` };
+    workStatus = { state: 'completed', label: '已完成' };
   } else {
     // 终态缺完成时间（历史孤儿轮）→ interrupted，不得伪装成 completed
     workStatus = { state: 'interrupted', label: '已停止' };

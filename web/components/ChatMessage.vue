@@ -96,7 +96,9 @@ const checkinArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.result&&t.re
 const isUser = computed(() => props.msg.role === 'user');
 
 // 仅失败/中断/取消轮展开技术运行轨迹（排查用）；成功轮隐藏 token/耗时/工具调用等技术元信息
-const showTrace = computed(() => ['failed', 'interrupted', 'cancelled'].includes(props.msg.status));
+// 2026-11-14：原来只有失败/中断才渲染轨迹块，导致正常回答永远看不到思维链与工具步骤。
+// 改为始终渲染，显隐交给 v-if 里的 steps.length 控制。
+const showTrace = true;
 
 /**
  * A5 计划步骤：活跃轮（streaming）读 run store 的 plan（plan_updated 实时更新），
@@ -381,7 +383,13 @@ const engineTitle = computed(() => {
       <p v-else-if="msg.status === 'streaming'" class="msg__pending">{{tr(phaseLabel)}}</p>
       <p v-else-if="msg.status === 'failed'" class="msg__pending">{{tr("本轮执行失败，未生成回答。")}}</p>
       <p v-else-if="msg.status === 'interrupted'" class="msg__pending">{{tr("本轮执行被中断，部分内容可能未生成。")}}</p>
-      <div v-for="(k,i) in knowledgeArtifacts" :key="'knowledge-'+i"><p v-for="h in k.hits" :key="h.id"><a :href="h.url" target="_blank" rel="noopener">{{h.title}} · v{{h.version}} {{tr("· 段落依据")}}</a></p></div>
+      <details v-if="knowledgeArtifacts.length" class="msg__kb">
+        <summary>{{ tr("知识依据") }} {{ knowledgeArtifacts.reduce((n,k)=>n+(k.hits?.length||0),0) }} 条</summary>
+        <details v-if="knowledgeArtifacts.length" class="msg__kb">
+          <summary>{{ tr("知识依据") }} {{ knowledgeArtifacts.reduce((n,k)=>n+(k.hits?.length||0),0) }} 条</summary>
+          <div v-for="(k,i) in knowledgeArtifacts" :key="'knowledge-'+i"><p v-for="h in (k.hits||[]).slice(0,5)" :key="h.id"><a :href="h.url" target="_blank" rel="noopener">{{h.title}} · v{{h.version}}</a></p></div>
+        </details>
+      </details>
       <template v-if="!textOnly"><BusinessPlanCard v-for="b in businessArtifacts" :key="b.key" :result="b.result" :card-id="msg.id+':'+b.key" :readonly="session.currentMode()==='chat'" />
       <!-- N03：本条消息自己的结构化结果卡（实时与历史同一渲染器） -->
       <OperationCard

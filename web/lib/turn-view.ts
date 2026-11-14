@@ -81,7 +81,9 @@ export function buildTurnRenderUnit(steps: TraceStep[], opts: BuildTurnUnitOptio
 /** 运行中 / 中断 / 失败一律强制展开；只有正常完成且无失败才允许默认收起 */
 export function shouldForceExpand(unit: TurnRenderUnit): boolean {
   if (unit.workStatus.state !== 'completed') return true;
-  return unit.hasFailure;
+  if (unit.hasFailure) return true;
+  // 2026-11-14 用户要求：思维链与工具过程是展示重点，有思考步骤时默认展开
+  return (unit.steps || []).some((s) => s.kind === 'thinking');
 }
 
 /**

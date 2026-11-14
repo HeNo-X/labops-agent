@@ -18,6 +18,7 @@ import {nativeDelegation} from '../security/context.ts';
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { runAgent } from '../agent/run.ts';
+import { acquireRunSlot, RunQueueTimeoutError, RunQueueAbortedError, type RunSlot } from '../agent/run-gate.ts';
 import { newTraceId } from '../obs/trace.ts';
 import { MAX_QUESTION_CHARS } from '../agent/prompts.ts';
 import { resolveActor } from '../operations/identity.ts';
@@ -481,7 +482,26 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
     if (deltaSinceFlush > 0 && Date.now() - lastFlushAt > 700) flush();
   }, 700);
 
+  // 跨会话并发第二片：全局并发闸门。释放口只放在 finally —— 终态、断连、取消、
+  // 排队超时都必须归还名额，否则后续任务会被永久堵在队列里。
+  let runSlot: RunSlot | null = null;
   try {
+    runSlot = await acquireRunSlot({
+      runId,
+      conversationId,
+      signal: ac.signal,
+      onQueue: (position) => {
+        // 不带 seq：SSE 解码器按 seq 去重，而 run_accepted 已占 -1、runAgent 事件从 0 起，
+        // 排队提示属于协议层控制事件，不进事件流编号空间（前端也不会交给 ingest）。
+        send(res, 'run_queued', {
+          v: 1,
+          runId,
+          type: 'run_queued',
+          ts: new Date().toISOString(),
+          payload: { position, message: `前面还有 ${position} 个任务，正在排队，稍后自动开始` }
+        });
+      }
+    });
     for await (const ev of runAgent({
       question: message,
       runId,
@@ -568,7 +588,15 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
       }
     }
   } catch (err) {
-    if (!aborted && !runHandle.cancelRequested()) {
+    // 排队期间断开不是故障（交 finally 按 interrupted 收敛）；排队超时要给用户可读原因
+    const queueAborted = err instanceof RunQueueAbortedError;
+    if (!aborted && !queueAborted && !runHandle.cancelRequested()) {
+      const queueTimeout = err instanceof RunQueueTimeoutError;
+      const code = queueTimeout ? 'queue_timeout' : 'stream_error';
+      const message = queueTimeout
+        ? (err as Error).message
+        : `事件流中断：${err instanceof Error ? err.message : String(err)}`;
+      const hint = queueTimeout ? '稍等片刻再发一次；已排队的任务会自动开始' : undefined;
       lastSeq += 1;
       send(res, 'run_failed', {
         seq: lastSeq,
@@ -576,13 +604,14 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         runId,
         type: 'run_failed',
         ts: new Date().toISOString(),
-        payload: { code: 'stream_error', message: `事件流中断：${err instanceof Error ? err.message : String(err)}` }
+        payload: { code, message, ...(hint ? { hint } : {}) }
       });
       terminal = true;
       finalStatus = 'failed';
-      failedError = { code: 'stream_error', message: err instanceof Error ? err.message : String(err) };
+      failedError = { code, message, ...(hint ? { hint } : {}) };
     }
   } finally {
+    runSlot?.release();
     clearInterval(flushTimer);
     cancelRequested = runHandle.cancelRequested();
     if (cancelRequested) {

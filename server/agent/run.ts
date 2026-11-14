@@ -34,6 +34,7 @@ import type { NeedConfirmPayload, Proposal, SandboxActor } from '../../shared/op
 import { saveFacts, listFacts, transformSchedule } from './facts.ts';
 import { applyContextBudget } from './context-budget.ts';
 import { isBusinessConnected, businessScope, readBusinessTask, listBusinessTasks, loadAuthorizedDataset } from '../business/bridge.ts';
+import { businessIdentityKey } from '../business/identity-key.ts';
 import { getConfig } from '../config.ts';
 import { loadDataset } from '../data/store.ts';
 import type { Dataset } from '../data/store.ts';
@@ -98,8 +99,9 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
   for await (const event of runAgentCore({...input, runId:lastRunId, signal})) {
     lastSeq = event.seq; lastRunId = event.runId;
     if (timeout.aborted && !originalSignal?.aborted) break;
-    if(event.type==='run_started')runScope=businessScope(input.actor?.id).scopeKey;
-    if(runScope&&businessScope(input.actor?.id).scopeKey!==runScope){
+    // 第二片：中止判断只看身份要素，不看 owner 级 generation —— 别的会话重连不再误杀本轮
+    if(event.type==='run_started')runScope=businessIdentityKey(input.actor?.id);
+    if(runScope&&businessIdentityKey(input.actor?.id)!==runScope){
       yield {seq:lastSeq,v:1,runId:lastRunId,type:'run_failed',ts:nowIso(),payload:{code:'scope_changed',message:'本轮期间业务账号或授权范围已变化，请在当前身份下重新查询。'}};
       return;
     }
@@ -131,7 +133,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   const watch = Stopwatch0();
 
   const persistedContext=input.sessionId?.startsWith('conv-')?loadContext(input.sessionId):null;
-  const remembered=input.sessionId?getSession(`${input.actor?.id||'anonymous'}:${businessScope(input.actor?.id).scopeKey}:${input.sessionId}`):null;
+  const remembered=input.sessionId?getSession(`${input.actor?.id||'anonymous'}:${businessIdentityKey(input.actor?.id)}:${input.sessionId}`):null;
   // 单一裁决点（整合方案 §4）：五处"这一问怎么答"的判断收敛到 routeTurn，此处只算一次，下游各站点读字段。
   const route=routeTurn({question,hasContext:Boolean(persistedContext?.labName||persistedContext?.task||remembered?.labName||remembered?.lastTask),engineDemo:engineForMode(input.mode==='chat'?'chat':'task')==='demo'});
   if(route.kind==='scope'){
@@ -171,7 +173,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   //   · 非法日期绝不继承，也绝不静默回落（dateInvalid 分支直接显式报错）；
   //   · 只有真实存在的房间才允许写入会话记忆（E999 这类错误实体不能升级为上下文）。
   const roomlessIntent = route.roomless;
-  const sessionKey=input.sessionId?`${input.actor?.id||'anonymous'}:${businessScope(input.actor?.id).scopeKey}:${input.sessionId}`:undefined;
+  const sessionKey=input.sessionId?`${input.actor?.id||'anonymous'}:${businessIdentityKey(input.actor?.id)}:${input.sessionId}`:undefined;
   let sess = getSession(sessionKey);
   // N07：进程重启后内存表为空 → 从会话库的 ContextSnapshot 回退加载
   if (!sess && input.sessionId?.startsWith('conv-')) {

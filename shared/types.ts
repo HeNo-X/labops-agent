@@ -35,6 +35,12 @@ export type EngineType = 'agnes' | 'demo' | 'facts' | 'dashscope' | 'scope';
 export const RUN_EVENT_TYPES = [
   /** 消息接受确认（会话端点专用）：payload 携带全部正式 ID（N01/N17） */
   'run_accepted',
+  /**
+   * 跨会话并发第二片：全局并发闸门排队提示（协议层控制事件）。
+   * ★ 不带 seq：SSE 解码器按 seq 去重，run_accepted 已占 -1、执行事件从 0 起，
+   *   排队提示不进事件流编号空间；前端只显示可读提示，不交给 run.ingest。
+   */
+  'run_queued',
   'run_started',
   /** 执行过程可见性：模型思维链增量（reasoning_content）或相位提示，只用于展示，不进答案 */
   'thinking',

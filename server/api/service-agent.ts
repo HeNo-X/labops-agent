@@ -27,6 +27,7 @@ import { getConfig } from '../config.ts';
 import { getDb, createConversation, createMessageWithRun, finalizeAssistantMessage } from '../persistence/db.ts';
 import { loggerFor, newTraceId } from '../obs/trace.ts';
 import { runAgent } from '../agent/run.ts';
+import { acquireRunSlot, RunQueueTimeoutError, RunQueueAbortedError } from '../agent/run-gate.ts';
 import { toolsForMode } from '../tools/registry.ts';
 import { modelForMode } from '../llm/router.ts';
 import type { SandboxActor, SandboxRole } from '../../shared/operations-contract.ts';
@@ -217,6 +218,16 @@ async function execute(body: ValidBody, runIdHint: string, conversationId: strin
   const traces: ToolTrace[] = [];
 
   const signal = AbortSignal.timeout(body.timeoutMs);
+  // 第二片：定时任务的「到点真跑一轮」也共享全局名额，避免无人值守任务绕过并发上限
+  const slot = await acquireRunSlot({ runId: runIdHint, conversationId, signal }).catch((err: unknown) => {
+    if (err instanceof RunQueueTimeoutError || err instanceof RunQueueAbortedError) {
+      const wrapped = new Error('当前任务较多，未能在等待时间内取得执行名额，请稍后重试。');
+      (wrapped as Error & { code?: string }).code = 'queue_timeout';
+      throw wrapped;
+    }
+    throw err;
+  });
+  try {
   for await (const ev of runAgent({
     question: body.prompt,
     sessionId: conversationId || body.sessionId,
@@ -247,6 +258,9 @@ async function execute(body: ValidBody, runIdHint: string, conversationId: strin
       (err as Error & { code?: string }).code = String(p['code'] ?? 'run_failed');
       throw err;
     }
+  }
+  } finally {
+    slot.release();
   }
 
   return {

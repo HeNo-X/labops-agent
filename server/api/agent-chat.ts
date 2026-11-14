@@ -18,6 +18,7 @@
 import type { ServerResponse } from 'node:http';
 import type { IncomingMessage } from 'node:http';
 import { runAgent } from '../agent/run.ts';
+import { acquireRunSlot, RunQueueTimeoutError, RunQueueAbortedError, type RunSlot } from '../agent/run-gate.ts';
 import { newTraceId } from '../obs/trace.ts';
 import { MAX_QUESTION_CHARS } from '../agent/prompts.ts';
 import { resolveActor } from '../operations/identity.ts';
@@ -124,7 +125,21 @@ export async function handleAgentChat(req: IncomingMessage, res: ServerResponse)
   // 但也要带上 seq（取已发出事件的下一个值），否则前端的去重/排序判断会踩到 undefined。
   let lastSeq = -1;
 
+  // 第二片：旧兼容入口也过同一把全局闸门，否则并发上限可被它绕过
+  let runSlot: RunSlot | null = null;
   try {
+    runSlot = await acquireRunSlot({
+      runId,
+      conversationId: sessionId ?? 'legacy-chat',
+      signal: ac.signal,
+      onQueue: (position) => {
+        // 不带 seq：与会话端点同口径，排队提示不进事件流编号空间
+        send('run_queued', {
+          v: 1, runId, type: 'run_queued', ts: new Date().toISOString(),
+          payload: { position, message: `前面还有 ${position} 个任务，正在排队，稍后自动开始` }
+        });
+      }
+    });
     for await (const ev of runAgent({
       question: rawMessage,
       runId,
@@ -138,20 +153,27 @@ export async function handleAgentChat(req: IncomingMessage, res: ServerResponse)
     }
   } catch (err) {
     // runAgent 内部已把可预期错误转成 run_failed；走到这里说明是流本身出错
-    lastSeq += 1;
-    send('run_failed', {
-      seq: lastSeq,
-      v: 1,
-      runId,
-      type: 'run_failed',
-      ts: new Date().toISOString(),
-      payload: {
-        code: 'stream_error',
-        message: `事件流中断：${err instanceof Error ? err.message : String(err)}`,
-        hint: '请重试；若持续失败，请检查服务端日志。'
-      }
-    });
+    const queueAborted = err instanceof RunQueueAbortedError;
+    if (!aborted && !queueAborted) {
+      const queueTimeout = err instanceof RunQueueTimeoutError;
+      lastSeq += 1;
+      send('run_failed', {
+        seq: lastSeq,
+        v: 1,
+        runId,
+        type: 'run_failed',
+        ts: new Date().toISOString(),
+        payload: {
+          code: queueTimeout ? 'queue_timeout' : 'stream_error',
+          message: queueTimeout
+            ? (err as Error).message
+            : `事件流中断：${err instanceof Error ? err.message : String(err)}`,
+          hint: queueTimeout ? '稍等片刻再发一次；已排队的任务会自动开始' : '请重试；若持续失败，请检查服务端日志。'
+        }
+      });
+    }
   } finally {
+    runSlot?.release();
     send('end', { seq: lastSeq + 1, v: 1, runId, type: 'end', ts: new Date().toISOString(), payload: { runId } });
     if (!res.writableEnded) res.end();
   }

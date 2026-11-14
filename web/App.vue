@@ -637,6 +637,15 @@ async function onSubmit(q: string): Promise<void> {
         if (liveMsgId?.startsWith('live-')) liveMsgId = String(p['assistantMessageId'] ?? liveMsgId);
         return;
       }
+      if (ev.type === 'run_queued') {
+        // 并发排队：只给一句人话，6 秒自动收起；不把 runId、并发上限等开发者信息摆到界面上
+        const p = ev.payload as Record<string, unknown>;
+        roundNotice.value = {
+          tone: 'warn',
+          lines: [typeof p['message'] === 'string' ? String(p['message']) : '正在排队，稍后自动开始']
+        };
+        return;
+      }
       store.ingest(ev);
     },
     onError: (err) => {

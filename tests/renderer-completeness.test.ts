@@ -155,7 +155,7 @@ const fixtures = {
     includes: ['学期安排已更新', 'revision=7', '12 条', 'fixture-admin', 'fixture-ignored']
   },
   records: { payload: checkinRecords, includes: ['签到签退明细：共 1 条', '2026****01', '夹具志愿者', at,
-    '类型：签到', '值班来源：替班', '模板匹配：否', '2026****02', '替班不改变签到主体', '不作考勤定性'] }
+    '类型：签到', '值班来源：替班', '模板匹配：否', '2026****02', '学号为掩码值'] }
 } satisfies Fixtures;
 
 const kinds = Object.keys(fixtures) as Kind[];
@@ -267,7 +267,19 @@ test('records 覆盖开放实验室历史字段与钥匙台账，保留掩码、
     const out = renderDemoAnswer({ kind: 'records', payload: openlab }, { ...extras, textOnly });
     for (const expected of ['2026****03', '2026****04', '2026****05', at, 'E312', 'D517', '类型：签退', '周值班模板', '模板匹配：是', 'SUN-am1-1']) assert.ok(out.includes(expected), expected);
     const keyOut = renderDemoAnswer({ kind: 'records', payload: keys }, { ...extras, textOnly });
-    for (const expected of ['钥匙台账：共 2 条', 'key-0', '夹具钥匙甲', '测试柜A', '2026****06', '夹具备注', '已借出', '夹具钥匙乙', '未借出']) assert.ok(keyOut.includes(expected), expected);
+    for (const expected of ['钥匙台账：共 2 条', '夹具钥匙甲', '测试柜A', '2026****06', '夹具备注', '已借出', '夹具钥匙乙', '未借出']) assert.ok(keyOut.includes(expected), expected);
+    // 用户口径（2026-11-11）：钥匙答案只留"哪把、借没借出、在谁手里/在哪"，
+    // 内部编号、labType 与掩码口径说明不再混进正文
+    for (const forbidden of ['key-0', 'key-1', 'labType', 'student', '借用人已掩码', '身份字段按服务端返回原样展示']) {
+      assert.ok(!keyOut.includes(forbidden), `不应出现内部字段：${forbidden}`);
+    }
+    // 单把钥匙直接给结论：不先报"共 1 条"，也不铺内部字段
+    const oneKey = renderDemoAnswer({
+      kind: 'records',
+      payload: { total: 1, keys: [{ id: 'key_lab_1', labId: 'lab_1', labName: 'E310', labType: 'student', name: 'E310钥匙', location: '在当前节次志愿者手中', holder: '', remark: '', borrowed: false }] }
+    }, { ...extras, textOnly });
+    assert.match(oneKey, /E310钥匙：未借出，位置：在当前节次志愿者手中/);
+    assert.ok(!oneKey.includes('共 1 条'), oneKey);
     const zero = renderDemoAnswer({ kind: 'records', payload: { total: 0, records: [] } }, { ...extras, textOnly });
     assert.match(zero, /共 0 条/);
     assert.match(zero, /不据此推断现场状态/);

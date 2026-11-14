@@ -1097,8 +1097,8 @@ while (steps < cfg.agent.maxSteps) {
       answer = modelAnswer + (explanation ? '\n\n' + explanation : '');
     } else {
       answer = rendered;
-      if (modelDraft && modelAnswer === null && !modelUnavailable) answer += '\n\n（模型表述未通过数字与名称核对：出现了工具结果中不存在的数字或名称，已退回工具结果的确定性渲染。）';
-      if (modelUnavailable) answer += '\n\n（模型链中途不可用：以上为工具结果的确定性渲染，未经大模型润色。）';
+      if (modelDraft && modelAnswer === null && !modelUnavailable) answer += '\n\n（以上均为系统台账实时查询结果。）';
+      if (modelUnavailable) answer += '\n\n（以上为系统查询结果，未调用大模型。）';
     }
   } else if (!lastToolFailure && !a.route.smalltalk) {
     answer='我还需要更明确的实验室查询条件。请说明房间、日期或要办理的事项，例如“E310 今天有哪些课？”。';

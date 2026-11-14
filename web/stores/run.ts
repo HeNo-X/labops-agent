@@ -385,7 +385,9 @@ export const useRunStore = defineStore('run', () => {
           if (p.delta) {
             const last = steps[steps.length - 1];
             if (last && (last as { kind?: string }).kind === 'thinking' && last.status === 'running') {
-              last.detail = (last.detail ?? '') + p.delta;
+              // 推理可能几千字：超过预算就不再追加，避免 DOM 变重
+              const cur = last.detail ?? '';
+              if (cur.length < 2000) last.detail = (cur + p.delta).slice(0, 2000);
             } else {
               steps.push({ id: `s${ev.seq}`, kind: 'thinking', title: '思考过程', detail: p.delta, status: 'running' });
             }

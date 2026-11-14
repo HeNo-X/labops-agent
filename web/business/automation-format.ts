@@ -175,6 +175,12 @@ export function nextRunText(iso: string | null | undefined, now: number = Date.n
   return formatDateTime(iso);
 }
 
+/** 文本里的 ISO 时间戳一律换成人话（正文/说明/历史都走这里） */
+export function humanizeIsoText(raw: unknown): string {
+  const s = typeof raw === 'string' ? raw : raw == null ? '' : String(raw);
+  return s.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:\d{2}|Z)?/g, (m) => formatDateTime(m));
+}
+
 /** 模板的一句话说明 —— 让用户在"选模板"这一步就知道后果，而不是看参数名 */
 export const KIND_HINT: Record<string, string> = {
   daily_report: '汇总当日值班、报修、通知，生成当天日报',

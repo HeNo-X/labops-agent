@@ -4,6 +4,7 @@ import ScheduledRuleCard from './business/ScheduledRuleCard.vue';
 import {provide} from 'vue';
 import type {BusinessResult} from '@shared/business';
 import {createNativeBusinessCard,nativeCardKey} from '../business/controller';
+import {formatDateTime} from '../business/automation-format';
 import ScheduleCard from './business/ScheduleCard.vue';
 import DutyCard from './business/DutyCard.vue';
 import IssueCard from './business/IssueCard.vue';
@@ -21,7 +22,7 @@ const {business,sameScope,stage,error,busy,perform,refresh,task,report,draftWarn
  <section class="native-card" :data-view="result.view" :aria-label="tr('原系统业务任务卡')">
   <div class="native-card__head"><b>{{tr(({schedule:'指定日期调课',duty:'正式班次与检查交接',issues:'真实报修与工单处理',notifications:'站内通知',report:'真实运营日报',closures:'原系统临时停用',checkin:'管理员代录签到',roster:'名册与班级归属'} as Record<string,string>)[result.view||'']||'原系统任务')}}</b><span role="status">{{stage}}</span></div>
        <details class="card__more"><summary>说明</summary>
-  <p class="native-card__source">{{result.source}} {{tr("· 查询时间")}} {{result.queriedAt}} · {{business.profile?.username}}</p>
+  <p class="native-card__source">{{result.source}} {{tr("· 查询时间")}} {{formatDateTime(result.queriedAt)}} · {{business.profile?.username}}</p>
        </details>
   <p v-if="!sameScope" class="native-card__warn">{{tr("该卡属于其他账号、已断开或失效的授权范围。请连接账号后重新查询。")}}</p>
   <template v-else>
@@ -31,7 +32,7 @@ const {business,sameScope,stage,error,busy,perform,refresh,task,report,draftWarn
    <p v-if="draftWarning" class="native-card__warn">{{draftWarning}} <button v-if="pendingDraft" @click="restorePendingDraft">{{tr("核对后恢复本地草稿")}}</button></p>
    <ScheduleCard v-if="result.view==='schedule'"/><DutyCard v-if="result.view==='duty'"/><IssueCard v-if="result.view==='issues'"/><NoticeCard v-if="result.view==='notifications'"/><ClosureCard v-if="result.view==='closures'"/>
    <NativeIncidentCard v-if="result.view==='incidents'&&result.scopeKey" :scope-key="result.scopeKey" :incident-id="result.incident?.id" :task-id="result.taskId" :readonly="readonly"/>
-   <div v-if="result.tasks"><p>{{tr("原系统任务")}} {{result.tasks.tasks.length}} {{tr("项 · 请从页面“我的工作”继续办理。")}}</p><p v-for="t in result.tasks.tasks" :key="t.id">{{t.id}} · {{t.kind}} · {{t.status}}</p></div>
+   <div v-if="result.tasks"><p>{{tr("原系统任务")}} {{result.tasks.tasks.length}} {{tr("项 · 请从页面“我的工作”继续办理。")}}</p><p v-for="t in result.tasks.tasks" :key="t.id">{{t.kind}} · {{t.status}}</p></div>
    <NativeResourceHealthCard v-if="result.view==='health'&&result.scopeKey" :scope-key="result.scopeKey" :task-id="result.taskId" :readonly="readonly"/>
    <ScheduledRuleCard v-if="result.scheduledRule&&result.scopeKey" :plan="result.scheduledRule" :scope-key="result.scopeKey" :readonly="readonly"/>
    <NativeReportCard v-if="report" :report="report"/>

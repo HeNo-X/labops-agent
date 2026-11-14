@@ -1,5 +1,6 @@
 import { useSessionStore } from './session';
 import {clientFetch} from '../client';
+import {formatDateTime} from '../business/automation-format';
 /**
  * 任务状态机 —— 「运行生命周期」与「结果类型」正交拆分（工作台改造 P0 修复）
  * ============================================================================
@@ -335,9 +336,8 @@ const inputLocked = computed(() => {
             id: `s${ev.seq}`,
             kind: 'start',
             title: '任务已受理',
-            detail:
-              `服务端时间 ${p.serverNow.date} ${p.serverNow.time}（${p.serverNow.weekdayLabel}）｜` +
-              `数据来源：${DATA_SOURCE_LABELS[p.sourceType]}｜引擎：${p.engine === 'agnes' ? `Agnes${p.model ? ` · ${p.model}` : ''}` : p.engine === 'dashscope' ? `DashScope${p.model ? ` · ${p.model}` : ''}` : '演示引擎'}`,
+            // 用户视角：只给看得懂的时间与数据来源；引擎名/模型名是开发者信息，不进正文
+            detail: `${formatDateTime(p.serverNow.iso)}（${p.serverNow.weekdayLabel}）· ${DATA_SOURCE_LABELS[p.sourceType]}`,
             status: 'done'
           });
           break;

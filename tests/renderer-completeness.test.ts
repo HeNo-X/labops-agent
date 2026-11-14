@@ -155,7 +155,7 @@ const fixtures = {
     includes: ['学期安排已更新', 'revision=7', '12 条', 'fixture-admin', 'fixture-ignored']
   },
   records: { payload: checkinRecords, includes: ['签到签退明细：共 1 条', '2026****01', '夹具志愿者', at,
-    '类型：签到', '值班来源：替班', '模板匹配：否', '2026****02', '学号为掩码值'] }
+    '类型：签到', '值班来源：替班', '模板匹配：否', '2026****02', '替班不改变签到主体'] }
 } satisfies Fixtures;
 
 const kinds = Object.keys(fixtures) as Kind[];

@@ -52,7 +52,7 @@ import type { Intent } from './intent.ts';
 import { getSession, rememberSession } from './session.ts';
 import { loadContext } from '../persistence/db.ts';
 import { planDemo, renderDemoAnswer, runDemoTool } from './demo-engine.ts';
-import { RECOMMENDATION_FORMAT, PROMPT_VERSION, buildSystemPrompt, buildDynamicTurnContext, shouldReciteFailure, failureRecitationText, detectInjection, sanitizeInput, wrapUserQuery } from './prompts.ts';
+import { RECOMMENDATION_FORMAT, PROMPT_VERSION, buildSystemPrompt, buildDynamicTurnContext, shouldReciteFailure, failureRecitationText, detectInjection, sanitizeInput, wrapUserQuery, USER_VERBATIM_POLICY } from './prompts.ts';
 import { normalizeLabName } from '../data/store.ts';
 
 export interface RunInput {
@@ -643,6 +643,21 @@ interface AgnesArgs extends Omit<DemoArgs, 'sourceType'> {
   route: RouteResult;
 }
 
+
+/**
+ * 给模型看的工具结果：剔除纯政策/免责类文案（meta.note）。
+ * 这些句子是给审计和界面用的，喂给模型只会让它复述成"我没编造数据"这类噪音
+ * （2026-11-14 用户实测报障）。工具事件里的 result 仍是完整对象，界面不受影响。
+ */
+function stripPolicyText(result: unknown): unknown {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
+  const src = result as Record<string, unknown>;
+  const meta = src['meta'];
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta) || !('note' in meta)) return result;
+  const { note: _note, ...restMeta } = meta as Record<string, unknown>;
+  return { ...src, meta: restMeta };
+}
+
 async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   const cfg = getConfig();
   const system = buildSystemPrompt({
@@ -658,6 +673,8 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     { role: 'system', content: system+'\n'+RECOMMENDATION_FORMAT },
     { role:'system',content:JSON.stringify({authorizedHistoricalFacts:authorizedFacts,activeTask:taskContext,authorizedTasks:listBusinessTasks(a.conversationId).map(t=>({taskId:t['taskId'],view:t['view'],date:t['date'],sourceLesson:t['sourceLesson'],candidateSetId:t['candidateSetId']})),rule:'历史事实只可转换或参考。问最新、改变查询条件、准备执行时重新调用工具。编号必须来自事实；候选序号依据活动候选顺序。业务确认权仅属于用户。'}) },
     { role: 'user', content: wrapUserQuery(a.question) },
+    // 防注入改在**声明**层做，绝不篡改用户原话（2026-11-14 用户裁定）
+    { role: 'system', content: USER_VERBATIM_POLICY },
     // A1 动态尾块：时间上下文 + 注入疑似声明。随 run 变化的内容全部沉到消息序列
     // 末尾（Manus 稳定前缀经验），system 前缀因此逐字节稳定、可被供应商前缀缓存
     // 跨 run 命中；本块只在本轮开始注入一次，run 内 messages 只追加、前缀不抖动。
@@ -719,7 +736,7 @@ let effectiveMaxSteps = cfg.agent.maxSteps;
       tool_calls: a.prefetched.map((s, i) => ({ id: `read-${i + 1}`, type: 'function', function: { name: s.tool, arguments: JSON.stringify(s.args) } }))
     });
     for (const [i, s] of a.prefetched.entries()) {
-      messages.push({ role: 'tool', tool_call_id: `read-${i + 1}`, content: JSON.stringify({ ok: true, summary: s.summary, data: s.result, dataSource: a.ds.sourceLabel }) });
+      messages.push({ role: 'tool', tool_call_id: `read-${i + 1}`, content: JSON.stringify({ ok: true, summary: s.summary, data: stripPolicyText(s.result), dataSource: a.ds.sourceLabel }) });
       toolEvidence.push(JSON.stringify(s.result ?? {}) + '\n' + (s.summary ?? ''));
       verifiedAnswers.push(renderDemoAnswer({ kind: s.resultKind!, payload: s.result, summary: s.summary }, { dateWasDefaulted: !a.intent.date, periodFiltered: Boolean(a.intent.periodKey), textOnly: a.mode === 'chat', scopeLabel: businessScope().principal?.username || a.actor?.label, question: a.question }));
       // 预取过的调用记入指纹表：模型再调同一工具会被停止条件④拦下，不白烧一轮重查
@@ -953,7 +970,7 @@ while (steps < cfg.agent.maxSteps) {
           content: JSON.stringify({
             ok: true,
             summary: exec.summary,
-            data: exec.result,
+            data: stripPolicyText(exec.result),
             dataSource: a.ds.sourceLabel
           })
         });

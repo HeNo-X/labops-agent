@@ -814,11 +814,16 @@ while (steps < cfg.agent.maxSteps) {
     // 没有任何已得结果时原样抛出（交给上层的确定性引擎兜底或 run_failed）。
     modelUnavailable = false;
     try {
+      // 进入模型阶段先给一条相位提示：长任务在首字之前可能空等十几秒，界面据此显示"正在思考…"
+      yield a.emit('thinking', { phase: 'model', note: '正在思考…', step: steps + 1 });
       for await (const ev of streamChatWithFallback({ messages, tools: recommendationRetried ? [] : toolsForMode(a.mode ?? 'task'), signal: a.signal }, a.mode ?? 'task', a.log, (spec) => {
         // 记录**真正**发起请求的模型（fallback 后会被覆盖）——界面要显示的是它，不是配置里的第一个
         usedModel = spec.model;
       }, a.providerShift ?? 0)) {
-        if (ev.type === 'text') {
+        if (ev.type === 'reasoning') {
+          // 思维链增量：只作"正在干什么"的可见证据，**不进 answer、不参与核对**
+          yield a.emit('thinking', { phase: 'model', delta: ev.text });
+        } else if (ev.type === 'text') {
           roundText += ev.text;
           answer += ev.text;
 

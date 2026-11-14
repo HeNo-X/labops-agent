@@ -47,6 +47,8 @@ export interface TokenUsage {
 
 export type AgnesStreamEvent =
   | { type: 'text'; text: string }
+  /** 思维链增量（reasoning_content）：只用于展示"正在想什么"，绝不并入正文 */
+  | { type: 'reasoning'; text: string }
   | { type: 'tool_calls'; calls: ToolCall[] }
   | { type: 'usage'; usage: TokenUsage }
   | { type: 'done'; finishReason: string };
@@ -390,6 +392,10 @@ export async function* parseSseStream(
 
           const text = delta['content'];
           if (typeof text === 'string' && text) yield { type: 'text', text };
+          // 思维链：DeepSeek/Qwen 兼容口径把推理过程放在 reasoning_content（部分方言用 reasoning）。
+          // 与 text 分开成事件 —— 正文与推理混在一起会被当成答案内容。
+          const reasoning = delta['reasoning_content'] ?? delta['reasoning'];
+          if (typeof reasoning === 'string' && reasoning) yield { type: 'reasoning', text: reasoning };
 
           const tc = delta['tool_calls'];
           if (Array.isArray(tc)) {

@@ -108,7 +108,7 @@ export interface Lab {
 
 export interface TraceStep {
   id: string;
-  kind: 'start' | 'tool' | 'answer' | 'done' | 'error' | 'cancelled';
+  kind: 'start' | 'tool' | 'answer' | 'done' | 'error' | 'cancelled' | 'thinking';
   title: string;
   detail: string;
   status: 'running' | 'done' | 'failed' | 'cancelled';
@@ -376,6 +376,22 @@ export const useRunStore = defineStore('run', () => {
           const at = toolIndex.get(p.toolCallId ?? String(p.step));
           if (at !== undefined && steps[at]) steps[at] = step;
           else steps.push(step);
+          break;
+        }
+        case 'thinking': {
+          // 思维链/相位提示：只进折叠的轨迹列表，绝不进正文。
+          // 增量按「同一条 step 追加」合并，避免每来一个 token 就多一行。
+          const p = ev.payload as { phase?: string; note?: string; delta?: string };
+          if (p.delta) {
+            const last = steps[steps.length - 1];
+            if (last && (last as { kind?: string }).kind === 'thinking' && last.status === 'running') {
+              last.detail = (last.detail ?? '') + p.delta;
+            } else {
+              steps.push({ id: `s${ev.seq}`, kind: 'thinking', title: '思考过程', detail: p.delta, status: 'running' });
+            }
+          } else if (p.note) {
+            steps.push({ id: `s${ev.seq}`, kind: 'thinking', title: p.note, detail: '', status: 'running' });
+          }
           break;
         }
         case 'answer_delta': {

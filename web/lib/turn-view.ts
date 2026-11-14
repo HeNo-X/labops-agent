@@ -127,6 +127,7 @@ export function glyphOf(s: TraceStep): string {
   if (s.status === 'cancelled') return '⏹';
   if (s.kind === 'done') return '✓';
   if (s.kind === 'tool') return '▣';
+  if (s.kind === 'thinking') return '✳';
   return '✓';
 }
 

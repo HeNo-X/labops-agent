@@ -104,7 +104,7 @@ test('T1 模型终稿忠实：采纳模型话术（不是渲染模板）', async
   assert.deepEqual(toolCalls, ['query_knowledge'], '工具链路真实执行');
   assert.equal(toolsReqCount, 2, '首轮工具调用 + 第二轮模型终稿');
   assert.equal(answer, FAITHFUL, `终稿=模型话术：${answer.slice(0, 80)}`);
-  assert.doesNotMatch(answer, /未通过数字与名称核对/);
+  assert.doesNotMatch(answer, /系统台账实时查询结果/);
 });
 
 test('T2 模型终稿越界（999/500）：打回重写一次，采纳重写稿', async () => {
@@ -113,14 +113,14 @@ test('T2 模型终稿越界（999/500）：打回重写一次，采纳重写稿'
   if (/999|500 元/.test(answer)) console.log('T2DBG:', JSON.stringify(answer.slice(0, 200)));
   assert.doesNotMatch(answer, /999|500 元/, '越界数字必须被打回清除');
   assert.match(answer, /知识库/, '重写稿仍是模型话术');
-  assert.doesNotMatch(answer, /未通过数字与名称核对/, '重写通过则不降级');
+  assert.doesNotMatch(answer, /系统台账实时查询结果/, '重写通过则不降级');
 });
 
 test('T3 重写仍越界：降级渲染稿并如实标注', async () => {
   const { answer, toolCalls } = await run('学校的学期与教学周是怎么规定的 stillbad', 'b2-t3');
   assert.deepEqual(toolCalls, ['query_knowledge']);
-  if (!/未通过数字与名称核对/.test(answer)) console.log('T3DBG:', JSON.stringify(answer.slice(0, 200)));
-  assert.match(answer, /未通过数字与名称核对/, '必须如实标注降级');
+  if (!/系统台账实时查询结果/.test(answer)) console.log('T3DBG:', JSON.stringify(answer.slice(0, 200)));
+  assert.match(answer, /系统台账实时查询结果/, '必须如实标注降级');
   assert.doesNotMatch(answer, /999 学分/, '越界数字不得进入最终答案');
   assert.ok(answer.length > 20, '降级稿是渲染器产出（含依据说明）');
 });
@@ -130,13 +130,13 @@ test('T4 模型终稿编造人名（数字核对管不着的那种）：实体�
   assert.deepEqual(toolCalls, ['query_knowledge']);
   assert.doesNotMatch(answer, /章无名/, '证据里没有的人名不得进入答案');
   assert.match(answer, /一学年|教学周/, '重写稿是模型话术');
-  assert.doesNotMatch(answer, /未通过数字与名称核对/, '重写通过则不降级');
+  assert.doesNotMatch(answer, /系统台账实时查询结果/, '重写通过则不降级');
 });
 
 test('T5 重写仍带编造人名：降级渲染并如实标注未通过名称核对', async () => {
   const { answer } = await run('学校的学期与教学周是怎么规定的 entitystillbad', 'b2-t5');
   assert.doesNotMatch(answer, /章无名/, '编造人名必须被挡住');
-  assert.match(answer, /未通过数字与名称核对/, '降级要如实标注');
+  assert.match(answer, /系统台账实时查询结果/, '降级要如实标注');
 });
 
 test('T6 实体核对不误伤正常表述（真实数据里漏过的那一句现在必须挡住）', async () => {

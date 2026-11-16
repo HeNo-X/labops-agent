@@ -57,6 +57,16 @@ npm start
 
 **跨端**：桌面与移动同源同构建；另有原生可分发客户端（Windows `.exe` / Android `.apk`），UI 层为 Web 技术，与 Web 端同一套构建产物。
 
+## 界面预览
+
+| 桌面端首屏 | 手机端会话 |
+|---|---|
+| <img src="assets/screenshots/desktop-hero.png" width="520" alt="桌面端首屏" /> | <img src="assets/screenshots/mobile-conversation.png" width="240" alt="手机端会话" /> |
+
+**提案 → 人工确认 → 写入回执**：
+
+<img src="assets/screenshots/proposal-receipt.png" width="820" alt="提案与回执" />
+
 ## 架构
 
 ```

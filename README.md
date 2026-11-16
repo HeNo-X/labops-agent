@@ -105,6 +105,7 @@ npm start
 ## 代码规范与目录结构
 
 - **语言与类型**：TypeScript 严格模式（`vue-tsc` + `tsc` 双工程检查），`npm run typecheck` 是构建门禁；组件使用 Vue 3 Composition API。
+- **静态检查**：ESLint 基线配置（`eslint.config.mjs`），`npm run lint` 检查语法错误与常见危险模式（重复键、不可达代码、NaN 比较等），不引入风格类告警。
 - **注释纪律**：模块文件头说明设计依据、约束与取舍；关键函数带行内注释，只解释不显而易见的逻辑。
 - **提交规范**：Conventional Commits（`feat / fix / docs / test / chore`）+ 中文描述。
 - **基础约定**：`.editorconfig` 统一字符集、换行符与缩进底线；项目含刻意紧凑的单行风格文件，因此不强制全局重排格式。
@@ -125,6 +126,7 @@ npm start
 
 ```bash
 npm run typecheck       # vue-tsc + tsc 双工程检查
+npm run lint            # ESLint 基线检查
 npm run check:rules     # 镜像一致性 + HTML 资源引用完整性
 npm run build           # 类型检查 + 生产构建
 npm test                # 单元 / 契约 / 回归（666 项，零 Key、零联网）

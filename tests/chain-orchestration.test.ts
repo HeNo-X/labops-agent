@@ -379,6 +379,7 @@ test('D10 停下时的文案要说清是哪条链（真实数据实测到三条�
   });
   const fs = await import('node:fs');
   const src = fs.readFileSync(new URL('../server/agent/run.ts', import.meta.url), 'utf8');
+  // eslint-disable-next-line no-template-curly-in-string
   assert.ok(src.includes('${CHAIN_LABEL[chainKind]}在第'), 'run.ts 兜底文案仍写死某一条链');
   assert.ok(!src.includes('`联合处置链在第'), '仍有硬编码文案');
 });

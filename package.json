@@ -15,12 +15,13 @@
     "preview": "vite preview",
     "start": "node server/index.ts",
     "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
+    "lint": "eslint .",
     "seed": "node seed/make-snapshot.ts",
     "knowledge:index": "node scripts/knowledge-index.ts",
     "knowledge:eval": "node scripts/knowledge-eval.ts",
     "test": "node scripts/run-tests.mjs",
     "test:acceptance": "node --test tests/stream-facts.test.ts",
-    "test:all": "npm run check:rules && npm run build && npm run analyze:bundle && npm test && npm run test:operations-page",
+    "test:all": "npm run lint && npm run check:rules && npm run build && npm run analyze:bundle && npm test && npm run test:operations-page",
     "sync:rules": "node scripts/sync-rules.mjs",
     "check:rules": "node scripts/sync-rules.mjs --check",
     "mock:vision": "node scripts/mock-vision-feed.mjs",
@@ -45,8 +46,11 @@
   "devDependencies": {
     "@types/node": "26.6.3",
     "@vitejs/plugin-vue": "6.0.9",
+    "eslint": "10.15.0",
+    "eslint-plugin-vue": "10.12.1",
     "playwright-core": "1.63.0",
     "typescript": "5.9.3",
+    "typescript-eslint": "8.72.2",
     "vite": "8.3.1",
     "vue-tsc": "3.3.11"
   }

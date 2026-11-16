@@ -238,7 +238,6 @@ export function sanitizeTermPairs(raw: unknown): UserTermPair[] {
     if (fromChars < MIN_USER_PAIR_CHARS || fromChars > MAX_USER_PAIR_CHARS) continue;
     if (toChars < 1 || toChars > MAX_USER_PAIR_CHARS) continue;
     if (from === to) continue;
-    // eslint-disable-next-line no-control-regex
     if (/[\u0000-\u001f\u007f]/.test(from) || /[\u0000-\u001f\u007f]/.test(to)) continue;
     if (seen.has(from)) continue;
     seen.add(from);

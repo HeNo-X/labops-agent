@@ -286,7 +286,6 @@ export function sanitizeKeywords(raw: unknown): string[] {
     const word = item.trim();
     const chars = [...word].length;
     if (chars < MIN_KEYWORD_CHARS || chars > MAX_KEYWORD_CHARS) continue;
-    // eslint-disable-next-line no-control-regex
     if (/[\u0000-\u001f\u007f]/.test(word)) continue;
     if (seen.has(word)) continue;
     seen.add(word);

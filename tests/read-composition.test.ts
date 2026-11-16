@@ -160,6 +160,7 @@ test('L8 接线守卫：预取在引擎分派前完成，答案归属由 ANSWER_
   const agnes = src.slice(src.indexOf('async function* runAgnesEngine'));
   assert.match(agnes, /if \(a\.prefetched\?\.length && answerGeneration\(\) === 'model'\)/, '模型链的预取消费没挂在 ANSWER_GENERATION 上');
   assert.match(agnes, /tool_calls: a\.prefetched\.map/, '缺 assistant 工具轮占位');
+  // eslint-disable-next-line no-template-curly-in-string
   assert.ok(agnes.includes("role: 'tool', tool_call_id: `read-${i + 1}`"), '缺 tool 结果消息');
   assert.match(agnes, /verifiedAnswers\.push\(/, '预取结果未进 verifiedAnswers，模型中途死亡时没得回落');
   assert.match(agnes, /seenCalls\.set\(/, '预取未登记调用指纹，模型可能白烧一轮重查');

@@ -6,6 +6,16 @@
 
 这不是给传统系统加了个聊天框，而是从设计之初就把 **AI 提议 → 人工确认 → 真实执行 → 同编号回查** 作为业务闭环的一等公民。
 
+## 界面预览
+
+| 桌面端首屏 | 手机端会话 |
+|---|---|
+| <img src="assets/screenshots/desktop-hero.png" width="520" alt="桌面端首屏" /> | <img src="assets/screenshots/mobile-conversation.png" width="240" alt="手机端会话" /> |
+
+**提案 → 人工确认 → 写入回执**：
+
+<img src="assets/screenshots/proposal-receipt.png" width="820" alt="提案与回执" />
+
 ---
 
 ## 快速开始
@@ -56,16 +66,6 @@ npm start
 **办理**（只准备提案，本人确认后才生效）：指定日期调课、检查登记与交接、工单创建与流转、站内通知、临时停用与恢复、资源核实、运营日报、定时规则预览、钥匙借还。
 
 **跨端**：桌面与移动同源同构建；另有原生可分发客户端（Windows `.exe` / Android `.apk`），UI 层为 Web 技术，与 Web 端同一套构建产物。
-
-## 界面预览
-
-| 桌面端首屏 | 手机端会话 |
-|---|---|
-| <img src="assets/screenshots/desktop-hero.png" width="520" alt="桌面端首屏" /> | <img src="assets/screenshots/mobile-conversation.png" width="240" alt="手机端会话" /> |
-
-**提案 → 人工确认 → 写入回执**：
-
-<img src="assets/screenshots/proposal-receipt.png" width="820" alt="提案与回执" />
 
 ## 架构
 

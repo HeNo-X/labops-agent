@@ -1097,7 +1097,7 @@ while (steps < cfg.agent.maxSteps) {
       answer = modelAnswer + (explanation ? '\n\n' + explanation : '');
     } else {
       answer = rendered;
-      if (modelDraft && modelAnswer === null && !modelUnavailable) answer += '\n\n（以上均为系统台账实时查询结果。）';
+      if (modelDraft && modelAnswer === null && !modelUnavailable) answer += '\n\n（以上直接来自系统查询结果，模型整理稿未采用。）';
       if (modelUnavailable) answer += '\n\n（以上为系统查询结果，未调用大模型。）';
     }
   } else if (!lastToolFailure && !a.route.smalltalk) {

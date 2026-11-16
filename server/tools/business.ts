@@ -116,8 +116,14 @@ export async function prepareWorkflow(args:Record<string,unknown>,ctx:ToolContex
     payload={...payload,labId:args['labId']||args['roomId'],periodKey:args['periodKey']||(Array.isArray(args['periodKeys'])&&args['periodKeys'].length?args['periodKeys'][0]:undefined)};
     delete payload['roomId'];delete payload['periodKeys'];
   }
+  // 名册班级变更（批W1）：目标与令牌去空白；缺目标就地报错，省一次往返，也不让模型去猜学号
+  if(args['kind']==='roster.update'){
+    const trim=(k:string)=>typeof payload[k]==='string'?String(payload[k]).trim():payload[k];
+    payload={...payload,targetName:trim('targetName'),targetAccount:trim('targetAccount'),className:trim('className'),expectedRosterVersion:trim('expectedRosterVersion')};
+    if(!payload['targetName']&&!payload['targetAccount']&&!payload['targetUsername'])return {ok:false,code:'bad_input',message:'改班级要先定位学生：请给出 targetAccount（query_user_directory 返回的掩码账号，如 2023****45）或 targetName（姓名，重名时必须用掩码账号）。不要推测或还原真实学号。',suggestions:[],summary:'名册班级变更未准备：目标学生未确定，账号档案与名册均未变化'};
+  }
   try{const endpoint=payload['kind']==='duty.handover'?'/handover/preview':'/workflow/preview';const r=await businessRequest(endpoint,'POST',{...payload,conversationId:ctx.conversationId||undefined},ctx.signal);const plan=r['plan'] as NativePlan;const autoNote=await autoCommit(plan,ctx);
-    return result({plan,task:r['task'] as BusinessResult['task'],taskId:plan.taskId,view:plan.kind==='resource.patch'?'health':plan.kind.startsWith('key.')?'tasks':plan.kind.startsWith('duty.')?'duty':plan.kind.startsWith('issue.')?'issues':plan.kind.startsWith('closure.')?'closures':plan.kind==='checkin.manual'?'checkin':'notifications',sourceRevision:plan.sourceRevision,summary:autoNote||(plan.kind==='checkin.manual'?'管理员代录方案已准备：记录标记 agent-manual 并全程审计，业务未提交，请核对后本人点击确认。':plan.kind.startsWith('key.')?'钥匙借还方案已准备：台账尚未变化，请核对借用人/归还状态后本人点击确认。':'原系统待确认方案已准备；业务尚未提交，请核对后本人点击确认。')},ctx);
+    return result({plan,task:r['task'] as BusinessResult['task'],taskId:plan.taskId,view:plan.kind==='roster.update'?'roster':plan.kind==='resource.patch'?'health':plan.kind.startsWith('key.')?'tasks':plan.kind.startsWith('duty.')?'duty':plan.kind.startsWith('issue.')?'issues':plan.kind.startsWith('closure.')?'closures':plan.kind==='checkin.manual'?'checkin':'notifications',sourceRevision:plan.sourceRevision,summary:autoNote||(plan.kind==='roster.update'?'名册班级变更方案已准备：账号档案与名册尚未变化，请核对改前→改后班级与变更依据后本人点击确认。':plan.kind==='checkin.manual'?'管理员代录方案已准备：记录标记 agent-manual 并全程审计，业务未提交，请核对后本人点击确认。':plan.kind.startsWith('key.')?'钥匙借还方案已准备：台账尚未变化，请核对借用人/归还状态后本人点击确认。':'原系统待确认方案已准备；业务尚未提交，请核对后本人点击确认。')},ctx);
   }catch(e){return fail(e);}
 }
 export async function queryIncident(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{

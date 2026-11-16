@@ -87,5 +87,5 @@ test('A1-04 组装契约：前缀跨 run 字节一致，尾块随 run 变化', (
 });
 
 test('A1-05 版本号已随前缀重构递增', () => {
-  assert.ok(PROMPT_VERSION.startsWith('labops-1.0.6'), `PROMPT_VERSION 应递增（当前 ${PROMPT_VERSION}）`);
+  assert.ok(PROMPT_VERSION.startsWith('labops-1.0.7'), `PROMPT_VERSION 应递增（当前 ${PROMPT_VERSION}）`);
 });

@@ -14,7 +14,7 @@
  *  本系统的规则会**给真人投递站内通知**，所以保留"影响核对"这一步 ——
  *  但在界面上做成同一页里的一段，而不是像旧版那样"预览 → 再确认"两次跳转。
  */
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { t as tr } from '../../i18n';
 import { autoRuleName, type ScheduledSpec } from '../../business/scheduled-form';
 import params from '@shared/scheduled-params.json';
@@ -240,10 +240,15 @@ function submit(): void {
   emit('requestPlan');
 }
 
+/** 影响核对区在页面最底部：生成后必须滚过去，否则用户看不到"确认创建"，会以为点击没反应 */
+const planEl = ref<HTMLElement | null>(null);
 watch(
   () => props.plan,
-  (value) => {
-    if (value) localError.value = '';
+  async (value) => {
+    if (!value) return;
+    localError.value = '';
+    await nextTick();
+    planEl.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 );
 </script>
@@ -412,7 +417,7 @@ watch(
         </div>
       </div>
 
-    <section v-if="plan" class="auto-review" :aria-label="tr('影响核对')">
+    <section v-if="plan" ref="planEl" class="auto-review" :aria-label="tr('影响核对')">
       <h3>{{ tr('确认后才会生效') }}</h3>
       <dl class="auto-review__grid">
         <div><dt>{{ tr('频率') }}</dt><dd>{{ tr(triggerText(plan.spec)) }}</dd></div>

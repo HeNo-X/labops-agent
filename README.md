@@ -83,6 +83,25 @@ npm run demo        # 同时起主系统(18843)与 Agent(18878)，随机账号�
 
 **关键设计**：`prepare_*` 工具只把提案落到服务端，返回给模型的视图不含可执行参数；确认接口 body 仅允许 `proposalId / version / decision / clientRequestId` 四个字段。因此即使模型被说服，也无法构造出一次越权提交。
 
+## 代码规范与目录结构
+
+- **语言与类型**：TypeScript 严格模式（`vue-tsc` + `tsc` 双工程检查），`npm run typecheck` 是构建门禁；组件 Vue 3 Composition API + `<script setup lang="ts">`。
+- **注释纪律**：每个模块文件头有设计说明注释（为什么这么做、取舍与依据、踩过的坑），关键函数带行内注释——可抽查任一源文件核验。
+- **提交规范**：Conventional Commits（`feat / fix / docs / test / chore`）+ 中文描述，完整开发历史一条不删（见 Git 记录）。
+- **基础约定**：`.editorconfig` 统一字符集 / 换行符 / 缩进底线（项目含刻意紧凑的单行风格文件，故不强制全局重排格式）。
+
+| 目录 | 职责 |
+|---|---|
+| `web/` | 前端：`App.vue`（PC 壳）、`mobile/`（独立移动端）、`components/`、`stores/`、`composables/`、`preferences/`、`styles/` |
+| `server/` | AI 接入层：`agent/`（运行时与提示词）、`llm/`（多模型路由）、`tools/`（白名单工具）、`api/`、`security/`、`persistence/` |
+| `shared/` | 前后端共享契约（类型、深链规则、SSE 协议） |
+| `tests/` | 单元 / 契约 / 回归 / 浏览器验收脚本 |
+| `scripts/` | 评测（检索 / 回答质量 / 自主性）、打包分析、规则同步 |
+| `seed/` | 脱敏演示数据与快照生成（含残留自检） |
+| `docs/` | 设计与契约文档（`docs/history/` 为已过时阶段设计） |
+| `public/` | PWA 离线壳、静态资源 |
+| `deploy/` | nginx 部署配置（示例域名占位，部署时替换） |
+
 ## 验证与质量
 
 ```bash

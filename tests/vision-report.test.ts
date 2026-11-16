@@ -24,6 +24,7 @@ import {
   visionSnapshot,
   visionStatus
 } from '../server/vision/monitor.ts';
+import { isDisplayable } from '../server/api/vision-api.ts';
 
 const SECRET = 'unit-test-secret';
 const savedSecret = process.env.VISION_INGEST_SECRET;
@@ -265,5 +266,41 @@ describe('告警判定与摄取（v2 口径）', () => {
     delete process.env.VISION_INGEST_SECRET;
     assert.equal(visionIngestConfigured(), false);
     process.env.VISION_INGEST_SECRET = SECRET;
+  });
+});
+
+describe('展示口径（2026-11-11 用户裁定）：DEMO 结果与模拟上报不进结果展示', () => {
+  it('isDisplayable：DEMO 房间、mock 模拟上报（大小写不敏感）均排除，真实上报保留', () => {
+    assert.equal(isDisplayable('DEMO', 'yolo26n'), false);
+    assert.equal(isDisplayable('E310', 'mock-yolo26n'), false);
+    assert.equal(isDisplayable('E310', 'MOCK-anything'), false);
+    assert.equal(isDisplayable('E310', null), true);
+    assert.equal(isDisplayable('E310', 'yolo26n.pt'), true);
+  });
+
+  it('visionStatus 透出 det 来源标记（真实=检测模型名 / 模拟=mock-*）', () => {
+    resetVisionStoreForTests();
+    const coerced = coerceVisionReport(baseReport({ quality: { det: 'mock-yolo26n' } }));
+    assert.ok(coerced.ok);
+    if (coerced.ok) assert.equal(ingestVisionReport(coerced.value).ok, true);
+    assert.equal(visionStatus().labs[0].det, 'mock-yolo26n');
+  });
+
+  it('展示过滤后只剩真实房间结果（事件流水同口径）', () => {
+    resetVisionStoreForTests();
+    for (const raw of [
+      baseReport({ lab_id: 'DEMO', capacity: null, quality: { det: 'yolo26n' } }),
+      baseReport({ lab_id: 'E312', quality: { det: 'mock-yolo26n' } }),
+      baseReport({ lab_id: 'E310', quality: { det: 'yolo26n.pt' } })
+    ]) {
+      const coerced = coerceVisionReport(raw);
+      assert.ok(coerced.ok);
+      if (coerced.ok) assert.equal(ingestVisionReport(coerced.value).ok, true);
+    }
+    const shownLabs = visionStatus().labs.filter((lab) => isDisplayable(lab.labId, lab.det));
+    assert.deepEqual(shownLabs.map((lab) => lab.labId), ['E310']);
+    const shownEvents = visionEvents({ limit: 50 }).filter((event) => isDisplayable(event.lab_id, event.quality.det));
+    assert.ok(shownEvents.length > 0);
+    assert.ok(shownEvents.every((event) => event.lab_id === 'E310'));
   });
 });

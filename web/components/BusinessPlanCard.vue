@@ -16,7 +16,11 @@ import NativeReportCard from './business/NativeReportCard.vue';
 import NativeConfirmation from './business/NativeConfirmation.vue';
 const props=defineProps<{result:BusinessResult;cardId:string;readonly?:boolean}>();
 const controller=createNativeBusinessCard(props);provide(nativeCardKey,controller);
-const {business,sameScope,stage,error,busy,perform,refresh,task,report,draftWarning,pendingDraft,restorePendingDraft}=controller;
+const {business,sameScope,stage,error,busy,perform,refresh,task,report,draftWarning,pendingDraft,restorePendingDraft,planLabels,planStates,labels}=controller;
+// controller 的 planLabels 未覆盖这几类；表外一律原样显示，不吞值
+const EXTRA_KINDS:Record<string,string>={'resource.patch':'原始数据修正','checkin.manual':'代录签到','key.lend':'钥匙借出','key.return':'钥匙归还','key.relocate':'钥匙位置变更','incident.bundle':'故障事件联合处置'};
+const kindText=(k:string)=>planLabels[k]||EXTRA_KINDS[k]||k;
+const statusText=(s:string)=>planStates[s]||labels[s]||s;
 </script>
 <template>
  <section class="native-card" :data-view="result.view" :aria-label="tr('原系统业务任务卡')">
@@ -30,7 +34,7 @@ const {business,sameScope,stage,error,busy,perform,refresh,task,report,draftWarn
    <p v-if="draftWarning" class="native-card__warn">{{draftWarning}} <button v-if="pendingDraft" @click="restorePendingDraft">{{tr("核对后恢复本地草稿")}}</button></p>
    <ScheduleCard v-if="result.view==='schedule'"/><DutyCard v-if="result.view==='duty'"/><IssueCard v-if="result.view==='issues'"/><NoticeCard v-if="result.view==='notifications'"/><ClosureCard v-if="result.view==='closures'"/>
    <NativeIncidentCard v-if="result.view==='incidents'&&result.scopeKey" :scope-key="result.scopeKey" :incident-id="result.incident?.id" :task-id="result.taskId" :readonly="readonly"/>
-   <div v-if="result.tasks"><p>{{tr("原系统任务")}} {{result.tasks.tasks.length}} {{tr("项 · 请从页面“我的工作”继续办理。")}}</p><p v-for="t in result.tasks.tasks" :key="t.id">{{t.kind}} · {{t.status}}</p></div>
+   <div v-if="result.tasks"><p>{{tr("原系统任务")}} {{result.tasks.tasks.length}} {{tr("项 · 请从页面“我的工作”继续办理。")}}</p><p v-for="t in result.tasks.tasks" :key="t.id">{{kindText(t.kind)}} · {{statusText(t.status)}}</p></div>
    <NativeResourceHealthCard v-if="result.view==='health'&&result.scopeKey" :scope-key="result.scopeKey" :task-id="result.taskId" :readonly="readonly"/>
    <ScheduledRuleCard v-if="result.scheduledRule&&result.scopeKey" :plan="result.scheduledRule" :scope-key="result.scopeKey" :readonly="readonly"/>
    <NativeReportCard v-if="report" :report="report"/>
@@ -46,8 +50,6 @@ const {business,sameScope,stage,error,busy,perform,refresh,task,report,draftWarn
     <p>{{ tr('变更依据：') }}{{ result.plan.payload.reason }}</p>
        <details class="card__more"><summary>说明</summary>
     <p class="native-card__source">{{ result.plan.payload.rosterRowPresent ? tr('名册对正表有该学号行：账号档案、名册行与班级人数一并更新。') : tr('名册对正表没有该学号行：不新建名册行，班级按账号档案生效，班级人数统计不变。') }}</p>
-       </details>
-       <details class="card__more"><summary>说明</summary>
     <p class="native-card__source">{{ tr('提交后写入审计（操作人、时间、改前→改后、依据）；学号原值不回传，时间以服务器为准。') }}</p>
        </details>
    </div>

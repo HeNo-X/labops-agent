@@ -4,7 +4,7 @@
  *  用假 agnes SSE 服务驱动真工具链（query_knowledge 离线可跑）：
  *    · T1 模型终稿忠实（无越界数字）→ 采纳模型话术，不用渲染模板；
  *    · T2 模型终稿出现越界数字（999/500）→ 核对层打回一次（禁工具重写）→ 采纳重写稿；
- *    · T3 重写仍越界 → 降级渲染稿并如实标注「未通过数字与名称核对」。
+ *    · T3 重写仍越界 → 降级渲染稿并如实披露「模型整理稿未采用」（不得宣称实时、不得删披露）。
  *  假服务按「最后一条用户消息」选择场景脚本；按 body.tools 是否存在区分
  *  「首轮（带工具，第 1 次回 tool_calls、第 2 次回该场景的终稿文本）」与
  *  「核对重写轮（禁工具）」。
@@ -104,7 +104,7 @@ test('T1 模型终稿忠实：采纳模型话术（不是渲染模板）', async
   assert.deepEqual(toolCalls, ['query_knowledge'], '工具链路真实执行');
   assert.equal(toolsReqCount, 2, '首轮工具调用 + 第二轮模型终稿');
   assert.equal(answer, FAITHFUL, `终稿=模型话术：${answer.slice(0, 80)}`);
-  assert.doesNotMatch(answer, /系统台账实时查询结果/);
+  assert.doesNotMatch(answer, /模型整理稿未采用/);
 });
 
 test('T2 模型终稿越界（999/500）：打回重写一次，采纳重写稿', async () => {
@@ -113,14 +113,15 @@ test('T2 模型终稿越界（999/500）：打回重写一次，采纳重写稿'
   if (/999|500 元/.test(answer)) console.log('T2DBG:', JSON.stringify(answer.slice(0, 200)));
   assert.doesNotMatch(answer, /999|500 元/, '越界数字必须被打回清除');
   assert.match(answer, /知识库/, '重写稿仍是模型话术');
-  assert.doesNotMatch(answer, /系统台账实时查询结果/, '重写通过则不降级');
+  assert.doesNotMatch(answer, /模型整理稿未采用/, '重写通过则不降级');
 });
 
 test('T3 重写仍越界：降级渲染稿并如实标注', async () => {
   const { answer, toolCalls } = await run('学校的学期与教学周是怎么规定的 stillbad', 'b2-t3');
   assert.deepEqual(toolCalls, ['query_knowledge']);
-  if (!/系统台账实时查询结果/.test(answer)) console.log('T3DBG:', JSON.stringify(answer.slice(0, 200)));
-  assert.match(answer, /系统台账实时查询结果/, '必须如实标注降级');
+  if (!/模型整理稿未采用/.test(answer)) console.log('T3DBG:', JSON.stringify(answer.slice(0, 200)));
+  assert.match(answer, /模型整理稿未采用/, '必须如实披露模型稿未采用');
+  assert.ok(!/（以上[^）]*实时[^）]*）/.test(answer), '尾注不得把快照/演示来源说成实时');
   assert.doesNotMatch(answer, /999 学分/, '越界数字不得进入最终答案');
   assert.ok(answer.length > 20, '降级稿是渲染器产出（含依据说明）');
 });
@@ -130,13 +131,13 @@ test('T4 模型终稿编造人名（数字核对管不着的那种）：实体�
   assert.deepEqual(toolCalls, ['query_knowledge']);
   assert.doesNotMatch(answer, /章无名/, '证据里没有的人名不得进入答案');
   assert.match(answer, /一学年|教学周/, '重写稿是模型话术');
-  assert.doesNotMatch(answer, /系统台账实时查询结果/, '重写通过则不降级');
+  assert.doesNotMatch(answer, /模型整理稿未采用/, '重写通过则不降级');
 });
 
-test('T5 重写仍带编造人名：降级渲染并如实标注未通过名称核对', async () => {
+test('T5 重写仍带编造人名：降级渲染并如实披露模型稿未采用', async () => {
   const { answer } = await run('学校的学期与教学周是怎么规定的 entitystillbad', 'b2-t5');
   assert.doesNotMatch(answer, /章无名/, '编造人名必须被挡住');
-  assert.match(answer, /系统台账实时查询结果/, '降级要如实标注');
+  assert.match(answer, /模型整理稿未采用/, '降级要如实披露');
 });
 
 test('T6 实体核对不误伤正常表述（真实数据里漏过的那一句现在必须挡住）', async () => {

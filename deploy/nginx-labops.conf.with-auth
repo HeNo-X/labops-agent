@@ -1,5 +1,6 @@
 server {
     listen 8788 ssl http2;
+    # 示例占位：部署时替换为实际域名（公开仓库不放真实部署地址）
     server_name lab.example.edu;
 
     ssl_certificate     /etc/nginx/ssl/lab/fullchain.pem;

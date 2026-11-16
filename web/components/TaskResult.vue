@@ -3,7 +3,8 @@ import {t as tr} from "../i18n";
 /**
  * 任务结果区 —— 按 resultKind 分流渲染
  * ============================================================================
- *  · schedule_hit / schedule_empty / config_insufficient → 课表卡（结构化课程明细）
+ *  · schedule_hit / config_insufficient → 课表卡（结构化课程明细）
+ *  · schedule_empty 且原因只是"当天/该节次没课" → 不渲染卡片（正文已说"没有课"）
  *  · lab_status    → 房间状态卡（档案 + 当日概况 + 在室人数明确"未知"）
  *  · free_rooms    → 空闲房间卡（按节次分组）
  *  · none          → 不渲染
@@ -43,7 +44,15 @@ const kind = computed<UiKind>(() => {
     if (props.artifact.kind !== 'schedule') return props.artifact.kind;
     const sr = props.artifact.result as ScheduleQueryResult;
     if (!sr.weekDeterminable || sr.reason === 'timetable_empty') return 'config_insufficient';
+    // 查到"当天/该节次没课"时不再渲染任何结果卡：正文已明确说"没有课"，
+    // 卡片里的"无匹配结果""系统没有编造任何课程"属于开发侧措辞（2026-11-11 用户反馈）。
+    if (sr.reason === 'no_class_that_day' || sr.reason === 'no_class_in_that_period') return 'none';
     return sr.reason === 'ok' ? 'schedule_hit' : 'schedule_empty';
+  }
+  // 活跃轮走 run store 的判定；同样隐藏"没课"空卡
+  if (store.resultKind === 'schedule_empty') {
+    const sr = store.lastResult;
+    if (sr && (sr.reason === 'no_class_that_day' || sr.reason === 'no_class_in_that_period')) return 'none';
   }
   return store.resultKind;
 });
@@ -69,7 +78,7 @@ const kindTag = computed<{ tone: Tone; glyph: string; label: string }>(() => {
     case 'schedule_hit':
       return { tone: 'ok', glyph: '✓', label: '课表命中' };
     case 'schedule_empty':
-      return { tone: 'warn', glyph: '▲', label: '无匹配结果' };
+      return { tone: 'warn', glyph: '▲', label: '没有查到' };
     case 'config_insufficient':
       return { tone: 'warn', glyph: '▲', label: '结果有条件' };
     case 'lab_status':
@@ -84,8 +93,9 @@ const kindTag = computed<{ tone: Tone; glyph: string; label: string }>(() => {
 const REASON_TEXT: Record<string, string> = {
   ok: '已找到排课记录',
   lab_not_found: '系统中没有这个房间号',
-  no_class_that_day: '该房间当天没有排课',
-  no_class_in_that_period: '该房间当天该节次没有排课',
+  class_not_found: '系统中没有这个班级',
+  no_class_that_day: '当天没有排课',
+  no_class_in_that_period: '当天该节次没有排课',
   lab_not_active: '该房间当前不在开放状态，且当天没有排课',
   timetable_empty: '系统内课表为空'
 };
@@ -164,8 +174,8 @@ const freeList = computed(() => {
 
     <!-- 无匹配 -->
     <div v-else-if="kind === 'schedule_empty'" class="alert alert--warn" role="status">
-      <StatusTag tone="warn" label="无匹配结果" />
-      <p class="alert__msg">{{ reasonText }}{{tr("。系统没有编造任何课程。")}}</p>
+      <StatusTag tone="warn" label="没有查到" />
+      <p class="alert__msg">{{ reasonText }}。</p>
       <div v-if="r?.suggestions?.length" class="suggest">
         <span class="suggest__label">{{tr("可选房间号：")}}</span>
         <span v-for="s in r.suggestions" :key="s" class="suggest__item">{{ s }}</span>
@@ -281,7 +291,7 @@ const freeList = computed(() => {
     </header>
     <template v-if="(extra.payload as LabStatusResult).labName === null">
       <div class="alert alert--warn" role="status">
-        <p class="alert__msg">{{tr("系统中没有这个房间号，未编造任何数据。")}}</p>
+        <p class="alert__msg">{{tr("系统中没有这个房间号。")}}</p>
         <div v-if="(extra.payload as LabStatusResult).suggestions.length" class="suggest">
           <span class="suggest__label">{{tr("可选房间号：")}}</span>
           <span v-for="s in (extra.payload as LabStatusResult).suggestions" :key="s" class="suggest__item">{{ s }}</span>

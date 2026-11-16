@@ -1,0 +1,17 @@
+# 基础编辑器约定（主流规范的统一底线）
+# 说明：项目内既有 2 空格标准缩进文件，也有刻意紧凑的单行风格文件（如
+# web/preferences/schema.ts），因此这里只约束「跨编辑器最容易漂移」的项，
+# 不强制 indent_size / 不自动裁剪行尾空格——避免格式化工具破坏紧凑文件。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+
+[*.{ts,tsx,js,mjs,vue,json,css,html}]
+indent_style = space
+
+[*.md]
+indent_style = space

@@ -57,17 +57,29 @@ test('房间与口径参数原样进查询串（此前连 labId 都传不进去�
   assert.equal(q.get('scope'), 'student');
 });
 
-test('摘要按口径措辞：学生上机 / 志愿者值班 / 两者混合不混称', async () => {
-  bridge.setNextResponse({ date: '2026-11-09', scope: 'student', records: [], total: 0 });
-  const a = await queryCheckinRecords({ date: '2026-11-09', labId: 'E310', scope: 'student' });
-  assert.match(a.summary!, /E310/);
-  assert.match(a.summary!, /学生上机/);
+test('摘要格式（2026-11-16 用户指定）：学生按班级分区只给掩码学号，志愿者只给姓名', async () => {
+  bridge.setNextResponse({ date: '2026-11-09', scope: 'student', total: 2, records: [
+    { user: '2026****01', name: '张三', type: 'checkin', className: '智能本2501' },
+    { user: '2026****02', name: '李四', type: 'checkin', className: '智能本2502' }
+  ] });
+  const a = await queryCheckinRecords({ date: '2026-11-09', scope: 'student' });
+  assert.match(a.summary!, /当前上课班级：智能本2501/);
+  assert.match(a.summary!, /已签到学生：2026\*\*\*\*01/);
+  assert.match(a.summary!, /当前上课班级：智能本2502/);
+  assert.doesNotMatch(a.summary!, /张三/, '学生只给掩码学号，不显示姓名');
 
   bridge.resetCalls();
-  bridge.setNextResponse({ date: '2026-11-09', scope: 'duty', records: [], total: 0 });
+  bridge.setNextResponse({ date: '2026-11-09', scope: 'duty', total: 1, records: [
+    { user: '2023****99', name: '王五', type: 'checkin', periodKey: 'am1' }
+  ] });
   const b = await queryCheckinRecords({ date: '2026-11-09', scope: 'duty' });
-  assert.match(b.summary!, /志愿者值班/);
-  assert.doesNotMatch(b.summary!, /学生/);
+  assert.match(b.summary!, /值班志愿者：王五/);
+  assert.doesNotMatch(b.summary!, /2023\*\*\*\*99/, '志愿者只给姓名，不显示账号');
+
+  bridge.resetCalls();
+  bridge.setNextResponse({ date: '2026-11-09', scope: 'student', records: [], total: 0 });
+  const c = await queryCheckinRecords({ date: '2026-11-09', labId: 'E310', scope: 'student' });
+  assert.match(c.summary!, /没有查到已签到记录/);
 });
 
 test('主系统的口径冲突错误如实上抛，不降级成"查无记录"', async () => {

@@ -65,10 +65,11 @@ test('T2-05 中断轮即使有服务端耗时也不显示数字',()=>{
   assert.ok(!/\d/.test(unit.workStatus.label));
 });
 
-test('T2-06 已完成且拿到服务端毫秒 → 显示"已工作 N 秒"',()=>{
+test('T2-06 已完成且拿到服务端毫秒 → 显示"已完成"（11-14 起不显示秒数）',()=>{
   const unit=buildTurnRenderUnit([step('a',{tool:'query_schedule'})],{running:false,interrupted:false,serverMs:8400});
   assert.equal(unit.workStatus.state,'completed');
-  assert.match(unit.workStatus.label,/已工作 8 秒/);
+  assert.equal(unit.workStatus.label,'已完成');
+  assert.ok(!/\d/.test(unit.workStatus.label),'完成态不得再拼秒数');
 });
 
 test('T2-07 toolTitle 单一事实源：已知工具返回中文类别名，未知工具兜底',()=>{

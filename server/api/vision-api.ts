@@ -32,12 +32,12 @@ import {
   visionStatus,
   MAX_SNAPSHOT_BYTES
 } from '../vision/monitor.ts';
+import { readLiveStatus, liveEventList, liveRoom, LIVE_FEED_URL } from '../vision/live.ts';
 import { currentActor } from '../security/context.ts';
 import { loggerFor } from '../obs/trace.ts';
 
 const log = loggerFor('vision');
 const REPORT_BODY_LIMIT = 1024 * 1024; // 上报 JSON ≤ 1MiB（含可选快照时走 snapshotBase64，同样受限）
-const LIVE_FEED_URL = (process.env.VISION_LIVE_FEED_URL || 'http://127.0.0.1:5000/live/video_feed').replace(/\/+$/, '');
 const LIVE_FEED_TOKEN = process.env.VISION_LIVE_TOKEN || '';
 
 function reply(res: ServerResponse, status: number, body: unknown): void {
@@ -250,65 +250,28 @@ async function handleLiveProbe(res: ServerResponse): Promise<void> {
  * 这条端点补上"从**当前画面**现取一次识别结果"：抓 MJPEG 的一帧 →
  * 交给边缘视觉服务的 /api/count → 返回人数。15 秒内复用结果，避免每次刷新都推理。
  */
-let liveCountCache: {
-  at: number; count: number; room: string | null; sourceKind: string | null;
-  inferFps: number | null; frameAgeMs: number | null; p95Ms: number | null;
-} | null = null;
-/** 实时事件流：人数变化就记一条（只来自 vision 侧，不看边缘上报历史） */
-const liveEvents: Array<{ at: number; room: string | null; count: number; prev: number | null }> = [];
-let lastLiveCount: number | null = null;
-
 /**
- * 实时画面识别结果（2026-11-14 修正版）
- * ---------------------------------------------------------------
- * 上一版抓帧后调 /api/count（单帧重推理），与**画面上的检测框**不是同一套参数：
- * 同一帧 live 会话检出 23 人、单帧重推理只给 3 人，于是卡片数字与画面矛盾。
- * 现改为直接读边缘的 `/api/live/status`——那是画框的那个循环自己的结论
- * （count / counts / detected / frame_age_ms / infer_fps），与画面天然一致。
+ * 实时画面识别结果 —— 数据面在 server/vision/live.ts（Agent 工具 query_vision_status
+ * 与本端点共用同一份实时数据，保证「监控面板看到的 = Agent 说的」）。
  */
 async function handleLiveCount(res: ServerResponse): Promise<void> {
-  const nowMs = Date.now();
-  if (liveCountCache && nowMs - liveCountCache.at < 5000) {
-    reply(res, 200, { ok: true, source: 'live', cached: true, ...liveCountCache, ageMs: nowMs - liveCountCache.at });
+  const r = await readLiveStatus();
+  if (r.ok && r.error === 'live_not_running') {
+    reply(res, 200, { ok: false, error: 'live_not_running', message: r.message });
     return;
   }
-  const base = LIVE_FEED_URL.replace(/\/live\/.*$/, '');
-  const r = await fetch(base + '/api/live/status', { signal: AbortSignal.timeout(5000) }).catch(() => null);
-  if (!r || !r.ok) {
-    reply(res, 502, { ok: false, error: 'vision_live_unreachable', message: '读不到边缘实时识别状态（画面可能未开始或服务未运行）' });
+  if (r.ok && r.snapshot) {
+    reply(res, 200, {
+      ok: true, source: 'live', cached: r.cached ?? false, ...r.snapshot,
+      ageMs: Date.now() - r.snapshot.at,
+      ...(r.cached ? {} : { counts: r.counts ?? null, note: r.note ?? null })
+    });
     return;
   }
-  const st = (await r.json().catch(() => null)) as {
-    running?: boolean; count?: number; detected?: number; counts?: Record<string, number>;
-    infer_fps?: number; frame_age_ms?: number; p95_ms?: number;
-    room?: string | null; source_kind?: string | null;
-    error?: string | null; note?: string | null;
-  } | null;
-  if (!st) { reply(res, 502, { ok: false, error: 'bad_live_status', message: '边缘返回的实时状态不是 JSON' }); return; }
-  if (st.running === false) {
-    reply(res, 200, { ok: false, error: 'live_not_running', message: st.note || '实时识别未开始（请在实验室现场端启动）' });
-    return;
-  }
-  const count = typeof st.count === 'number' ? st.count : typeof st.detected === 'number' ? st.detected : null;
-  if (count === null) { reply(res, 502, { ok: false, error: 'bad_live_status', message: '实时状态里没有人数字段' }); return; }
-  if (count !== lastLiveCount) {
-    liveEvents.unshift({ at: nowMs, room: st.room ?? null, count, prev: lastLiveCount });
-    if (liveEvents.length > 60) liveEvents.length = 60;
-    lastLiveCount = count;
-  }
-  liveCountCache = {
-    at: nowMs,
-    count,
-    room: st.room ?? null,
-    sourceKind: st.source_kind ?? null,
-    inferFps: typeof st.infer_fps === 'number' ? st.infer_fps : null,
-    frameAgeMs: typeof st.frame_age_ms === 'number' ? st.frame_age_ms : null,
-    p95Ms: typeof st.p95_ms === 'number' ? st.p95_ms : null
-  };
-  reply(res, 200, {
-    ok: true, source: 'live', cached: false, ...liveCountCache, ageMs: 0,
-    counts: st.counts ?? null,
-    note: st.error ?? st.note ?? null
+  reply(res, 502, {
+    ok: false,
+    error: r.error === 'no_count' ? 'bad_live_status' : r.error ?? 'vision_live_unreachable',
+    message: r.message ?? '读不到边缘实时识别状态（画面可能未开始或服务未运行）'
   });
 }
 
@@ -343,8 +306,12 @@ async function handleFeed(res: ServerResponse): Promise<void> {
 // ---- 总分发 -----------------------------------------------------------------
 
 export async function handleVisionApi(req: IncomingMessage, res: ServerResponse, pathname: string, query: URLSearchParams): Promise<void> {
-  // VISION_DISABLED: 实验室监控模块暂不提供（2026-11-14 裁定）
-  res.writeHead(404, {'Content-Type':'application/json'}); res.end(JSON.stringify({error:'vision_disabled'})); return;
+  // VISION_MODULE=off：本部署不提供实验室监控模块（用户裁定：本地保留完整模块，
+  // 上传部署到线上服务器的部分不显示）。本地运行不设该变量即保留；线上部署在
+  // 服务器 .env 设 VISION_MODULE=off。前端 web/vision-ui.ts 据此 404 隐藏入口。
+  if (process.env.VISION_MODULE === 'off') {
+    res.writeHead(404, {'Content-Type':'application/json'}); res.end(JSON.stringify({error:'vision_disabled'})); return;
+  }
 
   if (pathname === '/api/vision/report') {
     if (req.method !== 'POST') {
@@ -362,7 +329,7 @@ export async function handleVisionApi(req: IncomingMessage, res: ServerResponse,
   if (pathname === '/api/vision/feed' && req.method === 'GET') { await handleFeed(res); return; }
   if (pathname === '/api/vision/live-count' && req.method === 'GET') { await handleLiveCount(res); return; }
   if (pathname === '/api/vision/live-events' && req.method === 'GET') {
-    reply(res, 200, { ok: true, source: 'live', room: liveCountCache?.room ?? null, events: liveEvents });
+    reply(res, 200, { ok: true, source: 'live', room: liveRoom(), events: liveEventList(60) });
     return;
   }
   reply(res, 404, { error: 'unknown_endpoint', message: `未实现的视觉接口：${req.method} ${pathname}` });

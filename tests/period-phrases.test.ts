@@ -12,7 +12,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolvePeriodKey, resolvePeriodRange } from '../server/agent/intent.ts';
+import { resolvePeriodKey, resolvePeriodRange, resolveTimeSegments } from '../server/agent/intent.ts';
+import { serverNow } from '../server/time/term.ts';
 
 test('单节数字归属正确', () => {
   for (const [q, key] of [
@@ -63,4 +64,24 @@ test('原有中文写法仍然可用（不回归）', () => {
   assert.equal(resolvePeriodKey('下午第二大节'), 'pm2');
   assert.equal(resolvePeriodKey('上午第一大节'), 'am1');
   assert.deepEqual(resolvePeriodRange('下午'), ['pm1', 'pm2']);
+});
+
+test('一句多问按段拆开：周一上二 / 周三早八+下一 各自是独立日期与节次', () => {
+  const now = serverNow(new Date('2026-11-11T12:00:00+08:00'));
+  const segs = resolveTimeSegments('周一上二应该是哪两个志愿者值班？周三早八和下一呢', now);
+  assert.equal(segs.length, 2);
+  assert.equal(segs[0]!.date, '2026-11-09');
+  assert.deepEqual(segs[0]!.periodKeys, ['am2']);
+  assert.equal(segs[1]!.date, '2026-11-11');
+  assert.deepEqual(segs[1]!.periodKeys, ['am1', 'pm1']);
+});
+
+test('后句省略日期时承接前句，仍按各自节次拆段', () => {
+  const now = serverNow(new Date('2026-11-11T12:00:00+08:00'));
+  const segs = resolveTimeSegments('周一上二有课吗？下午呢', now);
+  assert.equal(segs.length, 2);
+  assert.equal(segs[0]!.date, '2026-11-09');
+  assert.deepEqual(segs[0]!.periodKeys, ['am2']);
+  assert.equal(segs[1]!.date, '2026-11-09');
+  assert.deepEqual(segs[1]!.periodKeys, ['pm1', 'pm2']);
 });

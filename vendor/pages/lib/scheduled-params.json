@@ -1,0 +1,35 @@
+{
+  "daily_report": [
+    "maxMissedHours"
+  ],
+  "tomorrow_courses": [
+    "roomId",
+    "className",
+    "maxMissedHours"
+  ],
+  "duty_reminder": [
+    "roomId",
+    "maxMissedHours"
+  ],
+  "due_followup": [
+    "roomId",
+    "thresholdHours",
+    "maxMissedHours"
+  ],
+  "notice_reminder": [
+    "maxMissedHours"
+  ],
+  "lab_open_reminder": [
+    "roomId",
+    "maxMissedHours"
+  ],
+  "session_checkin_reminder": [
+    "roomId",
+    "maxMissedHours"
+  ],
+  "patrol_reminder": [
+    "roomId",
+    "maxMissedHours"
+  ],
+  "agent_prompt": []
+}

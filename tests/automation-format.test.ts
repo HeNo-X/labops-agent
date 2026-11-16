@@ -63,6 +63,9 @@ test('nextRunText：相对时间分档，且绝不把已逾期说成"即将"', (
 test('recipientsText：四种接收对象，超过 3 个只报数量（卡片放不下明细）', () => {
   assert.equal(recipientsText([{ kind: 'user', userId: 'review-admin' }]), '本人（review-admin）');
   assert.equal(recipientsText([{ kind: 'role', role: 'volunteer' }]), '全体志愿者');
+  assert.equal(recipientsText([{ kind: 'role', role: 'student' }]), '全体学生', 'student 不得原样甩英文');
+  assert.equal(recipientsText([{ kind: 'role', role: 'admin' }]), '全体管理员');
+  assert.equal(recipientsText([{ kind: 'role', role: 'weird' }]), '全体weird', '表外身份原样显示，不吞值');
   assert.equal(recipientsText([{ kind: 'class', className: '计工本2503' }]), '班级 计工本2503');
   assert.equal(recipientsText([{ kind: 'all' }]), '全体成员');
   assert.equal(recipientsText([]), '未设置接收人');

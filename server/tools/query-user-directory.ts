@@ -20,6 +20,9 @@ export const QUERY_USER_DIRECTORY_SPEC = {
     '以及每个班级登记的人数。**账号（学号）已由服务端掩码**（如 2023****12），不要尝试还原或推测真实学号；' +
     '电话与学院信息不在返回范围内。仅管理员与志愿者可用；学生查询会被主系统拒绝，如实转告即可。' +
     '用户问「系统里一共多少人」「有哪些志愿者账号」「XX班名册多少人」时用本工具；' +
+    '每个账号还给出 className（服务端解析后的归属班级）与 rosterVersion（改班级用的并发令牌）。' +
+    '要改某学生的班级：用 prepare_business_workflow 的 kind=roster.update，把本工具的 account 原样填进 targetAccount（重名时不要只用姓名）、' +
+    'rosterVersion 原样填进 expectedRosterVersion，再给已存在的 className 与必填 reason；**仅管理员可改**，且不得还原真实学号。' +
     '目录只陈述事实，不要据此定性谁异常。未连接主系统或上游报错时如实说明，不编造。',
   parameters: {
     type: 'object',

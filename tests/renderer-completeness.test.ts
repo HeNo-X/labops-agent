@@ -13,6 +13,8 @@ type Fixtures = { [K in Kind]: { payload: Payload<K>; includes: string[] } };
 // 仅测试夹具，不写入业务数据；所有强类型载荷由 ToolExecution 校验，禁止 as never 掩盖缺字段。
 const date = '2026-11-08';
 const at = '2026-11-08T08:30:00+08:00';
+/** 明细时间按 2026-11-16 用户指定格式显示：yyyy-mm-dd hh:mm */
+const atShort = '2026-11-08 08:30';
 const provenance: ScheduleQueryResult['provenance'] = {
   sourceType: 'snapshot', sourceLabel: '渲染测试快照', queryTime: at,
   timezone: 'Asia/Shanghai', coverage: '仅测试夹具'
@@ -154,7 +156,7 @@ const fixtures = {
     payload: { target: 'term', revision: 7, count: 12, updatedBy: 'fixture-admin', droppedKeys: ['fixture-ignored'] },
     includes: ['学期安排已更新', 'revision=7', '12 条', 'fixture-admin', 'fixture-ignored']
   },
-  records: { payload: checkinRecords, includes: ['签到签退明细：共 1 条', '2026****01', '夹具志愿者', at,
+  records: { payload: checkinRecords, includes: ['签到签退明细：共 1 条', '夹具志愿者', atShort,
     '类型：签到', '值班来源：替班', '模板匹配：否', '2026****02', '替班不改变签到主体'] }
 } satisfies Fixtures;
 
@@ -265,7 +267,8 @@ test('records 覆盖开放实验室历史字段与钥匙台账，保留掩码、
   };
   for (const textOnly of [false, true]) {
     const out = renderDemoAnswer({ kind: 'records', payload: openlab }, { ...extras, textOnly });
-    for (const expected of ['2026****03', '2026****04', '2026****05', at, 'E312', 'D517', '类型：签退', '周值班模板', '模板匹配：是', 'SUN-am1-1']) assert.ok(out.includes(expected), expected);
+    for (const expected of ['夹具访客', atShort, 'E312', 'D517', '类型：签退', '周值班模板', '模板匹配：是', 'SUN-am1-1']) assert.ok(out.includes(expected), expected);
+    assert.doesNotMatch(out, /账号：/, '明细不再展示账号（2026-11-16 用户要求）');
     const keyOut = renderDemoAnswer({ kind: 'records', payload: keys }, { ...extras, textOnly });
     for (const expected of ['钥匙台账：共 2 条', '夹具钥匙甲', '测试柜A', '2026****06', '夹具备注', '已借出', '夹具钥匙乙', '未借出']) assert.ok(keyOut.includes(expected), expected);
     // 用户口径（2026-11-11）：钥匙答案只留"哪把、借没借出、在谁手里/在哪"，

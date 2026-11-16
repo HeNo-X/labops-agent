@@ -48,8 +48,19 @@ export interface Intent {
   hints?: IntentHint[];
   /** 上一问任务类型（由 run.ts 从会话上下文注入，N08 追问继承） */
   lastTask?: string | null;
+  /** 一句多问（"周一上二…周三早八和下一"）：每段各自的日期与节次，供只读组合逐段查询 */
+  timeSegments?: TimeSegment[];
   /** 解析过程中发现的歧义/降级说明 */
   notes: string[];
+}
+
+/** 一句多问里的一个"日期+节次"片段（2026-11-11：多段问句不再被合并成一个大范围） */
+export interface TimeSegment {
+  /** 原文片段，便于把依据说清 */
+  raw: string;
+  /** YYYY-MM-DD */
+  date: string;
+  periodKeys: PeriodKey[];
 }
 
 /** 方案B：规则从决策者降级为提议者——每条线索都带来源与一句话依据 */
@@ -363,6 +374,40 @@ export function resolvePeriodRange(text: string): PeriodKey[] | null {
   return null;
 }
 
+/**
+ * 一句多问拆段（2026-11-11 实机问题修复）
+ * ============================================================================
+ *  「周一上二应该是哪两个志愿者值班？周三早八和下一呢」里有两个日期、三个节次缩写。
+ *  旧实现把整句交给 resolvePeriodKey/resolvePeriodRange：三个节次被合并成一个
+ *  "时间范围 am1/am2/pm1"，日期只剩第一个「周一」——于是模型无法按段查询，
+ *  最终只回一句"请说明房间、日期或要办理的事项"。
+ *
+ *  这里按问号/句号/分号拆句，每句独立解算日期与节次；后句省略日期时承接前句。
+ *  拆不出来（没有日期、没有节次）就不产出片段，交回原有单日期逻辑，不猜。
+ */
+export function resolveTimeSegments(text: string, now: ServerNow): TimeSegment[] {
+  const clauses = String(text ?? '')
+    .split(/[。？！?！;；\n]+/)
+    // 没有标点也用「和/以及/还有」连接两段时（"周一上二和周三早八"）：
+    // 在下一个日期词出现前切开，避免把周三的节次算到周一头上
+    .flatMap((part) => part.split(/(?=(?:下{1,2}|上{1,2}|本)?(?:周|星期|礼拜)[一二三四五六日天])/))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const out: TimeSegment[] = [];
+  let carriedDate: string | null = null;
+  for (const clause of clauses) {
+    const resolved = resolveDate(clause, now);
+    const date: string | null = resolved && !('invalid' in resolved) ? resolved.date : carriedDate;
+    if (date) carriedDate = date;
+    if (!date) continue;
+    const numeric = resolveNumericPeriods(clause);
+    const keys = numeric.length ? numeric : (resolvePeriodRange(clause) ?? []);
+    if (!keys.length) continue;
+    out.push({ raw: clause, date, periodKeys: [...new Set(keys)] });
+  }
+  return out;
+}
+
 
 // ===========================================================================
 //  输入归一化（2026-11-08）：容忍全角、大小写、OCR 混淆与高频错别字
@@ -458,6 +503,9 @@ export function parseIntent(text: string, now: ServerNow): Intent {
   const periodKey = resolvePeriodKey(text);
   const periodKeys = periodKey ? null : resolvePeriodRange(text);
   const labName = resolveLabName(text);
+  // 多段问句（"周一上二…周三早八和下一"）：≥2 段才附上，单段仍走原有单日期路径
+  const segments = resolveTimeSegments(text, now);
+  const timeSegments = segments.length >= 2 ? segments : undefined;
 
   // 兜底：问题里出现「XX班」就认定他在按班级问，不依赖模型自觉填 className
   // 只取"数字前最多 6 个字"作专业前缀，再剥掉动词/指代（查一下、那、的…），
@@ -479,7 +527,7 @@ export function parseIntent(text: string, now: ServerNow): Intent {
   if (periodKeys) notes.push(`识别到时间范围（${periodKeys.join('/')}）——"整个范围都空闲"与"其中一节空闲"含义不同，需按口径处理`);
 
   if (className) notes.push(`识别到班级「${className}」——按班级查课表，不需要房间号`);
-  return { date, dateInvalid, periodKey, periodKeys, labName, className, notes };
+  return { date, dateInvalid, periodKey, periodKeys, labName, className, notes, ...(timeSegments ? { timeSegments } : {}) };
 }
 
 /** 给模型看的"当前时间与指代解算"上下文块（人话，省 token 且模型理解更准） */
@@ -504,6 +552,14 @@ export function buildTimeContext(now: ServerNow, intent: Intent, weekNote: strin
   if (intent.labName) lines.push(`【已识别的房间号】${intent.labName}`);
   if (intent.periodKey) lines.push(`【已识别的节次】${intent.periodKey}`);
   if (intent.periodKeys) lines.push(`【已识别的节次范围】${intent.periodKeys.join('、')}`);
+  if (intent.timeSegments?.length) {
+    lines.push('【本句包含多个"日期+节次"】这不是一个时间范围，请按段分别查询，每段一次工具调用：');
+    intent.timeSegments.forEach((s, i) => {
+      const label = s.periodKeys.map((k) => periodByKey(k)?.label ?? k).join('、');
+      // 只注入解算结果，不回显用户原文（避免把任意文本带进系统上下文）
+      lines.push(`- 第 ${i + 1} 段：${s.date}（${WEEKDAY_LABELS[weekdayOf(s.date)]}）${label}`);
+    });
+  }
 
   // 方案B：有线索时追加"线索不是结论"块——规则摊开依据，沿用与否由模型判断
   const hints = intent.hints ?? [];

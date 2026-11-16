@@ -34,6 +34,34 @@ test('L1 三种只读组合各自命中；只命中一半不进编排', () => {
   assert.equal(detectReadComposition({ question: 'D525 今天开放吗', mode: 'task', intent: intent({ labName: 'D525' }) }), null, '只问状态＝单工具');
 });
 
+test('L1b 一句多问（周一上二 / 周三早八+下一）按段查值班，不再要求用户补充条件', async () => {
+  const it = intent({
+    timeSegments: [
+      { raw: '周一上二应该是哪两个志愿者值班', date: '2026-11-09', periodKeys: ['am2'] },
+      { raw: '周三早八和下一呢', date: '2026-11-11', periodKeys: ['am1', 'pm1'] }
+    ]
+  });
+  const q = '周一上二应该是哪两个志愿者值班？周三早八和下一呢';
+  assert.equal(detectReadComposition({ question: q, mode: 'task', intent: it }), 'duty_slots');
+  assert.equal(detectReadComposition({ question: '周一上二谁值班', mode: 'task', intent: intent({ timeSegments: [{ raw: '周一上二谁值班', date: '2026-11-09', periodKeys: ['am2'] }] }) }), null, '单段仍交给单工具路径');
+
+  const s = spyOf({
+    query_term_schedule: () => ok('term_schedule', {
+      contractVersion: 3, date: '2026-11-09', queriedAt: '2026-11-11T09:00:00+08:00', sourceRevision: 'r1',
+      termSchedule: { enabled: false, notImported: true, term: '', weeks: null, week: null, weekday: null, sessions: [], cancelled: [], changes: [], notes: [] },
+      volunteerSchedule: { enabled: true, notImported: false, days: [], persons: [], personsMissingProfile: [], expected: { slotCode: '34', weekday: 1, names: ['尉佳琳', '李传国'], vacantCount: 0 }, dutyRoom: null },
+      hint: ''
+    })
+  });
+  const out = await runReadComposition('duty_slots', deps(q, { intent: it, execute: s.execute }));
+  assert.equal(out.usable, true);
+  assert.deepEqual(s.calls, [
+    { tool: 'query_term_schedule', args: { date: '2026-11-09', periodKey: 'am2' } },
+    { tool: 'query_term_schedule', args: { date: '2026-11-11', periodKey: 'am1' } },
+    { tool: 'query_term_schedule', args: { date: '2026-11-11', periodKey: 'pm1' } }
+  ]);
+});
+
 test('L2 办理话术一律让位给写链；聊天模式与学生通道不接手；开关可关', () => {
   assert.equal(detectReadComposition({ question: '把 E312 的钥匙借给 student，顺便看看那节有课吗', mode: 'task', intent: intent({ labName: 'E312' }) }), null, '借还话术必须走钥匙链');
   assert.equal(detectReadComposition({ question: '2026-11-09 E310 有谁签到？那节谁值班', mode: 'chat', intent: intent({ labName: 'E310' }) }), null, '聊天模式不做组合');

@@ -43,10 +43,14 @@ const mode=computed(()=>session.currentMode()),busy=computed(()=>run.inputLocked
 const switching=ref(false);
 async function setMode(m:'chat'|'task'):Promise<void>{if(m===mode.value||switching.value||busy.value)return;switching.value=true;try{if(props.conversationId)await session.changeConversationMode(props.conversationId,m);}catch(e){error.value=(e as Error).message;}finally{switching.value=false;}}
 async function load(){
+  // 每次进入/切换会话都从最新消息开始（消息异步载入时由文本 watch 继续贴底）
+  nearBottom.value=true;
+  newMessages.value=false;
   if(!props.conversationId){draft.value=session.draftFor('__new');return;}
   if(props.controller.activeConversation.value!==props.conversationId)await session.openConversation(props.conversationId);
   else session.saveCurrentId(props.conversationId);
   draft.value=session.draftFor(props.conversationId);
+  await latest();
 }
 onMounted(load);watch(()=>props.conversationId,load);watch(draft,value=>session.saveDraft(props.conversationId,value));
 useVisibleRefresh(()=>session.syncConversation(props.conversationId!),()=>Boolean(props.conversationId)&&props.controller.activeConversation.value!==props.conversationId);

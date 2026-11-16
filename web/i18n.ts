@@ -415,6 +415,7 @@ Object.assign(en,{
  "正在聆听": "Listening…",
  "语音输入": "Voice input",
  "实验室监控": "Lab monitoring",
+ "当前部署未提供实验室监控。": "Lab monitoring is not available in this deployment.",
  "有异常线索待核查": "Anomaly leads need review",
  "视觉通道正常": "Vision channel healthy",
  "等待边缘上报": "Waiting for edge reports",

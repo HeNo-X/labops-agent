@@ -26,13 +26,14 @@ import type { ServerNow } from '../time/term.ts';
 import type { ToolExecution } from '../tools/registry.ts';
 import type { ToolResultKind } from '../../shared/types.ts';
 
-export type ReadKind = 'checkin_duty' | 'openlab_presence' | 'key_schedule';
+export type ReadKind = 'checkin_duty' | 'openlab_presence' | 'key_schedule' | 'duty_slots';
 
 /** 停下或讲解时要说清是哪一种组合，不能三条都报"只读组合" */
 export const READ_LABEL: Record<ReadKind, string> = {
   checkin_duty: '签到明细 + 周值班模板',
   openlab_presence: '开放实验室状态 + 进出记录',
-  key_schedule: '钥匙台账 + 该节课表'
+  key_schedule: '钥匙台账 + 该节课表',
+  duty_slots: '多个日期/节次的志愿者值班'
 };
 
 export interface ReadStep {
@@ -87,6 +88,9 @@ export function detectReadComposition(deps: Pick<ReadDeps, 'question' | 'mode' |
   const q = deps.question;
   if (WRITE_INTENT_RE.test(q)) return null;
   if (CHECKIN_RE.test(q) && DUTY_RE.test(q)) return 'checkin_duty';
+  // 一句多问：两个及以上"日期+节次"片段，且问的是值班（"周一上二…周三早八和下一呢"）。
+  // 旧逻辑把三段节次合并成一个范围、只留第一个日期，模型无法按段查询，最终答成"请说明条件"。
+  if (DUTY_RE.test(q) && (deps.intent.timeSegments?.length ?? 0) >= 2) return 'duty_slots';
   if (OPEN_STATE_RE.test(q) && OPEN_VISIT_RE.test(q) && deps.intent.labName) return 'openlab_presence';
   if (KEY_RE.test(q) && LESSON_RE.test(q) && deps.intent.labName) return 'key_schedule';
   return null;
@@ -97,6 +101,21 @@ function planFor(kind: ReadKind, deps: ReadDeps): Array<{ tool: string; args: Re
   const date = deps.intent.date?.date ?? null;
   const lab = deps.intent.labName ?? null;
   const period = deps.intent.periodKey ?? null;
+  if (kind === 'duty_slots') {
+    const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+    const seen = new Set<string>();
+    for (const seg of deps.intent.timeSegments ?? []) {
+      for (const periodKey of seg.periodKeys) {
+        const key = `${seg.date}|${periodKey}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        calls.push({ tool: 'query_term_schedule', args: { date: seg.date, periodKey } });
+      }
+    }
+    if (calls.length < 2) return '多段问句没有解析出至少两个可查询的值班时段';
+    if (calls.length > 8) return `分解出 ${calls.length} 个值班时段，超过单次上限 8 个，请缩小范围`;
+    return calls;
+  }
   if (kind === 'checkin_duty') {
     if (!date) return '没说明查哪一天（签到台账与值班模板都按日期取，不能猜）';
     return [

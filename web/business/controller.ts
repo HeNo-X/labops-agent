@@ -24,7 +24,7 @@ export function createNativeBusinessCard(props:{result:BusinessResult;cardId:str
  const visibleCandidates=computed(()=>showAllCandidates.value?eligible.value:eligible.value.slice(0,3));
  const commitAllowed=computed(()=>sameScope.value&&!props.readonly&&!busy.value&&!edited.value&&!['stale','expired','permission_changed'].includes(task.value?.status||'')&&plan.value?.state==='awaiting_confirmation'&&Date.parse(plan.value.expiresAt)>Date.now());
  const labels:Record<string,string>={partial:'部分检查已登记',checked:'检查已补全',awaiting_acceptance:'待验收',completed:'交接已完成',open:'待指派',assigned:'已指派',in_progress:'处理中',closed:'已关闭'};
- const planLabels:Record<string,string>={'schedule.move':'指定日期调课','duty.handover':'检查登记与交接','duty.accept':'交接接收','duty.reassign':'重新指定接收人','duty.item':'遗留事项处理','issue.create':'创建工单','issue.action':'工单流转','notification.publish':'发布站内通知','closure.create':'登记临时停用','closure.revoke':'撤销临时停用'};
+ const planLabels:Record<string,string>={'schedule.move':'指定日期调课','duty.handover':'检查登记与交接','duty.accept':'交接接收','duty.reassign':'重新指定接收人','duty.item':'遗留事项处理','issue.create':'创建工单','issue.action':'工单流转','notification.publish':'发布站内通知','closure.create':'登记临时停用','closure.revoke':'撤销临时停用','roster.update':'名册班级归属变更'};
  const planStates:Record<string,string>={awaiting_confirmation:'待本人确认',committed:'已提交',executed:'已提交',superseded:'已由新方案替代',rejected:'已拒绝',expired:'已过期'};
  const checkLabels:Record<string,string>={power:'电源与设备',lights:'照明',doors:'门窗与清场',keys:'钥匙交接',todo:'未完成事项'},checkStates:Record<string,string>={done:'已完成',unchecked:'未检查',abnormal:'异常'};
  function checkText(items:NativeCheck[]){return items.map(c=>(checkLabels[c.key]||c.label||c.key)+'：'+(checkStates[c.state]||c.state)).join('、');}

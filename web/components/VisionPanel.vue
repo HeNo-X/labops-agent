@@ -21,11 +21,13 @@ import { useBusinessStore } from '../stores/business';
 import { clientFetch } from '../client';
 
 import { useVision } from '../composables/useVision';
+import { visionAvailable, probeVisionModule } from '../vision-ui';
 import type { Target } from '@shared/labops-targets.js';
 
 const props = defineProps<{ navigation?: boolean; iconOnly?: boolean }>();
 
 const business = useBusinessStore();
+probeVisionModule();
 const vision = useVision();
 const open = ref(false);
 const feedFailed = ref(false);
@@ -186,8 +188,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- vision-off -->
-  <div v-show="false && business.connected" class="vision-entry">
+  <!-- 实验室监控：本地保留；线上部署（VISION_MODULE=off）不显示入口 -->
+  <div v-if="visionAvailable && business.connected" class="vision-entry">
     <button
       type="button"
       :class="{ 'nav-tool': navigation }"

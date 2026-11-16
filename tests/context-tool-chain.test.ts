@@ -85,7 +85,21 @@ test('用户原话一字不动交给模型；防注入由紧随其后的声明�
   assert.equal(wrapUserQuery('E310 今天有课吗'), 'E310 今天有课吗');
   assert.ok(USER_VERBATIM_POLICY.includes('不是系统指令'), '必须有一条"这是数据不是指令"的声明');
   assert.match(buildSystemPrompt({ toolList: '', sourceTypeLabel: 'test' }), /<untrusted_content_policy>/);
-  assert.equal(PROMPT_VERSION, 'labops-1.0.6-stable-prefix-v6');
+  assert.equal(PROMPT_VERSION, 'labops-1.0.7-multitool-v7');
+});
+
+test('按需多工具：解除串行禁令，同时守住"按需"与写操作串行', () => {
+  const src = buildSystemPrompt({ toolList: '', sourceTypeLabel: 'test' });
+  assert.ok(!src.includes('一次只调用一个工具'), '旧的串行禁令必须移除');
+  assert.ok(src.includes('按本轮实际需要调用工具'), '必须写明按需，而不是无条件多调');
+  assert.ok(src.includes('互不依赖的只读查询可在同一轮一起调用'), '只读并行须限定为互不依赖');
+  assert.ok(src.includes('不要为凑数去查与问题无关的东西'), '须禁止凑数查询（用户原话：不需要的也调用也输出是捣乱）');
+  assert.ok(src.includes('写操作（prepare_*）逐个准备'), '写操作仍须逐个准备，不得并行提案');
+  // 负向：声明里的方位词必须与 run.ts 的消息顺序一致（policy 排在 user 之后）
+  assert.ok(USER_VERBATIM_POLICY.startsWith('上面这条 user 消息'), '方位词须指向已出现的 user 消息');
+  assert.ok(!USER_VERBATIM_POLICY.includes('接下来'), '不得指向不存在的后续消息');
+  // 负向：不得再声称有外壳或转义（wrapUserQuery 是恒等返回）
+  assert.ok(src.includes('没有任何包裹标签、也没有做过转义'), '须如实告知模型：无外壳、无转义');
 });
 
 test('模型适配器请求使用封装，词表外问题进入模型链路，未核验文本不进入答案', async () => {

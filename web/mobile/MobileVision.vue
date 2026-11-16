@@ -16,11 +16,13 @@ import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { clientFetch } from '../client';
 import { useSessionStore } from '../stores/session';
 import { t as tr } from '../i18n';
+import { visionAvailable, probeVisionModule } from '../vision-ui';
 import UiIcon from '../components/UiIcon.vue';
 import BuiltInCamera from '../components/BuiltInCamera.vue';
 import type { Target } from '@shared/labops-targets.js';
 
 const emit = defineEmits<{ navigate: [Target] }>();
+probeVisionModule();
 const session = useSessionStore();
 
 interface VisionLabSummary {
@@ -186,8 +188,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- vision-off -->
-  <section v-show="false" class="vision-view">
+  <!-- 实验室监控：本地保留；线上部署（VISION_MODULE=off）不显示 -->
+  <section v-show="visionAvailable" class="vision-view">
     <!-- ① 通道状态 -->
     <header class="vision-top" :class="`is-${channelTone}`">
       <span class="vision-pulse" aria-hidden="true"></span>
@@ -322,6 +324,7 @@ onUnmounted(() => {
       {{ tr('边缘推理：画面与人脸不出实验室内网；云端仅存剥离身份后的 JSON（人数/场景/事件）。二维码签到永远是主链，视觉只做辅助。') }}
     </footer>
   </section>
+  <p v-if="!visionAvailable" class="mobile-state">{{tr('当前部署未提供实验室监控。')}}</p>
 </template>
 
 <style scoped>

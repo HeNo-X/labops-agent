@@ -198,7 +198,8 @@ const inputLocked = computed(() => {
   const error = ref<StreamErrorInfo | null>(null);
   const elapsedMs = ref(0);
   /**
-   * 服务端权威耗时（run_completed.payload.ms）。**唯一允许用来显示"已工作 N 秒"的数字**；
+   * 服务端权威耗时（run_completed.payload.ms）。只用来判定 completed 与 interrupted，
+   * 不拼进文案（11-14 起显示「已完成」，不再显示秒数）；
    * 前端本地时钟的 elapsedMs 只用于运行中的进度感与取消前的时长，不冒充服务端事实。
    */
   const serverMs = ref<number | null>(null);

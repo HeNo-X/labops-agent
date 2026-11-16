@@ -12,7 +12,7 @@
  *    · 提醒偏好、事实结果、准备包降级为折叠区，不再与主任务混排
  *    · PC 与移动端共用本组件（移动端传 inline），口径天然一致
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { t as tr } from '../../i18n';
 import UiIcon from '../UiIcon.vue';
 import { useModal } from '../../composables/useModal';
@@ -108,6 +108,22 @@ const detail = automation.detail;
 const plan = automation.plan;
 const busy = automation.busy;
 const error = automation.error;
+
+// 影响核对区在列表/详情页的底部：生成后滚过去，避免用户以为按钮没反应
+// （新建/编辑路径由 AutomationComposer 自己滚，两边互斥不会抢滚动）
+const panelPlanEl = ref<HTMLElement | null>(null);
+watch(plan, async (value) => {
+  if (!value || composerOpen.value) return;
+  await nextTick();
+  panelPlanEl.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+// 服务端失败信息在面板顶部；用户在底部点"创建"时也要能看到原因，不能静默
+const panelErrorEl = ref<HTMLElement | null>(null);
+watch(error, async (value) => {
+  if (!value) return;
+  await nextTick();
+  panelErrorEl.value?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
 
 useModal(open, '.auto-panel', () => !props.inline);
 
@@ -310,7 +326,7 @@ useVisibleRefresh(
           {{ tr('当前只可查询规则与结果。修改请新建工作会话或进入实验室工作台。') }}
         </p>
         <p v-if="busy" class="auto-note" role="status">{{ tr('正在读取 / 保存…') }}</p>
-        <p v-if="error" class="auto-error" role="alert">{{ error }}</p>
+        <p v-if="error" ref="panelErrorEl" class="auto-error" role="alert">{{ error }}</p>
         <p v-if="savedNotice" class="auto-ok" role="status">{{ savedNotice }}</p>
 
         <!-- 详情 -->
@@ -380,7 +396,7 @@ useVisibleRefresh(
           </div>
 
           <!-- 影响核对（详情页里的立即运行/归档也走同一套确认） -->
-          <section v-if="plan" class="auto-review">
+          <section v-if="plan" ref="panelPlanEl" class="auto-review">
             <h3>{{ tr('确认后才会生效') }}</h3>
             <p class="auto-review__line">{{ tr('动作') }}：{{ actionLabel(plan.action) }} · {{ tr('接收') }}：{{ tr(recipientsText(plan.spec.recipients)) }}</p>
             <p class="auto-review__line">{{ tr('效果') }}：{{ tr(effectsText(plan.effects)) }}</p>
@@ -491,7 +507,7 @@ useVisibleRefresh(
           </div>
 
           <!-- 影响核对（列表页的新建/立即运行/归档） -->
-          <section v-if="plan" class="auto-review">
+          <section v-if="plan" ref="panelPlanEl" class="auto-review">
             <h3>{{ tr('确认后才会生效') }}</h3>
             <dl class="auto-review__grid">
               <div><dt>{{ tr('频率') }}</dt><dd>{{ tr(triggerText(plan.spec)) }}</dd></div>

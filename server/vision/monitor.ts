@@ -346,6 +346,8 @@ export interface VisionLabSummary {
   library: VisionLibraryHit[];
   sceneState: string | null;
   sceneReason: string | null;
+  /** 上报来源标记（quality.det）：mock-vision-feed 的模拟上报为 "mock-*"，真实边缘为检测模型名 */
+  det: string | null;
   alert: boolean;
   snapshotAvailable: boolean;
 }
@@ -366,6 +368,7 @@ export function visionStatus(): { labs: VisionLabSummary[]; eventCount: number; 
       library: state.latest.library,
       sceneState: state.latest.sceneState,
       sceneReason: state.latest.sceneReason,
+      det: state.latest.quality.det,
       alert: state.latest.alert,
       snapshotAvailable: Boolean(state.snapshot)
     }))

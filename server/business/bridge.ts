@@ -146,7 +146,7 @@ export async function handleBusinessApi(req:IncomingMessage,res:ServerResponse,p
     }
     if(record?.['conversationId']&&out['task']){
       const task=out['task'] as {id:string;kind:string},plan=out['plan'] as {id:string}|undefined;
-      rememberBusinessTask(record['conversationId'] as string,{task,taskId:task.id,plan,planId:plan?.id||null,view:task.kind==='schedule.move'?'schedule':task.kind.startsWith('incident.')?'incidents':task.kind.startsWith('duty.')?'duty':task.kind.startsWith('issue.')?'issues':'notifications',date:record['date'],sourceLesson:out['source'],candidates:out['candidates']||[],candidateSetId:out['candidateSetId'],scopeKey:businessScope().scopeKey,sourceRevision:out['revision']});
+      rememberBusinessTask(record['conversationId'] as string,{task,taskId:task.id,plan,planId:plan?.id||null,view:task.kind==='roster.update'?'roster':task.kind==='schedule.move'?'schedule':task.kind.startsWith('incident.')?'incidents':task.kind.startsWith('duty.')?'duty':task.kind.startsWith('issue.')?'issues':'notifications',date:record['date'],sourceLesson:out['source'],candidates:out['candidates']||[],candidateSetId:out['candidateSetId'],scopeKey:businessScope().scopeKey,sourceRevision:out['revision']});
     }
     return send(200,out);
   }catch(e){send((e as {status?:number}).status||502,{message:e instanceof Error?e.message:'原系统不可用',code:(e as {code?:string}).code||'business_unavailable',hint:'保留方案，恢复后重试或回查同一编号。'});}

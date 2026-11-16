@@ -57,6 +57,58 @@ function fail(err: unknown): ToolExecution {
 
 // ============================== ① 逐人签到明细 ==============================
 
+/**
+ * 签到明细的用户格式（2026-11-16 用户指定）：
+ *   · 学生签到：**按班级分区**——开头「当前上课班级：X」，下一行「已签到学生：掩码学号」，
+ *     多个班级依次分区；只列 type=checkin 的已签到记录；
+ *   · 志愿者值班：只给**姓名**（不显示掩码账号）。
+ * 掩码由主系统服务端完成（前 4 后 2），此处原样透传，不还原、不推断学号。
+ */
+export function formatCheckinRecordsText(raw: Record<string, unknown>): string {
+  const scalar = (v: unknown): string => (typeof v === "string" || typeof v === "number" ? String(v).trim() : "");
+  const date = scalar(raw["date"]);
+  // 顶层 scope 决定整批口径（duty 行级也可能带 scope；两者都兜住）
+  const topScope = scalar(raw["scope"]);
+  const rows = Array.isArray(raw["records"]) ? (raw["records"] as unknown[]) : [];
+  const empty = `**${date ? date + " " : ""}没有查到已签到记录。**`;
+  if (!rows.length) return empty;
+  const groups = new Map<string, string[]>();
+  const duty: string[] = [];
+  let shown = 0;
+  let truncated = false;
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+    const x = row as Record<string, unknown>;
+    const isDuty = topScope === "duty" || (topScope !== "student" && scalar(x["scope"]) === "duty");
+    if (isDuty) {
+      const n = scalar(x["name"]);
+      if (n && !duty.includes(n)) duty.push(n);
+      continue;
+    }
+    const type = scalar(x["type"]);
+    if (type && type !== "checkin") continue;
+    const user = scalar(x["user"]) || scalar(x["username"]);
+    if (!user) continue;
+    shown += 1;
+    if (shown > 50) { truncated = true; continue; }
+    const cls = scalar(x["className"]);
+    const arr = groups.get(cls) || [];
+    if (!arr.includes(user)) arr.push(user);
+    groups.set(cls, arr);
+  }
+  const lines: string[] = [];
+  for (const [cls, users] of groups) {
+    if (cls) lines.push(`当前上课班级：${cls}`);
+    lines.push(`已签到学生：${users.join("、")}`);
+    lines.push("");
+  }
+  if (duty.length) { lines.push(`值班志愿者：${duty.join("、")}`); lines.push(""); }
+  if (!groups.size && !duty.length) return empty;
+  if (truncated) lines.push("（仅列出前 50 位，如需完整名单请缩小查询范围。）");
+  const text = lines.join("\n").trim();
+  return date ? `${text}\n\n（${date}）` : text;
+}
+
 export const QUERY_CHECKIN_RECORDS_SPEC = {
   name: 'query_checkin_records',
   description:
@@ -93,15 +145,11 @@ export async function queryCheckinRecords(args: Record<string, unknown>, signal?
       labId: asStr(args['labId']),
       scope: asStr(args['scope'])
     }, signal);
-    const rows = (raw['records'] as unknown[]) || [];
-    const day = String(raw['date'] || '');
-    const scope = String(raw['scope'] || 'all');
-    const room = asStr(args['labId']);
     return {
       ok: true,
       resultKind: 'records',
       result: raw,
-      summary: `${day}${room ? ' ' + room : ''} 共 ${rows.length} 条${scope === 'duty' ? '志愿者值班' : scope === 'student' ? '学生上机' : '逐人签到'}记录（学号已掩码）`
+      summary: formatCheckinRecordsText(raw)
     };
   } catch (err) {
     return fail(err);

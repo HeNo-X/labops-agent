@@ -26,6 +26,7 @@ import type { ToolContext, ToolExecution } from '../tools/registry.ts';
 import { isBusinessConnected } from '../business/bridge.ts';
 import { PERSONAL_CHECKIN_RE } from '../tools/query-checkin-status.ts';
 import { CHECKIN_SUMMARY_RE } from '../tools/query-checkin-summary.ts';
+import { formatCheckinRecordsText } from '../tools/query-checkin-records.ts';
 
 export interface DemoPlan {
   /** 本次要调的工具名 */
@@ -637,6 +638,12 @@ function renderKeyRecordsAnswer(rows: unknown[], date: string, total: number): s
   return lines.join('\n');
 }
 
+/** 明细里的时间统一显示 yyyy-mm-dd hh:mm（2026-11-16 用户指定，不用 ISO 串） */
+function shortTimeText(v: string): string {
+  const m = v.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
+  return m ? `${m[1]} ${m[2]}` : v;
+}
+
 /** records 来自主系统三类明细接口；仅展示已知字段，身份掩码原样保留，不推断考勤。 */
 function renderRecordsAnswer(r: ResultPayload<'records'>): string {
   if (r['directory'] === true) return renderDirectoryAnswer(r);
@@ -647,8 +654,11 @@ function renderRecordsAnswer(r: ResultPayload<'records'>): string {
   const date = scalar(r['date']);
   const total = typeof r['total'] === 'number' && Number.isFinite(r['total']) ? r['total'] : rows.length;
   if (isKey) return renderKeyRecordsAnswer(rows, date, total);
+  // 签到明细（主系统返回带 scope）：用户指定格式——按班级分区，学生只给掩码学号，志愿者只给姓名
+  if (scalar(r['scope'])) return formatCheckinRecordsText(r as Record<string, unknown>);
   const fields: Array<[string, string[]]> = [
-    ['姓名', ['name']], ['账号', ['user', 'username', 'actorId']], ['时间', ['at', 'time', 'ts']],
+    // 用户 2026-11-16：明细不再展示账号，只留姓名/时间/实验室/节次等事实字段
+    ['姓名', ['name']], ['时间', ['at', 'time', 'ts']],
     ['实验室', ['labName', 'labId']], ['节次', ['periodKey']], ['替班对象', ['substituteFor']]
   ];
   const lines = [`**${date ? date + ' ' : ''}签到签退明细：共 ${total} 条**${total !== rows.length ? `（本次返回 ${rows.length} 条）` : ''}。`];
@@ -660,7 +670,7 @@ function renderRecordsAnswer(r: ResultPayload<'records'>): string {
     const values: string[] = [];
     for (const [label, keys] of fields) {
       const value = keys.map((key) => scalar(row[key])).find(Boolean);
-      if (value) values.push(`${label}：${value}`);
+      if (value) values.push(`${label}：${label === '时间' ? shortTimeText(value) : value}`);
     }
     const type = scalar(row.type);
     if (type) values.push(`类型：${type === 'checkin' ? '签到' : type === 'checkout' ? '签退' : type}`);
@@ -916,7 +926,7 @@ export function renderVisionFieldAnswer(r: VisionFieldResult): string {
       const state = lab.online ? '在线' : '摄像头离线';
       lines.push(`${lab.labId || '未知房间'}：${state}，AI 计数 ${lab.count ?? '未知'}${capacity} 人${faces}`);
     }
-  } else if (Array.isArray(r.knownLabs)) lines.push(`已接入房间：${r.knownLabs.join('、') || '无'}；${'暂无该房间数据'}`);
+  } else if (Array.isArray(r.knownLabs)) lines.push('没有查到该房间的监控数据。');
   else lines.push('暂无上报数据');
   if (r.note) lines.push(`（${r.note}）`);
   return lines.join('\n');

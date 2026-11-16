@@ -112,6 +112,9 @@ export function calendarText(policy: string | null | undefined): string {
   return policy === 'teaching_days' ? '仅教学日' : '按自然日';
 }
 
+/** 身份代号 → 中文。表里没有的原样显示，不吞值。 */
+export const ROLE_TEXT: Record<string, string> = { volunteer: '志愿者', student: '学生', admin: '管理员' };
+
 /** 接收对象人话 */
 export function recipientsText(recipients: Array<Record<string, string>> | undefined): string {
   const list = recipients ?? [];
@@ -120,7 +123,7 @@ export function recipientsText(recipients: Array<Record<string, string>> | undef
   return list
     .map((r) => {
       if (r['kind'] === 'user') return `本人（${r['userId'] ?? ''}）`;
-      if (r['kind'] === 'role') return r['role'] === 'volunteer' ? '全体志愿者' : `全体${r['role'] ?? ''}`;
+      if (r['kind'] === 'role') return `全体${ROLE_TEXT[r['role'] ?? ''] ?? r['role'] ?? ''}`;
       if (r['kind'] === 'class') return `班级 ${r['className'] ?? ''}`;
       if (r['kind'] === 'all') return '全体成员';
       return String(r['kind'] ?? '未知对象');

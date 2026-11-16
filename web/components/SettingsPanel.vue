@@ -14,7 +14,7 @@ const CATEGORIES=['personalization','general','account'];
 const allowed=[...CATEGORIES,'advanced',...(!mobile?['work']:[])];
 const category=ref(allowed.includes(props.category||'')?(props.category as string):'personalization');
 const business=useBusinessStore(),run=useRunStore();const session=useSessionStore();
-// B3 扩展：快捷入口覆盖全部 Agent 能力（按常用度排序，点击即在会话里预填请求文本）
+// 快捷入口覆盖全部 Agent 能力（按常用度排序，点击即在会话里预填请求文本）
 const quickStarts=[
   {label:'查今天课表',text:'今天有哪些课'},
   {label:'查空闲机房',text:'哪些实验室现在空着'},
@@ -268,7 +268,7 @@ refreshUpdateState();
 .settings-work-embed .native-card{border-left:1px solid var(--border-strong)}
 </style>
 <style scoped>
-/* 批次2：分区组折叠——summary 行 + chevron 旋转 + body 内距 */
+/* 分区组折叠——summary 行 + chevron 旋转 + body 内距 */
 .settings-group__toggle{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 2px;font-size:1em;font-weight:600;user-select:none}
 .settings-group__toggle::-webkit-details-marker{display:none}
 .settings-group__toggle span{flex:1}
@@ -277,7 +277,7 @@ details[open]>.settings-group__toggle .settings-group__chev{transform:rotate(90d
 .settings-group__body{display:flex;flex-direction:column;gap:14px;padding:2px 2px 8px}
 </style>
 <style scoped>
-/* 批次3：快捷发起网格——18 按钮自适应排列 */
+/* 快捷发起网格——按钮自适应排列 */
 .settings-quick-grid{display:flex;flex-wrap:wrap;gap:8px}
 .settings-quick-btn{
   border:1px solid var(--border);border-radius:var(--radius,10px);

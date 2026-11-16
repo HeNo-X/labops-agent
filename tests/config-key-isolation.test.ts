@@ -7,7 +7,7 @@
  *
  *  本用例锁死：`npm test`（scripts/run-tests.mjs）派生的测试进程拿不到环境模型 Key；
  *  而测试代码里**显式设定**的替身 Key 不受影响（这是刻意不用 config 闸门的原因——
- *  闸门会把替身 Key 一起清掉，实测打断 reliability 两个用例）。
+ *  闸门会把替身 Key 一起清掉，打断 reliability 用例）。
  *
  *  运行：node --test tests/config-key-isolation.test.ts
  */

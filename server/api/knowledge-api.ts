@@ -1,5 +1,5 @@
 /**
- * 知识向量索引 API（RAG 批次 2）
+ * 知识向量索引 API
  * ============================================================================
  *  POST /api/knowledge/reindex —— 管理员触发重建：内置操作说明全量 + 主系统
  *  已审核手册（连通时）。幂等可重跑；供「知识导入」页导入完成后一键刷新向量。
@@ -22,7 +22,7 @@ export async function handleKnowledgeApi(req: IncomingMessage, res: ServerRespon
   const method = (req.method ?? 'GET').toUpperCase();
   try {
     if (!pathname.startsWith('/api/knowledge/vec')) {
-      // 重建属管理操作：非管理员一律 403（沙盒演示身份同样经 resolveActor 校验）
+      // 重建属管理操作：非管理员一律 403（沙盒身份同样经 resolveActor 校验）
       if (effectiveRole() !== 'admin') {
         json(res, 403, { error: 'admin_required', message: '重建知识向量索引需要管理员身份。' });
         return true;

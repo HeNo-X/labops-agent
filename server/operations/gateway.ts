@@ -1,5 +1,5 @@
 /**
- * 沙盒业务网关（ops.v1，任务书 §8 的第 2 层：独立业务沙盒）
+ * 沙盒业务网关（ops.v1：独立业务沙盒）
  * ============================================================================
  *  所有业务写入的唯一通道。执行器（executor.ts）只调用这里，不直接碰 biz_* 表；
  *  Agent / 模型永远不直接改业务数据 —— 这是"模型准备、服务端提交"的分界线。
@@ -8,8 +8,8 @@
  *    全部成功或全部不发生，不产生"停用了但工单没建"的半状态。
  *  · 每个对象写入即写审计（ops_audit）；站内通知额外写一条 outbox 投递记录
  *    —— 入库即视为站内送达，但"已读"事实不跟踪（界面如实标注）。
- *  · production 适配器未接入：这里所有数据都在本库 biz_* 表，前缀
- *    sandbox 标识，绝不与老系统 state.json / lab.db 混写（任务书 §8.3 防双写）。
+ *  · 沙盒数据都在本库 biz_* 表，前缀 sandbox 标识，绝不与老系统
+ *    state.json / lab.db 混写（防双写）。
  */
 
 import { createHash } from 'node:crypto';
@@ -27,7 +27,7 @@ import {
   upsertBizRoomStatus
 } from '../persistence/db.ts';
 
-/** 网关执行失败：执行器转成结构化错误，不冒充成功 */
+/** 网关执行失败：执行器转成结构化错误，不把失败报成成功 */
 export class GatewayError extends Error {
   readonly code = 'gateway_execution_failed';
 }

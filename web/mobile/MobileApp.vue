@@ -22,7 +22,7 @@ const EvidencePanel=defineAsyncComponent(()=>import('../components/EvidencePanel
 const business=useBusinessStore(),session=useSessionStore(),run=useRunStore(),upload=useEvidenceUpload(),navigation=useMobileNavigation(auth.target.value),{route,error:routeError}=navigation,{keyboard}=useMobileViewport(),authed=auth.authenticated,loading=ref(true),error=ref(auth.error.value),account=ref(''),password=ref(''),loggingIn=ref(false),unread=ref<number|null>(null),content=ref<HTMLElement>(),offline=ref(!navigator.onLine),rememberAccount=ref(false),loginError=ref(''),showPassword=ref(false);
 // 记住账号：从 localStorage 恢复
 try{const saved=localStorage.getItem('labops.saved-account');if(saved){account.value=saved;rememberAccount.value=true;}}catch{}
-// 安装版登录页只保留一个低调的「连接设置」文字入口（原「应用设置」悬浮按钮已取消）。
+// 安装版登录页只保留一个低调的「连接设置」文字入口。
 const installed=isInstalledClient();
 function openAdvanced(){location.assign('/client/settings.html#advanced');}
 const controller=useConversationController(id=>navigation.go({view:'conversation',conversationId:id},route.value.view==='conversation'));
@@ -30,19 +30,19 @@ const title=computed(()=>{const view=route.value.view;if(view==='conversation'){
 const activeTab=computed(()=>{const view=route.value.view;if(['conversation','assistant','sessions'].includes(view))return 'assistant';if(['rooms','room','task','evidence','vision'].includes(view))return 'rooms';if(['profile','settings'].includes(view))return 'profile';return 'home';});
 if(authed.value&&auth.error.value)routeError.value=auth.error.value;
 const tabs=[{view:'assistant',label:'会话',icon:'chat'},{view:'rooms',label:'实验室',icon:'room'},{view:'home',label:'工作台',icon:'work'},{view:'profile',label:'我的',icon:'user'}];
-// 会话页抽屉（用户指令 2026-10-24）：最近会话与分区过滤收进左侧抽屉，主区精简
+// 会话页抽屉：最近会话与分区过滤收进左侧抽屉，主区精简
 const drawerOpen=ref(false);
 function openDrawer(){if(run.inputLocked||controller.submitting.value)return;drawerOpen.value=true;}
 function drawerSelect(id:string){drawerOpen.value=false;void session.openConversation(id);navigation.go({view:'conversation',conversationId:id});}
 function drawerNew(){drawerOpen.value=false;newChat();}
-// H2：左缘拖出抽屉（仅助手视图；与 swipe-back 场景互斥）
+// 左缘拖出抽屉（仅助手视图；与 swipe-back 场景互斥）
 useEdgeDrawerOpen(()=>route.value.view==='assistant'&&!drawerOpen.value,openDrawer);
-// 批次 B：视图切换动效 —— 按视图等级判定 推入(m-push)/退回(m-pop)/淡切(m-fade)，方案 4.2
+// 视图切换动效 —— 按视图等级判定 推入(m-push)/退回(m-pop)/淡切(m-fade)
 const viewRank:Record<string,number>={assistant:0,rooms:0,home:0,profile:0,sessions:1,conversation:1,settings:1,automation:1,messages:1,vision:1,task:2,evidence:2,room:2,job:3,notice:3};
 const transitionName=ref('m-fade');
 watch(()=>route.value,(next,previous)=>{if(!previous)return transitionName.value='m-fade';const from=viewRank[previous.view]??1,to=viewRank[next.view]??1;transitionName.value=to>from?'m-push':to<from?'m-pop':'m-fade';});
 const viewKey=computed(()=>[route.value.view,route.value.conversationId||'',route.value.roomId||'',route.value.taskId||'',route.value.jobId||'',route.value.noticeId||'',route.value.section||'',route.value.action||''].join('|'));
-// 批次 C：手势层 —— 边缘右滑返回 / 顶部下拉刷新（方案 4.3）
+// 手势层 —— 边缘右滑返回 / 顶部下拉刷新
 useSwipeBack(()=>content.value??null,()=>!['home','assistant','rooms','profile'].includes(route.value.view),()=>navigation.back());
 const ptr=usePullToRefresh(()=>content.value??null,()=>['home','rooms','messages'].includes(route.value.view),()=>route.value.view);
 function newChat(){if(run.inputLocked||controller.submitting.value)return;session.startDraft();navigation.go({view:'assistant'});}
@@ -51,7 +51,7 @@ async function workspace(){loading.value=true;try{await business.refresh();if(!b
 onMounted(async()=>{
   if(authed.value){
     await workspace();
-    // 用户口径（2026-11-07）：每次打开移动端都从新会话开始，不再停在上次那个会话里。
+    // 每次打开移动端都从新会话开始，不停在上次那个会话里。
     // 历史会话仍在侧栏（会话列表）里，随时能切回去。
     session.startDraft();
     if(route.value.view==='conversation')navigation.go({view:'assistant'},true);

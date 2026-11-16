@@ -1,16 +1,16 @@
 /**
- * 【批3 归档定位（2026-11-11）】本模块实现向量索引与向量路召回（RAG 批次 1）。
+ * 本模块实现向量索引与向量路召回。
  *  当前语料仅 3049 字——知识检索**默认走全量注入**（KNOWLEDGE_FULL_INJECT 缺省开），
- *  本模块处于**归档维护态**：测试与回退口径仍可用（KNOWLEDGE_FULL_INJECT=0 启用），
- *  语料增长到数万字前不要在生产启用检索路径（复杂度必须与数据规模匹配）。
+ *  本模块保留为可配置分支：KNOWLEDGE_FULL_INJECT=0 时参与检索链路；
+ *  语料增长到数万字前不在生产启用检索路径（复杂度必须与数据规模匹配）。
  */
 /**
- * 知识向量索引与向量路召回（RAG 批次 1）
+ * 知识向量索引与向量路召回
  * ============================================================================
  *  · 分块：段落即分块（与 BM25 路同粒度，locator §N 一一对应）；中文感知切分
- *    与重叠窗口属批次 2；
+ *    与重叠窗口由 knowledge-chunker 负责；
  *  · 存储：sqlite 表 knowledge_chunks_vec（Float32 原始字节 BLOB），**无向量库、
- *    无原生模块**——语料规模（数百~数千块）下 JS 余弦毫秒级，R1 零依赖 ✓；
+ *    无原生模块**——语料规模（数百~数千块）下 JS 余弦毫秒级，零依赖；
  *  · 索引幂等：chunkKey=docId#paraIndex upsert，语料变更后陈旧键清剪；
  *  · 召回：候选集由调用方按权限/生效日期过滤后传入（与 BM25/关键词路同一硬前置），
  *    维度不符的旧向量（改过 EMBEDDING_DIMENSIONS）自动跳过。
@@ -49,7 +49,7 @@ export interface IndexResult {
 }
 
 export interface IndexOptions {
-  /** 测试注入：覆盖 endpoint（进程内假上游）与向量化函数（确定性向量） */
+  /** 测试注入：覆盖 endpoint（进程内替身上游）与向量化函数（确定性向量） */
   endpoint?: Partial<EmbeddingEndpoint>;
   embed?: typeof embedTexts;
   /** 测试注入：:memory: 库；缺省用持久库 */
@@ -66,7 +66,7 @@ export async function indexKnowledge(docs: KnowledgeDocument[], opts: IndexOptio
   const db = opts.db ?? getDb();
   ensureKnowledgeVecTable(db);
   const ep = embeddingEndpoint(opts.endpoint);
-  // RAG 批次2：分块器接管——短段落 1 段 1 块（与批次 1 行为一致），长段落按
+  // 分块器：短段落 1 段 1 块，长段落按
   // 句边界开窗重叠；向量化文本带标题语境前缀。paraIndex 存**父段落号**，
   // chunkKey 保留子块号（docId#N / docId#N.k）。
   const entries = docs.flatMap((d) => docChunks(d, opts.chunk).map((c) => ({ key: c.key, docId: d.id, idx: c.paraIndex, text: c.embedText })));
@@ -142,7 +142,7 @@ export function vectorRecallByVec(queryVec: number[], eligible: KnowledgeDocumen
 }
 
 /**
- * RAG 批次2：主系统手册向量索引。键命名空间 `m:${id}@${version}#paraId(.k)`，
+ * 主系统手册向量索引。键命名空间 `m:${id}@${version}#paraId(.k)`，
  * **版本在键里**——重导入新版本自动新增键，同 id 旧版本键清剪（增量去重）。
  * 权限口径：只索引主系统按当前账号返回的手册（manualVisible 在主系统侧过滤）。
  */
@@ -181,7 +181,7 @@ export async function indexManuals(manuals: ManualDoc[], opts: IndexOptions = {}
 }
 
 /**
- * RAG 批次2：手册段落向量排序。**只对主系统本次返回的手册段落排序**——
+ * 手册段落向量排序。**只对主系统本次返回的手册段落排序**——
  * 手册集合的权威仍是主系统端点（权限在它那边过滤），向量路只决定段落先后。
  * 返回 `m:id@version#paraId` → 名次（1 起）。
  */

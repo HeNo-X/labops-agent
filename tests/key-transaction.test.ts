@@ -1,5 +1,5 @@
 /**
- * 批次4 批B（LabOps 侧）——钥匙借还走 workflow/plans 提案契约的透传与口径
+ * 钥匙借还走 workflow/plans 提案契约的透传与口径
  * 运行：node --test tests/key-transaction.test.ts
  */
 process.env.LABOPS_SKIP_ENV_FILE = '1';

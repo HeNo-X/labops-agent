@@ -1,11 +1,11 @@
 /**
- * 批次2 端到端验证：答案生成权回交（ANSWER_GENERATION=model 显式开启——默认 render，核对层实体校验就绪前不开）
+ * 端到端验证：答案生成权回交（ANSWER_GENERATION=model 显式开启——默认 render，核对层实体校验就绪前不开）
  * ============================================================================
- *  用假 agnes SSE 服务驱动真工具链（query_knowledge 离线可跑）：
+ *  用 stub agnes SSE 服务驱动真工具链（query_knowledge 离线可跑）：
  *    · T1 模型终稿忠实（无越界数字）→ 采纳模型话术，不用渲染模板；
  *    · T2 模型终稿出现越界数字（999/500）→ 核对层打回一次（禁工具重写）→ 采纳重写稿；
  *    · T3 重写仍越界 → 降级渲染稿并如实披露「模型整理稿未采用」（不得宣称实时、不得删披露）。
- *  假服务按「最后一条用户消息」选择场景脚本；按 body.tools 是否存在区分
+ *  stub 服务按「最后一条用户消息」选择场景脚本；按 body.tools 是否存在区分
  *  「首轮（带工具，第 1 次回 tool_calls、第 2 次回该场景的终稿文本）」与
  *  「核对重写轮（禁工具）」。
  *  ⚠️ stub 必须 unref()：否则 node --test 的进程永远等不到退出。
@@ -46,7 +46,7 @@ const SCRIPTS: Record<string, { final: string; retry: string }> = {
   faithful: { final: FAITHFUL, retry: CORRECTED },
   hallucinated: { final: HALLUCINATED, retry: CORRECTED },
   stillbad: { final: HALLUCINATED, retry: HALLUCINATED },
-  // 批次N：编造的**名称/代号**——数字核对挡不住（11-11 真实数据实测漏过 "T47"，只因证据里恰好没有 47 才碰巧被数字层拦住）。
+  // 编造的**名称/代号**——数字核对挡不住（"T47" 只因证据里恰好没有 47 才会被数字层拦住）。
   // 这里刻意用不含数字的人名，确保只有实体核对这一层能挡住它。
   entitybad: { final: '知识库未给出具体人名，排班由任课教师 章无名 负责。', retry: FAITHFUL },
   entitystillbad: { final: '知识库未给出具体人名，排班由任课教师 章无名 负责。', retry: '重写后仍写：任课教师 章无名 负责。' }
@@ -76,7 +76,7 @@ const stubPort = await new Promise<number>((r) => {
   const s = stub.listen(0, '127.0.0.1', () => r((s.address() as { port: number }).port));
 });
 stub.unref();
-// 假 agnes 服务接入模型链：AGNES 主模型 = stub（批次2 只改答案组装，链路语义不变）
+// AGNES 主模型指向 stub：只替换答案组装，链路语义不变
 process.env.AGNES_BASE_URL = `http://127.0.0.1:${stubPort}`;
 process.env.AGNES_API_KEY = 'stub-key';
 process.env.AGNES_MODEL = 'stub-model';
@@ -147,7 +147,7 @@ test('T6 实体核对不误伤正常表述（真实数据里漏过的那一句�
     keys: [{ id: 'key_lab_2', name: 'E312钥匙', location: '在E316钥匙柜' }],
     date: '2026-11-11', weekNo: 10, start: '14:00', end: '15:30'
   });
-  // 11-11 实测漏过的那句：教师被写成 T47
+  // 编造教师名的那句：教师被写成 T47
   assert.deepEqual(unsupportedReferences('今天下午第一大节（14:00–15:30），E312 排有《机器学习与模式识别》，任课教师 T47，班级为物联本2401，本周是第 10 教学周。', evidence), ['T47']);
   // 逐字来自依据的正常表述不得误伤
   assert.deepEqual(unsupportedReferences('今天下午第一大节（14:00–15:30），E312 排有《机器学习与模式识别》，任课教师王建，班级为物联本2401，本周是第 10 教学周（双周），钥匙 key_lab_2 在E316钥匙柜。', evidence), []);

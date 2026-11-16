@@ -20,7 +20,7 @@ import { ToolArgumentError } from './query-schedule.ts';
 /** 「本人签到状态」问法（business.ts 原生路由与 demo-engine 未连接兜底共用，避免两处口径漂移） */
 export const PERSONAL_CHECKIN_RE = /签到(?:了吗|状态|情况|没[有吗]?)|我的?签[到退]|签退了吗/;
 
-/** 把模型给的任意对象收敛成严格类型（F17）：显式非法必须报错，不静默放宽 */
+/** 把模型给的任意对象收敛成严格类型：显式非法必须报错，不静默放宽 */
 export function coerceCheckinStatusArgs(raw: Record<string, unknown>): CheckinStatusArgs {
   const out: CheckinStatusArgs = {};
   const date = raw['date'];

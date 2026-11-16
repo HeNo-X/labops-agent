@@ -9,7 +9,7 @@ interface Check {id:string;label:string;note?:string;correctable:boolean;resourc
 const business=useBusinessStore(),data=ref<{queriedAt:string;sourceRevision:string;checks:Check[];corrections:Array<{id:string;actorId:string;at:string;note:string;evidence:string;before:unknown;after:unknown}>;note:string}>(),selected=ref<Check>(),value=ref(''),note=ref(''),evidence=ref(''),plan=ref<NativePlan|null>(null),receipt=ref<NativeReceipt|null>(null),busy=ref(false),error=ref(''),edited=ref(false);
 const RESOURCE_KIND:Record<string,string>={room:'房间',class:'班级',course:'课程'};
 const FIELD_TEXT:Record<string,string>={capacity:'容量',size:'人数',equipment:'设备',requiredEquipment:'所需设备'};
-/** 数组摊成顿号串，别再给用户看方括号与引号；表外类型原样显示 */
+/** 数组摊成顿号串，不向用户暴露方括号与引号；表外类型原样显示 */
 function valText(v:unknown):string{if(Array.isArray(v))return v.length?v.map(x=>String(x)).join('、'):'无';if(v==null)return '无';if(typeof v==='object')return JSON.stringify(v);return String(v);}
 const payload=(b:Record<string,unknown>)=>({...b,scopeKey:props.scopeKey});
 async function work(fn:()=>Promise<void>){if(business.scopeKey!==props.scopeKey||!business.connected)return;busy.value=true;error.value='';try{await fn();}catch(e){error.value=(e as Error).message;}finally{busy.value=false;}}

@@ -1,16 +1,16 @@
 /**
- * 模型分流可见性 —— 回归防护（2026-10-06）
+ * 模型分流可见性 —— 回归防护
  * ============================================================================
  *  用户问：「当前在聊天模式下回复问题的是哪个模型？在工作模式下执行任务的又是谁？
  *          是否已按我的预期根据不同模式选择不同模型进行工作？」
  *
- *  实测发现两处"看不见"：
- *   ① 前端只在 engine==='agnes' 时硬编码 "Agnes 3.0 Flash"；
+ *  容易"看不见"的两处：
+ *   ① 前端若只在 engine==='agnes' 时硬编码 "Agnes 3.0 Flash"，
  *      聊天模式走 DashScope 时 engine==='dashscope' → 标签**为空**，用户完全看不到是谁在回答。
- *   ② run_started / run_completed 只带 engine（提供方），不带**实际生效的模型 id**，
- *      所以 fallback 换过模型也没人知道，更无从核对分流。
+ *   ② run_started / run_completed 若只带 engine（提供方），不带**实际生效的模型 id**，
+ *      那么 fallback 换过模型也没人知道，更无从核对分流。
  *
- *  修复：真实模型 id 一路带到 run_completed 并落库进消息 meta；
+ *  现在的口径：真实模型 id 一路带到 run_completed 并落库进消息 meta；
  *  /api/state 与 /api/agent/health 暴露分模式模型清单（只有模型 id，不含密钥）。
  *
  *  运行：node --test tests/model-routing.test.ts
@@ -27,7 +27,7 @@ import path from 'node:path';
 
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'labops-model-routing-'));
 process.env.LABOPS_DB_PATH = path.join(temp, 'agent.sqlite');
-// 置非空只是为了让引擎判定为"已配置大模型"（真正的 HTTP 由下面的钩子换成替身）
+// 置非空只是为了让引擎判定为"已配置大模型"（真正的 HTTP 由下面的钩子替换为替身）
 process.env.AGNES_API_KEY = 'stub-not-a-real-key';
 process.env.LABOPS_RUNS_PER_MINUTE = '1000';
 process.env.LABOPS_RUNS_PER_DAY = '10000';
@@ -82,7 +82,7 @@ test('分模式模型清单可被运维核对（只有模型 id，不含密钥�
 });
 
 test('受众口径错误到达用户时是可执行的：带 bad_audience + 工具名 + "发给谁"的建议', async () => {
-  // 剧本：模型照沙盒词表写受众，且角色说法无法映射（模拟"值班同学"这类自然语言）
+  // 剧本：模型照沙盒词表写受众，且角色说法无法映射（覆盖"值班同学"这类自然语言）
   resetScript([
     { kind: 'tool', name: 'prepare_business_workflow', args: { kind: 'notification.publish', title: '值班提醒', content: '值班同学到5楼来', audience: { kind: 'role_scope', role: '值班同学' } } },
     { kind: 'text', text: '（收尾发言，应被丢弃）' }

@@ -2,23 +2,13 @@
  * 只读工具：query_term_schedule（学期安排 / 志愿者周值班模板）
  * ============================================================================
  *  数据源：主系统 GET /api/integration/term-schedule（contractVersion=3，三角色可读）。
- *  本文件**自包含**，不修改 shared/types.ts / registry.ts / tool-display.ts / turn-view.ts
- *  （这些文件是并行会话的在制品，按工作区纪律不触碰）。
- *
- *  接线方式（待并行会话的 registry.ts 定稿后追加 3 行，勿用 add -A）：
- *    import { QUERY_TERM_SCHEDULE_SPEC, runQueryTermSchedule } from './query-term-schedule.ts';
- *    // REGISTRY 数组末尾：
- *    { spec: QUERY_TERM_SCHEDULE_SPEC, execute: runQueryTermSchedule, effect: 'read' },
- *    // web/lib/tool-display.ts 的 family 表： query_term_schedule: 'query'
- *    // web/lib/turn-view.ts 的 TOOL_TITLES： query_term_schedule: '查询学期安排'
- *    // 学生只读白名单 studentReads（registry.ts:699）加入 'query_term_schedule'
  *
  *  红线（写进 description，模型每次都会读到）：
  *    · 未导入时 enabled=false / notImported=true 是「尚未接入」，绝不可表述为
  *      「今天没课 / 本节没人值班」；
  *    · 独立档案，不参与课表实时解算，不得据此断言签到可行性；
  *    · 不含学号与手机号；停开课保留原始依据；地点错位等冲突由管理员裁决，Agent 不得自行更正；
- *    · 上游不可用如实报错，不回退旧快照冒充当前。
+ *    · 上游不可用如实报错，不得用旧快照代替当前数据。
  */
 
 import { businessRequest } from '../business/bridge.ts';
@@ -119,8 +109,8 @@ function objArray(v: unknown): Array<Record<string, unknown>> {
 }
 
 /**
- * 名单兼容两种真实形态：线上导入的是**姓名字符串数组**（31 人），旧夹具是对象数组。
- * 只按对象取 name 会把线上名单整体丢成空表 → 用户读到"0 名志愿者"（2026-11-10 彩排实测到）。
+ * 名单兼容两种形态：**姓名字符串数组**（31 人）与对象数组。
+ * 只按对象取 name 会把字符串名单整体丢成空表 → 用户读到"0 名志愿者"。
  */
 export function normalizePersons(v: unknown): Array<{ name: string; className: string; group: string }> {
   if (!Array.isArray(v)) return [];

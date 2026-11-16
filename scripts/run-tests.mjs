@@ -7,8 +7,8 @@
  *  表现为偶发 truncated_response / 超时，并消耗真实额度。
  *
  *  做法：在**进程环境层面**摘掉三把模型 Key，而不是在 config 里加"测试闸门"——
- *  闸门会连测试自己设的替身 Key 一起清空（实测打断 reliability 两个用例），
- *  而摘环境只影响"从系统继承来的真 Key"，测试代码里显式设的假 Key 照常生效。
+ *  闸门会连测试自己设的替身 Key 一起清空（会打断 reliability 用例），
+ *  而摘环境只影响"从系统继承来的真 Key"，测试代码里显式设置的替身 Key 照常生效。
  *
  *  真模型评测不走这里，走 scripts/evaluate-model.ts 与 evaluate-release.mjs。
  */

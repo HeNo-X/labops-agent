@@ -1,10 +1,10 @@
 /**
  * 确定性兜底探针（自包含）—— 供 tests/llm-quota.test.ts 在独立子进程里调用
  * ============================================================================
- *  场景：模型链整体配额耗尽（假上游恒 403 AllocationQuota.FreeTierOnly），
+ *  场景：模型链整体配额耗尽（上游替身恒 403 AllocationQuota.FreeTierOnly），
  *  用户在聊天模式问"310当前有人吗"。预期：**run_completed**（不是 run_failed）
  *  —— runAgent 降级到确定性规则引擎，用真实授权数据照答并如实标注未用大模型。
- *  假上游由本进程自己起（execFileSync 会冻结父进程事件循环，见 A6 教训）。
+ *  上游替身由本进程自己起（execFileSync 会冻结父进程事件循环）。
  */
 export {}; // 让本文件成为模块：顶层 await 只在模块里合法
 
@@ -20,7 +20,7 @@ const server = http.createServer((req, res) => {
 await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
 const port = (server.address() as { port: number }).port;
 
-// 两条链都指向假 403 上游：聊天（DashScope）与任务（Agnes）任一模式都必须能兜底
+// 两条链都指向恒 403 的上游替身：聊天（DashScope）与任务（Agnes）任一模式都必须能兜底
 process.env['DASHSCOPE_API_KEY'] = 'test-key-not-real';
 process.env['DASHSCOPE_BASE_URL'] = `http://127.0.0.1:${port}/v1`;
 process.env['DASHSCOPE_MODELS'] = 'quota-test-model';

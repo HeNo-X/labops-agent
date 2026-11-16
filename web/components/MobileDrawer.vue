@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
- * 会话抽屉（会话页左侧滑入，参考 LibreChat/NextChat 移动端范式）—— H3 行内操作版
+ * 会话抽屉（会话页左侧滑入，参考 LibreChat/NextChat 移动端范式）
  * ============================================================================
  *  · 内容：新会话主钮 → 搜索 → 工作/聊天分段过滤 → 会话行（SwipeRow：置顶/改名/删除）
- *  · "管理全部会话"按钮已移除：全部会话操作直接在抽屉行内完成（用户指令 2026-10-31）
+ *  · 全部会话操作直接在抽屉行内完成
  *  · 删除走确认弹层（destructive）；改名为行内编辑（输入 + 保存/取消）
  *  · 关闭：遮罩点击 / Esc（组件自听）；选中会话即关闭并导航
  */
@@ -143,7 +143,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
               <UiIcon name="more" :size="16"/>
             </button>
           </div>
-          <!-- 可见操作菜单（U-发现性）：不必依赖滑动即可 删改/置顶 -->
+          <!-- 可见操作菜单：不必依赖滑动即可 删改/置顶 -->
           <div v-if="menuId === c.id" class="m-drawer__menu" role="menu">
             <button type="button" role="menuitem" @click="pins.toggle(c.id); menuId = null">
               <UiIcon name="star" :size="14"/>{{ tr(pins.ids.value.includes(c.id) ? '取消置顶' : '置顶会话') }}

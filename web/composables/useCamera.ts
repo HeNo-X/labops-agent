@@ -147,7 +147,7 @@ export function useCamera() {
     }
   }
 
-  /** 前/后置切换：必须停掉旧轨再重开，否则部分安卓机报 NotReadableError */
+  /** 前/后置切换：必须先停掉当前轨道再重开，否则部分安卓机报 NotReadableError */
   async function flip(): Promise<void> {
     if (!active.value) return;
     const next: Facing = facing.value === 'user' ? 'environment' : 'user';

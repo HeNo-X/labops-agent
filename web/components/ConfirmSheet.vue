@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
- * 确认弹层宿主 —— Promise 化替代 window.confirm（H1 品牌化重写）
+ * 确认弹层宿主 —— Promise 化替代 window.confirm
  * ============================================================================
  *  ⚠️ 本组件 Teleport 到 body，**脱离 .mobile-shell 作用域**：
  *     shell 内的按钮/字体样式全部够不到 —— 样式必须在这里自持（ scoped 对
- *     Teleport 节点同样生效）。此前"素面白块红按钮"正是漏了这一点。
- *  视觉对齐批次 A 分层表面：20px 顶部圆角 + grabber + 分层阴影 + sans 字体；
- *  破坏性操作带警示图标与红色实心主按钮；拖拽关闭 = 取消（批次 C）。
+ *     Teleport 节点同样生效），否则按钮/字体会退回浏览器默认样式。
+ *  视觉：20px 顶部圆角 + grabber + 分层阴影 + sans 字体；
+ *  破坏性操作带警示图标与红色实心主按钮；拖拽关闭 = 取消。
  */
 import { t as tr } from '../i18n';
 import { useFeedback } from '../mobile/feedback';

@@ -16,14 +16,14 @@ const pins=useCollection('conversations',owner);
 useModal(accountOpen,'.sidebar-account-menu');
 const folded=ref({work:false,chat:false});try{const saved=JSON.parse(localStorage.getItem('labops.nav.folded')||'{}');folded.value={work:saved.work===true,chat:saved.chat===true};}catch{}
 function fold(key:'work'|'chat'){folded.value[key]=!folded.value[key];try{localStorage.setItem('labops.nav.folded',JSON.stringify(folded.value));}catch{}}
-// PC-1 待办区块：tasks 里 awaiting_confirmation = 等你确认；其余未完结（failed 含义见标签）= 今天要做
+// 待办区块：tasks 里 awaiting_confirmation = 等你确认；其余未完结（failed 含义见标签）= 今天要做
 const todosWaiting=computed(()=>props.tasks.filter(t=>t.status==='awaiting_confirmation'));
 const todosToday=computed(()=>props.tasks.filter(t=>t.status!=='awaiting_confirmation'&&t.status!=='completed'&&t.status!=='cancelled'&&t.status!=='expired'));
 const groups=computed(()=>[{key:'work' as const,label:'工作会话',mode:'task' as const,list:session.workConversations},{key:'chat' as const,label:'聊天会话',mode:'chat' as const,list:session.chatConversations}].map(group=>({...group,list:group.list.filter(c=>!query.value||[c.title,c.preview||''].join(' ').toLowerCase().includes(query.value.toLowerCase())).slice().sort((a,b)=>Number(pins.ids.value.includes(b.id))-Number(pins.ids.value.includes(a.id)))})));
 const name=computed(()=>business.profile?.username||'演示账户'),role=computed(()=>({admin:'管理员',volunteer:'志愿者',student:'学生'}[business.profile?.identity||props.actor]));
 async function focusSearch(){if(layout.collapsed.value)layout.toggle();await nextTick();search.value?.focus();}
-// T7：Ctrl/Cmd+K 的唯一监听者是命令面板；这里只响应"聚焦会话搜索"请求，
-// 功能不减、路径只有一条，绝不会出现两个组件抢同一个快捷键。
+// Ctrl/Cmd+K 的唯一监听者是命令面板；这里只响应"聚焦会话搜索"请求，
+// 路径只有一条，不会出现两个组件抢同一个快捷键。
 const searchRequest=sidebarSearchRequest();
 watch(searchRequest,()=>{void focusSearch();});
 function shortcut(event:KeyboardEvent){if(event.key==='Escape'){accountOpen.value=false;more.value='';emit('close');}}
@@ -33,7 +33,7 @@ onMounted(()=>window.addEventListener('keydown',shortcut));onUnmounted(()=>windo
 <aside class="agent-sidebar" :class="{'is-collapsed':layout.collapsed.value,'is-open':open,'is-resizing':layout.resizing.value}" :style="{'--sidebar-size':layout.effectiveWidth.value+'px'}" :aria-label="tr('会话导航')">
  <header class="sidebar-brand"><UiIcon name="lab"/><b>LabOps</b><button :aria-label="layout.collapsed.value?'展开侧边栏':'收起侧边栏'" :title="layout.collapsed.value?'展开侧边栏':'收起侧边栏'" @click="layout.toggle"><UiIcon name="panel"/></button></header>
  <div class="sidebar-shortcuts"><button class="sidebar-new" :disabled="run.inputLocked" @click="emit('new')" :aria-label="tr('新建会话')" :title="tr('新建会话')"><UiIcon name="new"/><span>{{tr("新会话")}}</span></button><button class="sidebar-search-icon" :aria-label="tr('搜索会话')" :title="tr('搜索会话')" @click="focusSearch"><UiIcon name="search"/><span>{{tr("搜索会话")}}</span></button><label class="sidebar-search"><UiIcon name="search"/><input ref="search" v-model="query" type="search" :placeholder="tr('搜索会话')" :aria-label="tr('搜索会话')"></label><ScheduledJobsPanel :navigation="true" :icon-only="layout.collapsed.value" :readonly="!taskMode"/></div>
- <!-- PC-1 待办中心：聚合"等你确认/今天要做"；空态整体隐藏（桌面空间宝贵） -->
+ <!-- 待办中心：聚合"等你确认/今天要做"；空态整体隐藏（桌面空间宝贵） -->
  <nav v-if="todosWaiting.length||todosToday.length" class="sidebar-todos" :aria-label="tr('待办')">
   <div class="sidebar-todos__sum" v-if="!layout.collapsed.value">{{tr("待办")}} · {{tr("今天")}} {{todosWaiting.length+todosToday.length}}<template v-if="todosWaiting.length"> · {{tr("等你确认")}} {{todosWaiting.length}}</template></div>
   <button v-for="t in todosWaiting" :key="t.taskId" class="sidebar-todo is-urgent" @click="emit('task',t.conversationId)" :title="tr('等你确认')+'：'+t.goal">
@@ -44,7 +44,7 @@ onMounted(()=>window.addEventListener('keydown',shortcut));onUnmounted(()=>windo
   </button>
  </nav>
  <nav class="sidebar-tools" :aria-label="tr('常用业务')"><button class="sidebar-link" @click="emit('rooms')" :aria-label="tr('实验室')" :title="tr('实验室')"><UiIcon name="room"/><span>{{tr("实验室")}}</span></button><VisionPanel :navigation="true" :icon-only="layout.collapsed.value"/></nav>
- <!-- 业务面板改为静默挂载：入口已迁入设置→工作，这里只保留全局事件监听与弹层 -->
+ <!-- 业务面板静默挂载：入口在设置→工作，这里只保留全局事件监听与弹层 -->
  <NativeWorkPanel :readonly="!taskMode" panel-only/><EvidencePanel :readonly="!taskMode" panel-only/>
  <div class="sidebar-history"><p v-if="session.listError" class="sidebar-error" role="alert">{{session.listError}}</p><p class="sidebar-history-title">{{tr('会话列表')}}</p><section v-for="group in groups" :key="group.key" class="sidebar-group"><h2><button :aria-expanded="!folded[group.key]||!!query" @click="fold(group.key)"><UiIcon name="chevron" :size="12" :class="{'is-turned':!folded[group.key]}"/>{{tr(group.label)}}</button><span>{{group.list.length}}</span><button :aria-label="tr('新建'+group.label)" :disabled="run.inputLocked" @click="emit('new',group.mode)"><UiIcon name="new" :size="14"/></button></h2><ul v-if="!folded[group.key]||query" :id="'nav-'+group.key+'-list'"><li v-for="c in group.list" :key="c.id" :class="{'is-active':c.id===session.currentId}"><button class="sidebar-conversation" :title="c.title+'（'+c.messageCount+' 条消息）'" @click="emit('select',c.id)"><UiIcon v-if="pins.ids.value.includes(c.id)" name="star" :size="12"/><span v-if="c.source==='automation'" class="sidebar-auto-chip" :title="tr('主系统定时任务到点触发，无人工干预')">{{tr('定时')}}</span><span>{{c.title}}</span></button><button class="sidebar-more" :aria-label="tr('管理会话')+': '+c.title" @click="more=more===c.id?'':c.id"><UiIcon name="more" :size="16"/></button><div v-if="more===c.id" class="sidebar-row-menu"><button @click="pins.toggle(c.id);more=''">{{tr(pins.ids.value.includes(c.id)?'取消置顶':'置顶会话')}}</button><button @click="emit('rename',c.id,c.title);more=''">{{tr("重命名")}}</button><button @click="emit('remove',c.id,c.title);more=''">{{tr("删除")}}</button></div></li><li v-if="!group.list.length" class="sidebar-empty">{{tr(query?'无匹配会话':'暂无会话')}}</li></ul></section><section v-if="authMode==='demo'&&tasks.length" class="sidebar-group"><h2>{{tr("我的任务")}}</h2><ul><li v-for="task in tasks.slice(0,12)" :key="task.taskId"><button class="sidebar-conversation" @click="emit('task',task.conversationId)" :title="TASK_STATUS_LABELS[task.status]+' · '+task.goal"><span>{{task.goal}}</span></button></li></ul></section></div>
  <footer class="sidebar-footer"><button class="sidebar-account" :aria-label="tr('账户与设置')" :title="name+' · '+role" @click="accountOpen=!accountOpen"><span class="sidebar-avatar">{{name.slice(0,1).toUpperCase()}}</span><span class="sidebar-account-name"><b>{{name}}</b><small>{{tr(role)}}</small></span><UiIcon name="more"/></button></footer>

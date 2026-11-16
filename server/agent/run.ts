@@ -6,14 +6,14 @@ import {renderBusinessFacts} from '../business/fact-text.ts';
 import { planNativeDialogue, verifiedRecommendation } from '../tools/business.ts';
 import type { BusinessResult } from '../../shared/business.ts';
 /**
- * Agent 编排 —— 有界自主循环（C5）
+ * Agent 编排 —— 有界自主循环
  * ============================================================================
- *  停止条件（四个都要有，缺一个就是事故）：
+ *  停止条件（四个都要有，缺一个就失去收敛保障）：
  *    ① max_steps   —— 最多 AGENT_MAX_STEPS 步（默认 6），到点强制收敛
  *    ② 墙钟上限     —— AGENT_WALL_CLOCK_MS（默认 60s），超时立即收敛
  *    ③ 无工具调用   —— 模型不再要求调工具 ⇒ 已可作答，正常结束
  *    ④ 重复调用检测 —— 同一 (工具名+参数) 连续出现 2 次 ⇒ 打断，用已有结果作答
- *  人工接管点：第一阶段没有写操作，因此不需要阻塞式确认；预留事件在 shared/types.ts。
+ *  人工接管点：当前只有只读查询，不需要阻塞式确认；预留事件在 shared/types.ts。
  *
  *  两个引擎（agnes / demo）产出**完全同构**的事件流，前端不需要区分。
  */
@@ -64,12 +64,12 @@ export interface RunInput {
   sessionId?: string;
   /** 会话类型（服务端权威存储）：task=任务工作台（默认）；chat=只读对话，不能调用准备或办理工具 */
   mode?: 'chat' | 'task';
-  /** ops.v1：服务端解析的沙盒演示身份（写操作准备必需；不传则 prepare 工具报 no_actor） */
+  /** ops.v1：服务端解析的沙盒身份（写操作准备必需；不传则 prepare 工具报 no_actor） */
   actor?: SandboxActor;
   /**
-   * 工具白名单（2026-10-31 定时任务"到点让 Agent 跑"用）。
+   * 工具白名单（定时任务"到点让 Agent 跑"用）。
    * 传了就**只能**用这些工具：提示词里只列这些，运行时也硬拦（见 executeTool）。
-   * 不传 = 沿用 mode 的原规则，行为与改造前完全一致。
+   * 不传 = 沿用 mode 的原规则。
    */
   allowedTools?: string[];
   /** 客户端断开时置位：模型请求与流式输出随即停止，不再产生新事件 */
@@ -78,11 +78,11 @@ export interface RunInput {
   autonomous?: boolean;
   /** 多模型重答：本轮从工作链第 N 个模型开始（0=agnes 主模型） */
   providerShift?: number;
-  /** N07：本轮结束时回传最终可信上下文（会话 API 落库用） */
+  /** 本轮结束时回传最终可信上下文（会话 API 落库用） */
   onContext?: (ctx: { labName: string | null; date: string | null; task: string | null }) => void;
 }
 
-/** 本轮问题指向的任务类型已并入 routeTurn.taskHint（整合方案 §4 单一裁决点） */
+/** 本轮问题指向的任务类型已并入 routeTurn.taskHint（单一裁决点） */
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -99,7 +99,7 @@ export async function* runAgent(input: RunInput): AsyncGenerator<RunEvent> {
   for await (const event of runAgentCore({...input, runId:lastRunId, signal})) {
     lastSeq = event.seq; lastRunId = event.runId;
     if (timeout.aborted && !originalSignal?.aborted) break;
-    // 第二片：中止判断只看身份要素，不看 owner 级 generation —— 别的会话重连不再误杀本轮
+    // 中止判断只看身份要素，不看 owner 级 generation —— 别的会话重连不再误杀本轮
     if(event.type==='run_started')runScope=businessIdentityKey(input.actor?.id);
     if(runScope&&businessIdentityKey(input.actor?.id)!==runScope){
       yield {seq:lastSeq,v:1,runId:lastRunId,type:'run_failed',ts:nowIso(),payload:{code:'scope_changed',message:'本轮期间业务账号或授权范围已变化，请在当前身份下重新查询。'}};
@@ -134,7 +134,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
 
   const persistedContext=input.sessionId?.startsWith('conv-')?loadContext(input.sessionId):null;
   const remembered=input.sessionId?getSession(`${input.actor?.id||'anonymous'}:${businessIdentityKey(input.actor?.id)}:${input.sessionId}`):null;
-  // 单一裁决点（整合方案 §4）：五处"这一问怎么答"的判断收敛到 routeTurn，此处只算一次，下游各站点读字段。
+  // 单一裁决点：五处"这一问怎么答"的判断收敛到 routeTurn，此处只算一次，下游各站点读字段。
   const route=routeTurn({question,hasContext:Boolean(persistedContext?.labName||persistedContext?.task||remembered?.labName||remembered?.lastTask),engineDemo:engineForMode(input.mode==='chat'?'chat':'task')==='demo'});
   if(route.kind==='scope'){
     log.info('route_turn',{runId,kind:route.kind,reason:route.reason});
@@ -167,20 +167,20 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
   const intent: Intent = parseIntent(question, now);
   const contextHints = contextHintsEnabled();
 
-  // ---- 会话承接（阶段 2A）：缺房间/日期时显式沿用上一问，且必须留痕 ----
-  // F13 继承纪律：
+  // ---- 会话承接：缺房间/日期时显式沿用上一问，且必须留痕 ----
+  // 继承纪律：
   //   · 找空闲房间/寒暄/能力外问题不继承房间号（范围语义不同或无必要）；
   //   · 非法日期绝不继承，也绝不静默回落（dateInvalid 分支直接显式报错）；
   //   · 只有真实存在的房间才允许写入会话记忆（E999 这类错误实体不能升级为上下文）。
   const roomlessIntent = route.roomless;
   const sessionKey=input.sessionId?`${input.actor?.id||'anonymous'}:${businessIdentityKey(input.actor?.id)}:${input.sessionId}`:undefined;
   let sess = getSession(sessionKey);
-  // N07：进程重启后内存表为空 → 从会话库的 ContextSnapshot 回退加载
+  // 进程重启后内存表为空 → 从会话库的 ContextSnapshot 回退加载
   if (!sess && input.sessionId?.startsWith('conv-')) {
     const snap = loadContext(input.sessionId);
     if (snap) sess = { labName: snap.labName, date: snap.date, periodKey: null, lastTask: snap.task, question: '', updatedAt: Date.now() };
   }
-  // N08：追问默认继承上一问的**任务类型**（"那 E312 呢"保持状态查询，不跳回课表）
+  // 追问默认继承上一问的**任务类型**（"那 E312 呢"保持状态查询，不跳回课表）
   if (sess?.labName || sess?.date) intent.lastTask = sess.lastTask ?? intent.lastTask;
   // 口语追问常省略房间号前缀（「那 312 呢」）。resolveLabName 只能给出裸数字，
   // 这里按已授权房间做**唯一匹配**补全（312 → E312）；有歧义就不动，宁缺勿错。
@@ -193,9 +193,9 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
     }
   }
   // 按班级问课表时**绝不继承房间号**：否则「查智能本2501班的课」会被做成
-  // 「查 E310 的课」，答出来的是别的班的课（2026-11-08 线上就是这个错法）。
-  // 方案B：hints 模式下 carried 只进 intent.hints（线索），沿用与否由模型判断；
-  // legacy（CONTEXT_HINTS=0）保持旧的直接写槽位行为。逻辑本体在 intent.ts 便于单测。
+  // 「查 E310 的课」，答出来的是别的班的课。
+  // hints 模式下 carried 只进 intent.hints（线索），沿用与否由模型判断；
+  // legacy（CONTEXT_HINTS=0）则直接写入槽位。逻辑本体在 intent.ts 便于单测。
   applySessionCarry(intent, sess, { roomlessIntent, hintsMode: contextHints });
   const commitContext = () => {
     const knownRooms = new Set(availableRoomNames(ds).map((n) => normalizeLabName(n)));
@@ -212,7 +212,7 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
 
   const week = describeWeek(intent.date?.date ?? now.date, ds.term);
   // 会话类型：chat=聊天（可查询真实数据，不能办理业务）；task=任务（可生成办理单）
-  // 用户口径：聊天模式只是不能"执行操作"，数据读取与回答照常 —— 查询类工具全部保留
+  // 聊天模式只是不能"执行操作"，数据读取与回答照常 —— 查询类工具全部保留
   const convMode: 'chat' | 'task' = input.mode === 'chat' ? 'chat' : 'task';
   const modeTools = toolsForMode(convMode, input.allowedTools);
   const toolListText =
@@ -282,8 +282,8 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
       yield emit('run_completed', { answer: route.signRefusal, steps: 0, toolCalls: 0, ms: watch.ms, sourceType, engine: 'facts', strategy: 'scope_guidance' } satisfies RunCompletedPayload);
       return;
     }
-    // 确定性链编排（批次D）：契约固定的多步办理链交给服务端按已验证接口顺序驱动。
-    // 依据是实测——spark 单轮 15~30 s 里读 29 份工具清单只占 0.5 s，大头是每轮重新生成
+    // 确定性链编排：契约固定的多步办理链交给服务端按已验证接口顺序驱动。
+    // 依据：spark 单轮 15~30 s 里读 29 份工具清单只占 0.5 s，大头是每轮重新生成
     // "思考+工具名+参数"；把三步机械往返省掉，才是不动墙钟/步数安全值的前提下真正的提速。
     // 边界：前置参数不齐时 runChain 一步都不执行并交回模型；一旦执行过就不交回，只如实汇报。
     const chainKind = isBusinessConnected() && convMode === 'task' ? detectChain({ question, mode: convMode }) : null;
@@ -307,15 +307,15 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
       log.info('chain_orchestration', { runId, kind: chainKind, steps: 0, handback: chain.stoppedReason });
     }
     /**
-     * 只读预取（批次L→M）：两半各查一张表的只读问句（签到+值班 / 开放实验室状态+进出 / 钥匙+课表），
+     * 只读预取：两半各查一张表的只读问句（签到+值班 / 开放实验室状态+进出 / 钥匙+课表），
      * 由服务端按用户原话一次把两份查询执行完，再交给引擎去写正文。
      *
-     * 为什么在分派引擎之前：省掉的只是**机械的工具选择轮**（彩排实测这类问句要 21~63 s、2~3 轮），
+     * 为什么在分派引擎之前：省掉的只是**机械的工具选择轮**，
      * 正文归属不变——有模型时由模型写一轮；只有模型链整体不可用（未配 Key/离线）才由规则引擎
-     * 渲染两份依据并如实标注未用大模型。11-11 用户实机反馈明确：直接吐渲染结果＝系统在回答。
+     * 渲染两份依据并如实标注未用大模型。直接吐渲染结果会让界面看起来是"系统在回答"。
      *
      * 保守边界：参数不齐或任一步失败一律不预取（半份依据只会让模型拿缺的那半去编）；
-     * 有写意图（借/还/登记/调课/停用/方案）的话术让位给批次D-F 的办理链。
+     * 有写意图（借/还/登记/调课/停用/方案）的话术让位给写操作办理链。
      */
     const readKind = isBusinessConnected() ? detectReadComposition({ question, mode: convMode, intent }) : null;
     let prefetched: ReadStep[] | undefined;
@@ -345,9 +345,9 @@ async function* runAgentCore(input: RunInput): AsyncGenerator<RunEvent> {
     if (engine === 'demo'||(convMode==='chat'&&isBusinessConnected()&&planNativeDialogue(question,{dataset:ds,now,actor:input.actor,conversationId:input.sessionId,mode:convMode}))) {
       yield* runDemoEngine({ question, intent, ds, now, emit, log, runId, watch, sourceType, signal: input.signal, actor: input.actor, conversationId: input.sessionId ?? null, mode: convMode, allowedTools: input.allowedTools, autonomous: input.autonomous, prefetched });
     } else {
-      // A10：模型链整体不可用（账号配额耗尽/未配置）且**尚未产生任何可展示内容**
+      // 模型链整体不可用（账号配额耗尽/未配置）且**尚未产生任何可展示内容**
       // 时，降级到确定性规则引擎——能查的照答（真实授权数据），并如实标注未用大模型。
-      // 已输出过内容（中途失败）或用户取消则原样抛出，不重复作答、不造假。
+      // 已输出过内容（中途失败）或用户取消则原样抛出，不重复作答。
       let sawContent = false;
       const chainLen = Math.min(modelPlan()[convMode].length, 3);
       const runAgnesAttempt = async function* (shift: number): AsyncGenerator<RunEvent> {
@@ -418,7 +418,7 @@ function Stopwatch0(): Stopwatch {
 }
 
 // ===========================================================================
-//  演示引擎（无 AGNES_API_KEY）
+//  确定性规则引擎（未配置模型 Key 时）
 // ===========================================================================
 
 /** 多模型重答的判定（纯函数，便于单测）：模型级失败 + 零工具执行 + 零已流出内容才允许换模型重答 */
@@ -427,15 +427,15 @@ export function shouldShiftModel(code: string | undefined, sawTool: boolean, saw
   return code !== undefined && MODEL_SHIFT_CODES.has(code) && !sawTool && !sawDelta;
 }
 
-/** 批次2 核对层：模型终稿里的数字 token，凡在本轮证据（工具结果+原话）中找不到的即「越界数字」 */
+/** 核对层：模型终稿里的数字 token，凡在本轮证据（工具结果+原话）中找不到的即「越界数字」 */
 export function unsupportedNumbers(text: string, evidence: string): string[] {
   const tokens = [...new Set(text.match(/\d+(?:\.\d+)?/g) ?? [])];
   return tokens.filter((nn) => !evidence.includes(nn));
 }
 
 /**
- * 实体核对（批次N）：数字核对只挡数字，编造的**代号/名称**照样溜到屏幕上——
- * 11-11 真实数据实测到证据里教师是「王建」，模型终稿写「任课教师 T47」。
+ * 实体核对：数字核对只挡数字，编造的**代号/名称**仍会出现在终稿——
+ * 例如证据里教师是「王建」，模型终稿写「任课教师 T47」。
  * 只核对有明确标记的形态（房间/钥匙代号、《课程名》、「教师/班级/编号：X」的紧邻词），
  * 不做中文分词，免得把正常句子误判成编造。
  */
@@ -466,7 +466,7 @@ export function unsupportedReferences(text: string, evidence: string, known?: Se
   }
   // 课程名裸写（无书名号、无「课程：」前缀）：默认口径改 model 后，模型转述事实时最容易
   // 在这里编造。判断依据是**结构化事实里的真实取值集合**（known，由 collectStrings 收集）。
-  // 两个收敛条件缺一不可（2026-11-14 生产事故后加）：
+  // 两个收敛条件缺一不可：
   //   ① 只在**证据里确实有课程数据**时才启用 —— 否则「需要管理员在主系统改」这种正常答复里
   //      的「…系统」「…技术」会被当成编造课程名，导致正确答案被打回、退化成确定性渲染；
   //   ② 后缀只保留**日常叙述里罕见**的词 —— 系统/技术/设计/分析/基础/工程/网络/结构/
@@ -497,23 +497,23 @@ interface DemoArgs {
   watch: Stopwatch;
   sourceType: DataSourceType;
   signal?: AbortSignal;
-  /** ops.v1：服务端注入的沙盒演示身份与会话（prepare 工具必需） */
+  /** ops.v1：服务端注入的沙盒身份与会话（prepare 工具必需） */
   actor?: SandboxActor;
   conversationId?: string | null;
-  /** 会话类型：chat=纯聊天（无工具，演示引擎下诚实说明能力边界） */
+  /** 会话类型：chat=纯聊天（无写工具，规则引擎下如实说明能力边界） */
   mode?: 'chat' | 'task';
   /** 工具白名单（定时任务服务端调用用）：传了就只用这些工具 */
   allowedTools?: string[];
   /** 定时任务自主执行（高危）：draft 工具准备完的方案直接提交原系统 */
   autonomous?: boolean;
-  /** 只读预取（批次L→M）：服务端已按用户原话执行完的两份查询，正文仍归引擎写 */
+  /** 只读预取：服务端已按用户原话执行完的两份查询，正文仍归引擎写 */
   prefetched?: ReadStep[];
   /** 多模型重答：本轮从工作链第 N 个模型开始 */
   providerShift?: number;
 }
 
 async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
-  // 方案B：确定性引擎没有模型做指代消解——把 carried 线索落回槽位（行为与旧继承一致）
+  // 确定性引擎没有模型做指代消解——把 carried 线索落回槽位（与 legacy 行为一致）
   applyHintsToSlots(a.intent);
   const nativePlan=isBusinessConnected()?planNativeDialogue(a.question,{dataset:a.ds,now:a.now,actor:a.actor,conversationId:a.conversationId,mode:a.mode,signal:a.signal}):null;
   if(nativePlan){
@@ -527,9 +527,9 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
   const plan = planDemo(a.question, a.intent, a.ds);
   a.log.info('demo_plan', { callTool: plan.callTool, args: plan.args, disclosures: plan.needsDisclosure, mode: a.mode });
 
-  // 用户口径（2A.4 复核）：聊天模式可以查真实数据，只是不能办理业务。
-  // 演示引擎在聊天模式下照常路由查询工具；仅当问题指向业务办理（prepare_*/报告单）时
-  // 诚实告知需切换任务模式。
+  // 聊天模式可以查真实数据，只是不能办理业务。
+  // 规则引擎在聊天模式下照常路由查询工具；仅当问题指向业务办理（prepare_*/报告单）时
+  // 如实告知需切换任务模式。
   if (plan.callTool && !toolsForMode(a.mode ?? 'task', a.allowedTools).some(t => t.name === plan.tool)) {
     const OPS_NAMES: Record<string, string> = {
       prepare_issue_ticket: '报修工单',
@@ -641,7 +641,7 @@ async function* runDemoEngine(a: DemoArgs): AsyncGenerator<RunEvent> {
   } satisfies RunCompletedPayload);
 }
 
-/** 演示引擎的披露话术 —— 必须让用户一眼看出"这段文字不是大模型生成的" */
+/** 规则引擎兜底时的披露话术：明确标注本条未调用大模型 */
 function renderDisclosure(extra: string[], short: boolean,live=false): string {
   const base = live?'\n\n（确定性事实引擎：本条回答由服务端规则生成，未调用大模型。）':short
     ? '\n\n（演示引擎：本条回答由服务端规则生成，未调用大模型。）'
@@ -681,8 +681,8 @@ interface AgnesArgs extends Omit<DemoArgs, 'sourceType'> {
 
 /**
  * 给模型看的工具结果：剔除纯政策/免责类文案（meta.note）。
- * 这些句子是给审计和界面用的，喂给模型只会让它复述成"我没编造数据"这类噪音
- * （2026-11-14 用户实测报障）。工具事件里的 result 仍是完整对象，界面不受影响。
+ * 这些句子是给审计和界面用的，喂给模型只会让它复述成"我没编造数据"这类噪音。
+ * 工具事件里的 result 仍是完整对象，界面不受影响。
  */
 function stripPolicyText(result: unknown): unknown {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return result;
@@ -708,10 +708,10 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
     { role: 'system', content: system+'\n'+RECOMMENDATION_FORMAT },
     { role:'system',content:JSON.stringify({authorizedHistoricalFacts:authorizedFacts,activeTask:taskContext,authorizedTasks:listBusinessTasks(a.conversationId).map(t=>({taskId:t['taskId'],view:t['view'],date:t['date'],sourceLesson:t['sourceLesson'],candidateSetId:t['candidateSetId']})),rule:'历史事实只可转换或参考。问最新、改变查询条件、准备执行时重新调用工具。编号必须来自事实；候选序号依据活动候选顺序。业务确认权仅属于用户。'}) },
     { role: 'user', content: wrapUserQuery(a.question) },
-    // 防注入改在**声明**层做，绝不篡改用户原话（2026-11-14 用户裁定）
+    // 防注入改在**声明**层做，绝不篡改用户原话
     { role: 'system', content: USER_VERBATIM_POLICY },
-    // A1 动态尾块：时间上下文 + 注入疑似声明。随 run 变化的内容全部沉到消息序列
-    // 末尾（Manus 稳定前缀经验），system 前缀因此逐字节稳定、可被供应商前缀缓存
+    // 动态尾块：时间上下文 + 注入疑似声明。随 run 变化的内容全部沉到消息序列
+    // 末尾，system 前缀因此逐字节稳定、可被供应商前缀缓存
     // 跨 run 命中；本块只在本轮开始注入一次，run 内 messages 只追加、前缀不抖动。
     { role:'system', content: buildDynamicTurnContext({ timeContext: buildTimeContext(a.now, a.intent, a.week.note), injectionSuspected: a.injectionSuspected }) }
   ];
@@ -734,14 +734,14 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   let lastToolFailure: { tool: string; code: string; message: string; suggestions: string[] } | null = null;
   const verifiedAnswers: string[] = [];
   const businessFacts:BusinessResult[]=[];
-  // 批次2：工具结果（成功）的 JSON 与 summary——模型终稿的**数字核对证据**
+  // 工具结果（成功）的 JSON 与 summary——模型终稿的**数字核对证据**
   const toolEvidence: string[] = [];
   // 结构化工具结果（与 toolEvidence 同源），供实体核对取「真实取值集合」
   const toolResults: unknown[] = [];
   let verificationRetried = false;
   let recommendationRetried = false;
   let modelFinal='';
-  /** A10：模型链中途死亡（配额/超时/网络）——已有确定性结果时用它作答并如实标注 */
+  /** 模型链中途死亡（配额/超时/网络）——已有确定性结果时用它作答并如实标注 */
   let modelUnavailable = false;
   /** 上下文预算的最近一次决策（随 run_completed 带出供界面展示，不参与任何业务判定） */
   let budgetDecision: import('../../shared/context-budget.ts').BudgetDecision | null = null;
@@ -750,21 +750,21 @@ async function* runAgnesEngine(a: AgnesArgs): AsyncGenerator<RunEvent> {
   let runTaskStatus: 'awaiting_confirmation' | undefined = undefined;
   /** 指纹 = 工具名 + 排序后的规范化参数；在**执行前**检查（写工具接入后防重复执行） */
   const seenCalls = new Map<string, number>();
-  /** A4：连续工具失败次数（成功即清零）与复述已发标志（整个 run 只复述一次） */
+  /** 连续工具失败次数（成功即清零）与复述已发标志（整个 run 只复述一次） */
   let consecutiveToolFailures = 0;
   let failureRecited = false;
 
-    /** 单程白名单命中标记：批次2 答案生成权回交对该路径豁免（渲染即答案） */
+    /** 单程白名单命中标记：答案生成权交回模型的路径对此豁免（渲染即答案） */
   let singlePassCandidate = false;
-// 批5：有效步数上限（多步计划联动可放宽 +2）；初始=配置值
+// 有效步数上限（多步计划联动可放宽 +2）；初始=配置值
 let effectiveMaxSteps = cfg.agent.maxSteps;
   /**
-   * 只读预取（批次L→M）：a.prefetched 由 runAgentCore 在分派引擎前一次取好并发出工具事件。
-   * 两种正文归属由 ANSWER_GENERATION 决定，且都不撒谎：
+   * 只读预取：a.prefetched 由 runAgentCore 在分派引擎前一次取好并发出工具事件。
+   * 两种正文归属由 ANSWER_GENERATION 决定：
    *   · render（默认）——事实块即答案，毫秒级；模型不再花一轮复述它（复述稿本来就被丢弃）；
-   *   · model——把结果作为"已发生的工具轮"喂回上下文，正文由模型写一轮（实测 13.7~45.3 s），
+   *   · model——把结果作为"已发生的工具轮"喂回上下文，正文由模型写一轮，
    *     数字仍要过核对层，不过就打回一次再降级回渲染。
-   * （11-11 用户实机反馈：默认渲染让界面看起来是"系统在回答"——答案归属因此做成显式开关而非硬编码。）
+   * 直接渲染会让界面看起来是"系统在回答"——答案归属因此做成显式开关而非硬编码。
    */
   if (a.prefetched?.length && answerGeneration() === 'model') {
     messages.push({
@@ -791,9 +791,9 @@ while (steps < cfg.agent.maxSteps) {
     }
     steps += 1;
 
-    // A4 收敛前复述：带失败进入最后一轮（或连续失败 ≥2）时，把失败摘要重新
+    // 收敛前复述：带失败进入最后一轮（或连续失败 ≥2）时，把失败摘要重新
     // 注入一条 system 消息——逼模型换路或如实交代，而不是用注定失败的重试
-    // 耗尽步数（Manus「keep the wrong stuff in」）。
+    // 耗尽步数。
     if (shouldReciteFailure({ steps, maxSteps: effectiveMaxSteps, hasFailure: lastToolFailure !== null, consecutiveToolFailures, recited: failureRecited })) {
       failureRecited = true;
       a.log.warn('failure_recitation', { steps, tool: lastToolFailure?.tool, code: lastToolFailure?.code });
@@ -815,7 +815,7 @@ while (steps < cfg.agent.maxSteps) {
     for (let i = 0; i < budgeted.messages.length; i += 1) messages[i] = budgeted.messages[i]!;
     budgetDecision = budgeted.decision;
 
-    // A10：模型链中途死亡（配额/超时/网络）但**已拿到确定性工具结果**时，
+    // 模型链中途死亡（配额/超时/网络）但**已拿到确定性工具结果**时，
     // 不再 run_failed——用已渲染的 verifiedAnswers 如实作答并标注"未经大模型润色"。
     // 没有任何已得结果时原样抛出（交给上层的确定性引擎兜底或 run_failed）。
     modelUnavailable = false;
@@ -876,12 +876,12 @@ while (steps < cfg.agent.maxSteps) {
 
     const toolNotes: string[] = [];
     /**
-     * 单次往返（2026-11-09）：确定性只读查询一次工具就能定稿。
+     * 单次往返：确定性只读查询一次工具就能定稿。
      *
      * 为什么可以提前收敛：本函数结尾本来就是
      *   if (verifiedAnswers.length) answer = verifiedAnswers.join('\n\n')
-     * ——说明**最终答案一直是工具结果的确定性渲染**，第二次模型往返产出的
-     * 只是一段被丢弃的复述。而单次模型往返实测 ~40s，这一刀直接省掉一半时间，
+     * ——最终答案始终有工具结果的确定性渲染兜底，第二次模型往返产出的
+     * 只是复述。单次模型往返耗时更长，这一刀直接省掉一半时间，
      * 语义权仍然 100% 在模型手里（调哪个工具、传什么参数都由它决定）。
      *
      * 保守约束（任一条不满足就老老实实走第二轮）：
@@ -897,7 +897,7 @@ while (steps < cfg.agent.maxSteps) {
       try {
         rawArgs = call.function.arguments ? (JSON.parse(call.function.arguments) as Record<string, unknown>) : {};
       } catch {
-        // 容错解析（难点 1 对策 1）：JSON 坏了不中断，回一条可恢复错误让模型重来
+        // 容错解析：JSON 坏了不中断，回一条可恢复错误让模型重来
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
@@ -969,20 +969,19 @@ while (steps < cfg.agent.maxSteps) {
 
       if (exec.ok) {
         consecutiveToolFailures = 0;
-        // 单程往返白名单与多意图标记的裁决都在 routeTurn.singlePassEligible（整合方案 §4）。
-        // 2026-11-14 用户裁定：不允许"系统直接给答案"。单程短路会让本轮不经模型成稿，
-        // 因此改为**显式开启**（AGENT_SINGLE_PASS=1）才生效，默认关闭。
+        // 单程往返白名单与多意图标记的裁决都在 routeTurn.singlePassEligible。
+        // 单程短路会让本轮不经模型成稿，因此必须**显式开启**（AGENT_SINGLE_PASS=1），默认关闭。
         if (process.env['AGENT_SINGLE_PASS'] === '1' && a.route.singlePassEligible(name, calls.length)) {
           singlePassCandidate = true;
         }
         if(exec.resultKind==='business_plan')businessFacts.push(exec.result);
-        // A5：计划是模型自己的工作记录，不是业务答案——不进 verifiedAnswers，
+        // 计划是模型自己的工作记录，不是业务答案——不进 verifiedAnswers，
         // 单独以 plan_updated 事件广播给界面（计划面板）。
         if(exec.resultKind!=='task_plan')verifiedAnswers.push(renderDemoAnswer({kind:exec.resultKind,payload:exec.result,summary:exec.summary},{dateWasDefaulted:!a.intent.date,periodFiltered:Boolean(a.intent.periodKey),textOnly:a.mode==='chat',scopeLabel:businessScope().principal?.username||a.actor?.label,question:a.question,today:a.now.date}));
         if(exec.resultKind==='task_plan'){
           const planSteps=(exec.result as {steps:import('../../shared/types.ts').TaskPlanStep[]}).steps;
           yield a.emit('plan_updated',{steps:planSteps,updatedAt:nowIso()} satisfies import('../../shared/types.ts').TaskPlanUpdatedPayload);
-          // 批5：多步计划联动放宽——模型规划 ≥3 步说明任务比默认预算长，自动 +2（封顶 12）
+          // 多步计划联动放宽——模型规划 ≥3 步说明任务比默认预算长，自动 +2（封顶 12）
           if (planSteps.length >= 3) effectiveMaxSteps = Math.min(12, cfg.agent.maxSteps + 2);
         }
         yield a.emit('tool_result', {
@@ -1005,7 +1004,7 @@ while (steps < cfg.agent.maxSteps) {
             allowedDecisions: ['confirm', 'reject']
           } satisfies NeedConfirmPayload);
         }
-        // 批次2：核对层证据（结果 JSON + summary 里的派生计数，模型终稿的数字都要能在这里找到）
+        // 核对层证据（结果 JSON + summary 里的派生计数，模型终稿的数字都要能在这里找到）
         toolEvidence.push(JSON.stringify(exec.result ?? {}) + '\n' + (exec.summary ?? ''));
         toolResults.push(exec.result ?? {});
         messages.push({
@@ -1066,7 +1065,7 @@ while (steps < cfg.agent.maxSteps) {
   if (verifiedAnswers.length) {
     const explanation=verifiedRecommendation(modelFinal,businessFacts);
     const rendered=verifiedAnswers.join('\n\n')+(explanation?'\n\n'+explanation:'');
-    // 批次2（答案生成权回交）：工具结果是**证据**，最终答复的表达权交回模型；
+    // 答案生成权：工具结果是**证据**，最终答复的表达权交回模型；
     // verifiedAnswers/渲染器降为核对层与兜底。豁免：单程短路（无模型终稿）、链路中途死亡（残稿不可信）。
     const modelDraft = answerGeneration() === 'model' && !modelUnavailable && !singlePassCandidate && modelFinal.trim()
       ? modelFinal : null;
@@ -1104,9 +1103,9 @@ while (steps < cfg.agent.maxSteps) {
     answer='我还需要更明确的实验室查询条件。请说明房间、日期或要办理的事项，例如“E310 今天有哪些课？”。';
   } else if (!a.route.smalltalk) {
     // 走到这里 ⇒ 本轮没有任何成功的工具调用（成功必进 verifiedAnswers）。
-    // 旧实现用 lastToolSummary 兜底，它在该分支恒为 null ⇒ 永远只说「请明确日期、房间或所需操作」
+    // 只按成功结果兜底会让该分支恒为 null ⇒ 永远只说「请明确日期、房间或所需操作」
     // 这类通用文案 —— 对「帮我发一条通知」这种**已经说清操作**的请求是无效建议，
-    // 会诱导用户反复重试；真实原因其实就在 tool_result.error 里。
+    // 会诱导用户反复重试；真实原因在 tool_result.error 里。
     const f = lastToolFailure;
     const message = f
       ? `你要求的操作没有完成：${f.message}（工具 ${f.tool}｜错误码 ${f.code}）`
@@ -1126,7 +1125,7 @@ while (steps < cfg.agent.maxSteps) {
   if (!answer.trim()) answer = '你好，可以查询课表、房间状态，或在任务模式准备办理单。';
   yield* streamText(answer, a.emit, a.signal);
 
-  if (a.signal?.aborted) return; // N06/B10：取消后不再补发完成终态
+  if (a.signal?.aborted) return; // 取消后不再补发完成终态
   a.log.info('run_completed', {
     engine: engineForMode(a.mode ?? 'task'),
     model: usedModel,
@@ -1160,12 +1159,12 @@ function fnKey(args: Record<string, unknown>): string {
 }
 
 // ===========================================================================
-//  错误 → run_failed 映射（C4：异常分类：可重试 / 需人工 / 终止）
+//  错误 → run_failed 映射（异常分类：可重试 / 需人工 / 终止）
 // ===========================================================================
 
 function toRunFailed(err: unknown, wallClockMs: number): RunFailedPayload {
   if (err instanceof AgnesError) {
-    // A10：修复提示按实际出错链区分（聊天=DashScope / 任务=Agnes），聊天模式不得让用户去查 AGNES_API_KEY
+    // 排查提示按实际出错链区分（聊天=DashScope / 任务=Agnes），聊天模式不得让用户去查 AGNES_API_KEY
     const keyHint = err.provider === 'dashscope' ? 'DASHSCOPE_API_KEY（聊天链）' : 'AGNES_API_KEY（任务链）';
     const hint =
       err.code === 'agnes_not_configured'

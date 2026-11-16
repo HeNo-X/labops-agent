@@ -95,8 +95,8 @@ function line(mark, title, detail) {
       blockers.push('seed/snapshot.json 不是合法 JSON，请重新生成：npm run seed -- <真实 state.json 路径>');
     }
   } else if (fs.existsSync(fb)) {
-    line(C.warn('!'), '数据来源', '未找到脱敏快照 → 将使用模拟演示数据（房间号 DEMO- 开头）');
-    warnings.push('当前是模拟演示数据，与真实实验室无关。要用真实数据请先跑：npm run seed -- <真实 state.json 路径>');
+    line(C.warn('!'), '数据来源', '未找到脱敏快照 → 将使用内置示例数据（房间号 DEMO- 开头）');
+    warnings.push('当前是内置示例数据，与真实实验室无关。要用真实数据请先跑：npm run seed -- <真实 state.json 路径>');
   } else {
     line(C.err('✗'), '数据来源', '既没有 snapshot.json 也没有 fallback-demo.json');
     blockers.push('没有任何可用数据文件，服务端会拒绝启动。请运行：npm run seed -- <真实 state.json 路径>');

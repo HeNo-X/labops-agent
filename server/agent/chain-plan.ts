@@ -1,11 +1,11 @@
 /**
- * 确定性链编排（批次D）
+ * 确定性链编排
  * ============================================================================
- *  为什么做：11-10 探针实测 spark 单轮 15–30 s 里，读 29 份工具清单只多花 0.5 s，
+ *  为什么做：模型单轮 15–30 s 里，读 29 份工具清单只多花 0.5 s，
  *  大头是**每一轮都让模型重新生成一遍"思考 + 工具名 + 参数 JSON"**。
  *  而"故障事件 → 分析教学影响 → 准备联合方案"这条链的顺序、参数、接口契约都是固定的
- *  （workflow/preview → plans/commit 同型），让模型走三遍只是把同一件事贵三次，
- *  实测还会顶到 120 s 墙钟（方案卡已生成却被截尾）。
+ *  （workflow/preview → plans/commit 同型），让模型走三遍只是把同一件事重复计价，
+ *  还可能顶到 120 s 墙钟（方案卡已生成却被截尾）。
  *
  *  怎么做：契约固定的机械步骤由服务端按已验证的接口顺序驱动；模型只在
  *  **参数不全 / 候选不唯一**时接手——这两种情况一律返回 null 交回模型，绝不替用户猜。
@@ -14,7 +14,7 @@
  *    · 链只准备方案，**不调用 plans/commit、不点确认**——执行权始终在用户；
  *    · 候选多于一个、被阻塞项非空、或搜索被截断 ⇒ 停在 analyze，如实说明有几个候选要人选；
  *    · 任一步失败就地停下，把主系统原文错误码与"上一步已完成"一并说清，不掩盖半提交；
- *    · `AGENT_CHAIN_ORCHESTRATION=0` 一键回退纯模型链。
+ *    · `AGENT_CHAIN_ORCHESTRATION=0` 关闭链编排，走纯模型链。
  */
 
 import type { Dataset } from '../data/store.ts';
@@ -28,7 +28,7 @@ import { resolvePeriodKey } from './intent.ts';
 
 export type ChainKind = 'incident_joint' | 'schedule_move' | 'key_transaction';
 
-/** 停下时要说清是哪条链，不能三条都报"联合处置链"（2026-11-10 真实数据实测到文案错位） */
+/** 停下时要说清是哪条链，不能三条都报"联合处置链" */
 export const CHAIN_LABEL: Record<ChainKind, string> = {
   incident_joint: '故障事件联合处置链',
   schedule_move: '调课提案链',
@@ -216,7 +216,7 @@ function mentionedRooms(ds: Dataset, question: string): Array<{ id: string; name
 }
 
 function statedReason(question: string): string | null {
-  // 「原因是投影仪故障」是最自然的说法，字符类里少了「是」会让整条链零执行交回模型（2026-11-10 彩排实测到）
+  // 「原因是投影仪故障」是最自然的说法，字符类里必须包含「是」，否则整条链会零执行交回模型
   const m = /(?:因为|由于|原因[：:是为])\s*([^。，,；;\n]+)/.exec(question);
   const v = m?.[1]?.trim();
   return v && v.length >= 2 ? v : null;

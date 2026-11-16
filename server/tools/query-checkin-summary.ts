@@ -1,5 +1,5 @@
 /**
- * 只读工具：query_checkin_summary（批次 2，仅管理员）
+ * 只读工具：query_checkin_summary（仅管理员）
  * ============================================================================
  *  数据源：主系统 GET /api/integration/checkin-summary（admin 鉴权；应到=名册人数
  *  或班级档案人数；实到=当日有效签到去重；缺口=应到−实到；未签到名单=已登记名册
@@ -8,8 +8,8 @@
  *  红线（写进 description，模型每次都会读到）：
  *    · 缺口只是"应到−实到"的账面差，必须现场核实后才能定性（人到未签/请假/旷课
  *      由人工判断），不得据此断言某人缺勤；
- *    · 请勿代替学生签到（主系统立场 + 不造假数据）；
- *    · 逐人签到明细（谁在什么时候签的）依旧没有开放接口，本工具只给聚合与缺口名单；
+ *    · 不得代替学生签到（主系统立场，签到数据必须真实）；
+ *    · 本工具只给聚合与缺口名单；逐人签到明细见 query_checkin_records；
  *    · 仅管理员可用；学生/志愿者调用会被主系统 403，如实转述。
  */
 
@@ -23,7 +23,7 @@ import { ToolArgumentError } from './query-schedule.ts';
 /** 「签到汇总/缺口」类问法（管理员向；business.ts 路由用；先于本人问法判断但按角色门控） */
 export const CHECKIN_SUMMARY_RE = /签到.{0,6}(情况|统计|汇总|缺口|异常|出勤)|签到汇总|出勤率|缺勤|未签到.{0,8}(名单|学号|谁)|哪些.{0,10}没签到/;
 
-/** 把模型给的任意对象收敛成严格类型（F17）：显式非法必须报错，不静默放宽 */
+/** 把模型给的任意对象收敛成严格类型：显式非法必须报错，不静默放宽 */
 export function coerceCheckinSummaryArgs(raw: Record<string, unknown>): CheckinSummaryArgs {
   const out: CheckinSummaryArgs = {};
   const date = raw['date'];

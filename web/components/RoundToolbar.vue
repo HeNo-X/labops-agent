@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import {t as tr} from "../i18n";
 /**
- * 轮次操作条 —— 批次1 后只保留「第 N 轮」标记：
- *  · 删除入口已迁移到助手回复底部的垃圾桶（见 ChatMessage round-delete）
- *  · 回档/修改仍在用户消息气泡下方的图标行（见 ChatMessage）
+ * 轮次操作条 —— 只显示「第 N 轮」标记：
+ *  · 删除入口在助手回复底部的垃圾桶（见 ChatMessage round-delete）
+ *  · 回档/修改在用户消息气泡下方的图标行（见 ChatMessage）
  */
 defineProps<{ index: number }>();
 </script>

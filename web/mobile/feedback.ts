@@ -1,9 +1,9 @@
 /**
- * 移动端反馈中心（批次 A）—— Toast + Promise 化确认弹层
+ * 移动端反馈中心 —— Toast + Promise 化确认弹层
  * ============================================================================
  *  · toast(text, action?)：瞬态提示（2.8s 自动消失），底部浮出、导航栏上方
  *  · confirmSheet(opts)：替代 window.confirm 的底部弹层确认（破坏性操作红色主按钮），
- *    返回 Promise<boolean>；这也是批次 D「确认弹层」的种子实现
+ *    返回 Promise<boolean>。
  *  · 模块级响应式状态，任意组件可调用；宿主组件 ToastHost/ConfirmSheet 挂在 MobileApp
  */
 
@@ -21,7 +21,7 @@ export interface ConfirmOptions {
   message?: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  /** destructive=true 时主按钮为红色（破坏性分级，方案 4.4） */
+  /** destructive=true 时主按钮为红色（破坏性分级） */
   destructive?: boolean;
 }
 
@@ -37,7 +37,7 @@ const state = reactive({
 
 let seq = 0;
 
-/** F2：轻触觉反馈（渐进增强；不支持/系统关闭时静默跳过） */
+/** 轻触觉反馈（渐进增强；不支持/系统关闭时静默跳过） */
 function buzz(ms: number): void {
   try {
     navigator.vibrate?.(ms);

@@ -2,7 +2,7 @@
  * POST /api/agent/transcribe —— 语音输入的转写端点
  * ============================================================================
  *  前端 useVoiceInput 录音 → base64 JSON → 这里 → server/llm/asr.ts → 文本。
- *  音频**只做临时转写、用后即弃**：不落盘、不入证据库、不进会话历史
+ *  音频**只做转写、用后即弃**：不落盘、不入证据库、不进会话历史
  *  （证据附件管线按魔数只收 PNG/JPEG/WebP/PDF/文本，audio/* 本来就进不去）。
  *
  *  请求体上限 6 MiB（base64 的 4 MiB 音频 ≈ 5.33 MiB 字符 + JSON 开销），
@@ -43,7 +43,7 @@ const DEFAULT_HOURLY_LIMIT = 60;
  * 纠错词典 = Tier A（数据集来的封闭集合）∪ Tier B（人工术语表，带音节键）。
  * 缓存在"数据集版本 + 术语表指纹"上：改了词表立刻生效，不会"改了但没跑"。
  * 任一侧取不到就退化成另一侧；两侧都没有就是不纠错 —— 纠错是增强，
- * 绝不能让语音输入整体失败，也绝不因为词典没加载上而假装纠过。
+ * 绝不能让语音输入整体失败，也绝不因为词典没加载上就声称已纠错。
  */
 interface CorrectBundle {
   key: string;
@@ -196,7 +196,7 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
   reply(res, 200, {
     ok: true,
     text,
-    // 只有真的改过才回传原文与改动清单，未改动时响应体与旧版完全一致
+    // 只有真的改过才回传原文与改动清单，未改动时不返回这两项
     ...(corrections.length ? { originalText: raw, corrections } : {}),
     // 用户主动叫停时如实标注，不让人以为"这个词表没生效"是故障
     ...(skipped ? { termCorrectSkipped: true } : {}),
@@ -209,7 +209,7 @@ export async function handleTranscribe(req: IncomingMessage, res: ServerResponse
       omittedFromBudget: result.applied.context ? bundle.contextOmitted : 0,
       hotwordsAvailable: Object.keys(bundle.hotwords).length,
       // 用户常用词的登记数。它们只走"事前"这两条有出处的通道（上下文实体词表 / 原生 vocabulary），
-      // 到底发没发出去看同一份 applied 里的 context 与 hotwords —— 不许用登记数冒充已生效。
+      // 到底发没发出去看同一份 applied 里的 context 与 hotwords —— 不得用登记数代替已生效数量。
       userKeywordsRegistered: bundle.keywords.length,
       suppressedByUser: skipped
     },

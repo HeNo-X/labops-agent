@@ -1,13 +1,13 @@
 import { calendar,effectiveSchedule } from '../data/calendar.ts';
 import { closuresFor } from '../data/closures.ts';
 /**
- * 只读工具：query_free_rooms —— 找空实验室（阶段 2A / F09·F11·F12 修正）
+ * 只读工具：query_free_rooms —— 找空实验室
  * ============================================================================
  *  「明天下午哪些实验室空着」的正解。与 query_schedule 同源同口径：
  *  一个房间在某节次"空闲" = 该节次没有命中周次的排课（停课、跨学期、周次/单双周
  *  过滤与 query_schedule 完全一致）。
  *
- *  事实边界（F09/F11）：
+ *  事实边界：
  *    · coverage='complete' 仅当课表数据非空——空表不能从"没有记录"推出"全部空闲"；
  *    · rooms[] 只列**档案开放**的房间；关闭/停用进 excluded[] 并给理由；
  *    · 「空闲」= 课表无排课 ≠ 室内无人 ≠ 可预约，notes 固定声明。
@@ -35,7 +35,7 @@ export function runQueryFreeRooms(
     );
   }
 
-  // F12：支持节次范围（如"下午"= pm1+pm2）；periodKey 仍兼容
+  // 支持节次范围（如"下午"= pm1+pm2）；periodKey 仍兼容
   let wanted: PeriodKey[];
   if (args.periodKey !== undefined && args.periodKey !== null && String(args.periodKey).trim() !== '') {
     const p = periodByKey(String(args.periodKey).trim());
@@ -65,7 +65,7 @@ export function runQueryFreeRooms(
   const week = describeWeek(date, ds.term);
   const holiday = isHoliday(date, ds.term);
 
-  // F09/R09：覆盖判断以数据契约为准 —— termEnd 缺失就不能证明任何日期的完整覆盖，
+  // 覆盖判断以数据契约为准 —— termEnd 缺失就不能证明任何日期的完整覆盖，
   // 绝不用"教学周不超过 N 周"之类的臆造阈值代替证明。
   let coverage: FreeRoomsResult['coverage'];
   if (ds.timetable.length === 0) {
@@ -97,7 +97,7 @@ export function runQueryFreeRooms(
   // 该星期几、当前学期、未停课、周次匹配的全部排课（教学周不可确定时不过滤并声明）
   const dayRows: TimetableRow[] = effectiveSchedule(ds,date);
 
-  // F11：档案开放 → 主名单；关闭/停用 → excluded 并给理由
+  // 档案开放 → 主名单；关闭/停用 → excluded 并给理由
   const allRooms = [...ds.labs, ...ds.openLabs].sort((a, b) =>
     a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true })
   );
@@ -120,7 +120,7 @@ export function runQueryFreeRooms(
       periodLabel: p.label,
       startTime: p.start,
       endTime: p.end,
-      // F09：非 complete 覆盖时绝不输出"已确认空闲"名单
+      // 非 complete 覆盖时绝不输出"已确认空闲"名单
       rooms:
         coverage === 'complete'
           ? activeRooms
@@ -154,7 +154,7 @@ export function runQueryFreeRooms(
         ? '实时数据：经授权读取原系统业务数据，来源见查询信息'
         : ds.sourceType === 'snapshot'
           ? '脱敏快照：从真实 state.json 导出后已脱敏，非实时'
-          : '模拟演示：内置构造的示例数据，与真实实验室无关'
+          : '内置示例：随仓库提供的示例数据，与真实实验室无关'
   };
 
   return {
@@ -174,7 +174,7 @@ export function runQueryFreeRooms(
   };
 }
 
-/** 供注册表做参数收敛。显式非法的节次抛错而不是静默丢弃（F17） */
+/** 供注册表做参数收敛。显式非法的节次抛错而不是静默丢弃 */
 export function coerceFreeRoomsArgs(raw: Record<string, unknown>): FreeRoomsArgs {
   const out: FreeRoomsArgs = {};
   const date = raw['date'];
@@ -185,7 +185,7 @@ export function coerceFreeRoomsArgs(raw: Record<string, unknown>): FreeRoomsArgs
   const periodKey = raw['periodKey'];
   if (typeof periodKey === 'string' && periodKey.trim()) out.periodKey = periodKey.trim() as PeriodKey;
   else if (periodKey !== undefined && periodKey !== null && periodKey !== '') {
-    // R10：显式给了错误类型（如数字 999）也是参数错误，不能静默丢弃后放宽为全天
+    // 显式给了错误类型（如数字 999）也是参数错误，不能静默丢弃后放宽为全天
     throw new ToolArgumentError('bad_period', `periodKey 必须是字符串节次键，收到：${typeof periodKey}(${String(periodKey)})`);
   }
   const periodKeys = raw['periodKeys'];

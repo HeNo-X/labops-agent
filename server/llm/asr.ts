@@ -13,8 +13,8 @@
  *       适配 DashScope 兼容模式的 qwen3-asr-flash 一类网关。
  *
  *  与聊天/任务两条主链路的关系：完全独立、密钥独立（ASR_API_KEY）。
- *  未配置 Key ⇒ 调用方拿到 asr_not_configured，如实降级——绝不借另一家 Key
- *  冒充、也不本地假装识别（与全局"诚实降级"人格一致）。
+ *  未配置 Key ⇒ 调用方拿到 asr_not_configured，如实降级——不借用其他供应商的 Key，
+ *  也不在本地伪造识别结果。
  *
  *  Key 只读于服务端，永不进日志；上游错误只回传状态码与脱敏片段。
  */
@@ -31,7 +31,7 @@ export interface AsrConfig {
   timeoutMs: number;
   /** 音频语种。空字符串 = 不发 language（混合语种时官方建议不设） */
   language: string;
-  /** 逆文本规范化：口语数字→阿拉伯数字。默认关，实测达标再开 */
+  /** 逆文本规范化：口语数字→阿拉伯数字。默认关，验证达标后再开启 */
   enableItn: boolean;
   /** 是否把术语表当上下文发给模型（事前偏置） */
   contextEnabled: boolean;
@@ -92,7 +92,7 @@ function clampInt(raw: string | undefined, fallback: number, min: number, max: n
  * 启动时一次性触发 .env 装载（幂等；.env 不存在则跳过，不报错）。
  * ⚠️ 不能放进 getAsrConfig() 里每次调用：那样运行时/测试里被清掉的环境变量
  *    会被 .env 反复灌回来 —— 测试删了 DASHSCOPE_API_KEY 却仍判定"已配置"，
- *    「诚实降级」就无从验证（实测踩过）。装载只做一次，之后只读 process.env。
+ *    降级路径就无从验证。装载只做一次，之后只读 process.env。
  */
 getConfig();
 
@@ -130,9 +130,9 @@ export function getAsrConfig(): AsrConfig {
     // 显式置空（ASR_LANGUAGE=）表示"不发 language"，与"未设置=用默认 zh"是两种意思
     language: env.ASR_LANGUAGE === undefined ? DEFAULT_ASR_LANGUAGE : env.ASR_LANGUAGE.trim(),
     enableItn: env.ASR_ENABLE_ITN === '1',
-    // 默认**关**。理由有两边：一是收益没在真实录音上 A/B 过（没有录音），
-    // 二是 2026-11-06 真实 Key 实测到"模型把参考词表整段念回来"（静音样本，两种协议都犯）。
-    // 没测出来的好处不默认替用户打开 —— 要试就显式设 ASR_CONTEXT_ENABLED=1，跑 --mode=live 对比再定。
+    // 默认**关**。理由有两边：一是参考词表上下文的效果尚未在真实录音上验证，
+    // 二是上游会"把参考词表整段念回来"（静音样本，两种协议都如此）。
+    // 未验证收益的能力不默认开启 —— 要试就显式设 ASR_CONTEXT_ENABLED=1，跑 --mode=live 对比再定。
     contextEnabled: env.ASR_CONTEXT_ENABLED === '1',
     contextMaxChars: clampInt(env.ASR_CONTEXT_MAX_CHARS, DEFAULT_CONTEXT_MAX_CHARS, 0, 20000),
     hotwordsEnabled: env.ASR_HOTWORDS !== '0',
@@ -146,7 +146,7 @@ export function isAsrConfigured(): boolean {
   return Boolean(getAsrConfig().apiKey);
 }
 
-/** 本次请求实际带上了哪些可选参数 —— 失败降级后必须让人看得见，不许静默假装生效 */
+/** 本次请求实际带上了哪些可选参数 —— 失败降级后必须让人看得见，结果里如实体现 */
 export type AsrApplied = {
   context: boolean;
   options: boolean;
@@ -161,7 +161,7 @@ export type AsrApplied = {
   language: string;
   itn: boolean;
   contextChars: number;
-  /** 真为"上游不收这些参数，已降级重发"。不许静默假装增强生效 */
+  /** 真为"上游不收这些参数，已降级重发"。降级状态必须在结果里如实体现 */
   degraded: boolean;
 };
 
@@ -321,7 +321,7 @@ function buildChatAudioRequest(
   if (variant.withContext && contextText) {
     messages.push({ role: 'system', content: [{ type: 'text', text: contextText }] });
   }
-  // DashScope 兼容模式实测（2026-10-29，真实 Key）：input_audio.data 必须是完整
+  // DashScope 兼容模式要求：input_audio.data 必须是完整
   // data URI（data:audio/wav;base64,xxx）——裸 base64 会被网关当 URL 解析而报
   // "The provided URL does not appear to be valid"。
   messages.push({
@@ -509,7 +509,7 @@ function textFromChatCompletion(payload: unknown): string {
  * 取上游用量。两种形态都要认：OpenAI 兼容的 usage.prompt_tokens /
  * prompt_tokens_details.audio_tokens，与 DashScope 原生的 input_tokens_details /
  * output_tokens_details / seconds（官方明确原生没有 prompt_tokens 这套名字）。
- * 拿不到就留空 —— 缺数据要看得见，不许填 0 冒充测过。
+ * 拿不到就留空 —— 缺数据要看得见，不许填 0 当作已测量。
  */
 function parseUsage(payload: unknown): AsrUsage {
   const root = payload as {
@@ -541,8 +541,8 @@ function parseUsage(payload: unknown): AsrUsage {
 
 /**
  * 上下文偏置的反噬：模型会把我们发的参考词表整段当识别结果念出来。
- * 2026-11-06 真实 Key 实测（静音样本）：chat_audio 与原生协议**都**把
- * 「实验室管理领域参考词（中文）：\n器材 投影仪 服务器」原样返回了，官方社区也有
+ * chat_audio 与原生协议**都**可能把
+ * 「实验室管理领域参考词（中文）：\n器材 投影仪 服务器」原样返回，官方社区也有
  * 同款报告（aliyun/alibabacloud-bailian-speech-demo#50「无故输出全部 corpus」）。
  * 词表首行是我们自己写的标题，说话的人不可能念它 —— 它一出现就说明模型在念提示词，
  * 宁可判"没听清"，也绝不能把 1200 字词表灌进用户的草稿里。
@@ -635,7 +635,7 @@ export async function transcribeAudio(input: TranscribeInput): Promise<AsrResult
           };
         }
         lastBody = bodyText.slice(0, 300);
-        // 429 是配额/限流，不是"参数不认识"，必须留给同参数的网络重试（改造前就是这个口径）
+        // 429 是配额/限流，不是"参数不认识"，必须留给同参数的网络重试（保持同一口径）
         if (response.status >= 400 && response.status < 500 && response.status !== 429) {
           // 只有"像参数不认识"的 4xx 才值得摘一个重发；裸请求仍被拒就是真失败，不再退
           dropNext = looksLikeParameterRejection(response.status, bodyText)

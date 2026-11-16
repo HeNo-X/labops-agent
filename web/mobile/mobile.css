@@ -1,15 +1,14 @@
 /* ============================================================================
-   移动端皮肤 —— 批次 A「视觉令牌与组件质感」重写版
+   移动端皮肤 —— 视觉令牌与组件质感
    ============================================================================
-   变化（对照方案 4.1–4.4）：
-     · 描边方盒 → 分层表面：页面 surface-2、卡片 surface+阴影、tonal 按钮
+   要点：
+     · 分层表面：页面 surface-2、卡片 surface+阴影、tonal 按钮
      · 按钮三体系：默认=tonal / .mobile-primary=filled / 危险=红色 tonal
-     · 列表行 → inset 分组行（发丝线分隔，不再每行一个盒子）
+     · 列表行 → inset 分组行（发丝线分隔，不用逐行盒子）
      · 分段控件 → pill 滑轨（滑块带过渡）
      · 底部弹层 → 20px 顶部圆角 + grabber + 浮层阴影
      · 字体治理：UI 层 sans；衬线仅保留长文正文与正式单号
      · 按压反馈：scale(.97)（动效令牌见 tokens.css，reduced-motion 自动关闭）
-   不变：全部选择器名、布局属性（flex/grid/尺寸/间距结构）、无障碍属性。
    ========================================================================== */
 
 /* ---------- 壳层 ---------- */
@@ -179,7 +178,7 @@
 .mobile-shell .dlg{width:100%;max-height:90%;overflow:auto;border:0;border-radius:var(--m-radius-sheet,20px) var(--m-radius-sheet,20px) 0 0;background:var(--m-card,var(--surface));box-shadow:var(--m-shadow-float);padding:6px 12px calc(12px + env(safe-area-inset-bottom))}
 .mobile-sheet-mask{position:fixed;inset:0;background:#0007;z-index:130;display:flex;align-items:flex-end}
 .mobile-sheet{width:100%;border:0;border-radius:var(--m-radius-sheet,20px) var(--m-radius-sheet,20px) 0 0;background:var(--m-card,var(--surface));box-shadow:var(--m-shadow-float);padding:6px 12px calc(12px + env(safe-area-inset-bottom));max-height:80%;overflow:auto;position:relative}
-/* grabber：视觉把手（拖拽交互在批次 C 接管） */
+/* grabber：视觉把手（拖拽交互见 gestures.ts） */
 .mobile-sheet::before,.mobile-shell .dlg::before{content:'';display:block;width:36px;height:4px;border-radius:var(--m-radius-pill,999px);background:var(--m-tonal,var(--surface-3));margin:2px auto 8px}
 .mobile-sheet h2{font-size:calc(var(--ui-font-size) * 1.44444)}
 
@@ -317,7 +316,7 @@
 .mobile-home-queues{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .mobile-home-queues>.mobile-section{margin:0}
 .mobile-home-queues>.is-populated{grid-column:1/-1}
-/* U03：队列全空的聚合引导卡（替代一屏"暂无"占位） */
+/* 队列全空的聚合引导卡（替代一屏"暂无"占位） */
 .m-home-clear{display:grid;gap:6px}
 .m-home-clear h3{margin:0}
 .m-home-clear p{margin:0;color:var(--text-muted)}
@@ -328,7 +327,7 @@
 .mobile-sheet,.m-toast-wrap{--m-radius-sheet:20px;--m-radius-card:14px;--m-radius:10px;--m-radius-sm:8px;--m-radius-pill:999px;--m-shadow-card:0 1px 2px rgba(0,0,0,.05),0 2px 10px rgba(0,0,0,.04);--m-shadow-float:0 2px 6px rgba(0,0,0,.08),0 8px 24px rgba(0,0,0,.1);--m-tonal:var(--surface-3);--m-card:var(--surface);--m-page:var(--surface-2);--m-hairline:var(--border)}
 [data-theme='dark'] .mobile-sheet,[data-theme='dark'] .m-toast-wrap{--m-shadow-card:0 1px 2px rgba(0,0,0,.35),0 2px 10px rgba(0,0,0,.3);--m-shadow-float:0 2px 6px rgba(0,0,0,.45),0 8px 24px rgba(0,0,0,.5)}
 
-/* ---------- 批次 B：动效系统（方案 4.2） ---------- */
+/* ---------- 动效系统 ---------- */
 /* 视图容器：包裹层不改变既有布局；会话类视图占满高度 */
 .mobile-view{min-width:0}
 .mobile-content-conversation>.mobile-view{height:100%;display:flex;flex-direction:column}
@@ -361,7 +360,7 @@
 /* reduced-motion：Teleport 到 body 的节点不受 .mobile-shell * 开关覆盖，单独关闭 */
 @media(prefers-reduced-motion:reduce){.mobile-sheet,.mobile-sheet-mask,.m-toast,.m-toast-wrap{animation:none!important;transition:none!important}}
 
-/* ---------- 批次 C：手势层配套样式（方案 4.3） ---------- */
+/* ---------- 手势层配套样式 ---------- */
 /* 边缘右滑返回：水平手势留给页面（垂直滚动仍归浏览器） */
 .mobile-view{touch-action:pan-y}
 /* 下拉刷新指示器：位于头部之下、内容之上，高度随进度增长 */
@@ -392,13 +391,13 @@
 .m-drawer__automation:hover{border-color:var(--border-strong,var(--border-strong))}
 
 /* ==========================================================================
-   2026-11-04 移动端输入与语音（微信形态）
+   移动端输入与语音（微信形态）
    ========================================================================== */
 
 /* A. 输入控件常态 ≥16px
       为什么：iOS Safari 对 font-size < 16px 的输入控件在聚焦时会强制放大页面，
       而放大后不会自动缩回 —— 用户看到的就是"点一下输入框，字突然变大"。
-      旧实现的做法是「常态 13px、:focus 跳到 16px」，等于把缩放换成了肉眼可见的跳变。
+      若常态 13px、:focus 跳到 16px，等于把缩放换成了肉眼可见的跳变。
       正解是常态就 ≥16px；同时保留"界面字号"偏好的放大能力（取两者较大值）。
       下面这批 :focus 规则用于覆盖文件上方同选择器里的 font-size:16px，不动其它声明。 */
 .mobile-shell input,
@@ -466,13 +465,13 @@
 }
 
 /* ==========================================================================
-   2026-11-04 移动端输入与语音（微信形态）
+   移动端输入与语音（微信形态）
    ========================================================================== */
 
 /* A. 输入控件常态 ≥16px
       为什么：iOS Safari 对 font-size < 16px 的输入控件在聚焦时会强制放大页面，
       而放大后不会自动缩回 —— 用户看到的就是"点一下输入框，字突然变大"。
-      旧实现的做法是「常态 13px、:focus 跳到 16px」，等于把缩放换成了肉眼可见的跳变。
+      若常态 13px、:focus 跳到 16px，等于把缩放换成了肉眼可见的跳变。
       正解是常态就 ≥16px；同时保留"界面字号"偏好的放大能力（取两者较大值）。
       下面这批 :focus 规则用于覆盖文件上方同选择器里的 font-size:16px，不动其它声明。 */
 .mobile-shell input,
@@ -545,8 +544,8 @@
   min-width: 0;
 }
 
-/* 2026-11-07 移动端首页布局收整 */
-/* 模式切换：移到内容区顶部、缩成小胶囊（原来占满输入区一整行，视觉太重） */
+/* 移动端首页布局 */
+/* 模式切换：位于内容区顶部、小胶囊形态（占满一行会压过输入区） */
 .mobile-start > .mobile-start-mode-row {
   display: flex;
   gap: 4px;
@@ -582,7 +581,7 @@
   color: var(--primary);
 }
 /* 输入行：与两侧按钮同高，避免输入框比按钮高一截看着突兀
-   注：字号必须 >=16px，否则 iOS 聚焦时会自动放大整页（这就是之前"点击变大"的根因） */
+   注：字号必须 >=16px，否则 iOS 聚焦时会自动放大整页（聚焦放大问题的根因） */
 .mobile-start-input-row textarea {
   min-height: 44px;
   max-height: 96px;
@@ -595,8 +594,8 @@
   min-height: 44px;
 }
 
-/* 2026-11-07 移动端首页布局收整 */
-/* 模式切换：移到内容区顶部、缩成小胶囊（原来占满输入区一整行，视觉太重） */
+/* 移动端首页布局 */
+/* 模式切换：位于内容区顶部、小胶囊形态（占满一行会压过输入区） */
 .mobile-start > .mobile-start-mode-row {
   display: flex;
   gap: 4px;
@@ -632,7 +631,7 @@
   color: var(--primary);
 }
 /* 输入行：与两侧按钮同高，避免输入框比按钮高一截看着突兀
-   注：字号必须 >=16px，否则 iOS 聚焦时会自动放大整页（这就是之前"点击变大"的根因） */
+   注：字号必须 >=16px，否则 iOS 聚焦时会自动放大整页（聚焦放大问题的根因） */
 .mobile-start-input-row textarea {
   min-height: 44px;
   max-height: 96px;
@@ -645,7 +644,7 @@
   min-height: 44px;
 }
 
-/* 空会话态（打开即主会话区）：问候 + 快捷胶囊，替代原来的独立入口页 */
+/* 空会话态（打开即主会话区）：问候 + 快捷胶囊 */
 .mobile-empty {
   display: grid;
   gap: 14px;
@@ -659,7 +658,7 @@
   color: var(--text);
 }
 
-/* 空会话态（打开即主会话区）：问候 + 快捷胶囊，替代原来的独立入口页 */
+/* 空会话态（打开即主会话区）：问候 + 快捷胶囊 */
 .mobile-empty {
   display: grid;
   gap: 14px;
@@ -673,7 +672,7 @@
   color: var(--text);
 }
 
-/* L1 跨端横幅：另一台设备正在生成时，手机端给出状态与叫停入口 */
+/* 跨端横幅：另一台设备正在生成时，手机端给出状态与叫停入口 */
 .mobile-external-run {
   display: flex;
   align-items: center;
@@ -701,7 +700,7 @@
   cursor: pointer;
 }
 
-/* L1 跨端横幅：另一台设备正在生成时，手机端给出状态与叫停入口 */
+/* 跨端横幅：另一台设备正在生成时，手机端给出状态与叫停入口 */
 .mobile-external-run {
   display: flex;
   align-items: center;

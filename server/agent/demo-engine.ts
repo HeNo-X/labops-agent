@@ -2,18 +2,16 @@ import {renderBusinessFacts} from '../business/fact-text.ts';
 import type { KnowledgeResult, EvidenceObservationResult } from '../../shared/types.ts';
 import type { TermScheduleResult } from '../tools/query-term-schedule.ts';
 /**
- * 演示引擎 —— 不依赖大模型的确定性兜底（无 AGNES_API_KEY 时启用）
+ * 确定性规则引擎 —— 不依赖大模型的兜底实现（未配置模型 Key 时启用）
  * ============================================================================
- *  定位：**等价替换**，不是"假装修好了"。它产出的 SSE 事件与 Agnes 引擎完全同构
+ *  定位：与模型引擎同构，产出的 SSE 事件序列一致
  *  （run_started → tool_started → tool_result → answer_delta → run_completed），
- *  所以前端、组件、状态机一行都不用改。
+ *  因此前端、组件、状态机无需区分引擎形态。
  *
- *  它换掉的是「意图理解 + 工具选择 + 组织语言」这一段：用服务端规则解析代替模型。
- *  这是诚实的降级 —— 界面与回答里都会写明「演示引擎·未接入大模型」，
- *  且**不会**把规则引擎的措辞说成"AI 分析"。
+ *  它承担「意图理解 + 工具选择 + 组织语言」这一段：用服务端规则解析代替模型。
+ *  回答与界面都会明确标注本条未调用大模型，不会把规则引擎的措辞说成"AI 分析"。
  *
- *  它不换的是数据层：数据仍然走注册表里的只读工具，数据来源仍如实标注。
- *  阶段 2A：支持三个工具的路由（query_schedule / query_lab_status / query_free_rooms）。
+ *  数据层与模型引擎一致：数据仍然走注册表里的只读工具，数据来源仍如实标注。
  */
 
 import type { CheckinStatusResult, CheckinSummaryResult, FreeRoomsResult, LabStatusResult, OperationsReportResult, QueryScheduleArgs, ScheduleQueryResult, VisionFieldResult } from '../../shared/types.ts';
@@ -53,9 +51,9 @@ const OUT_OF_SCOPE_PATTERNS: Array<[RegExp, string]> = [
 
 // ---- 在室人数 vs 签到明细 vs 本人签到状态：三者数据可得性完全不同，不能混成一条拒绝文案 ----
 //  在室人数：主系统 /occupancy 提供"上海当日同房间、同主体逐条配对的未结束有效签到记录"的房间级计数（与主系统页面同源），
-//           业务通道连通时**可以给真实数字**；此前被这条兜底规则一律拦成"无法提供"，是错的。
-//  本人签到状态：2026-11-06 批次1 起开放（/api/integration/checkin-status，只回本人记录）——连通后可查，未连通时如实说取不到。
-//  他人签到明细：逐人签到/签退/补签明细没有对 LabOps 开放的接口，仍然如实说不可得。
+//           业务通道连通时可以给真实数字，不能一律拦成"无法提供"。
+//  本人签到状态：通过 /api/integration/checkin-status 查询（只回本人记录）——连通后可查，未连通时如实说取不到。
+//  他人签到明细：逐人签到/签退/补签明细没有对 LabOps 开放的接口，如实说不可得。
 const OCCUPANCY_RE = /在室|几个人|多少人|谁在|签到(人数|情况|统计)|签退(人数|情况|统计)/;
 const CHECKIN_DETAIL_RE = /签到|签退|补签/;
 
@@ -72,7 +70,7 @@ function occupancyFallback(reason: 'no_room' | 'no_channel', ds: Dataset): strin
 /** 「哪些房间空着/找空教室」类问题：不需要房间号（导出供 run.ts 做继承判定） */
 export const FREE_ROOMS_RE = /哪些.{0,6}(空|闲)|空(着|的|教室|实验室|房间)|空闲|没(有)?被占用|可以(用|借)/;
 /** 房间档案/状态类问题：需要房间号，且在问开放/容量/状态/在室人数等。
- *  A7：补"有人/空吗/在吗"等口语问法——"310有人吗"与"E310 在室几个人"同义。 */
+ *  补充"有人/空吗/在吗"等口语问法——"310有人吗"与"E310 在室几个人"同义。 */
 export const LAB_STATUS_RE = /开放吗|开(着|放)吗|还开|状态|容量|多大|能坐|位置|在哪|什么情况|简介|介绍|下一?节|在室|几个人|多少人|谁在|钥匙|(?:有(?:没有)?)人|空吗|空着吗|在吗/;
 /** 纯寒暄/致谢（导出供 run.ts 做继承判定） */
 export const SMALLTALK_RE = /^(谢谢|多谢|感谢|辛苦了|辛苦|好的|好|嗯+|噢|哦|ok|OK|Ok|收到|明白|了解了|你好|您好|嗨|hi|hello|哈喽)[！!。.~，,～\s]*$/;
@@ -82,7 +80,7 @@ export function planDemo(question: string, intent: Intent, ds: Dataset): DemoPla
   if(/制度|规程|手册|怎么用|操作说明|时间窗口/.test(q)) return {tool:'query_knowledge',callTool:true,args:{query:q},directReply:null,needsDisclosure:[]};
   if(/下次值班|下一次值班|正式排班|我的班次/.test(q)) return {tool:'query_duty_context',callTool:true,args:{},directReply:null,needsDisclosure:[]};
 
-  // F13：寒暄/确认类输入直接回应，不查任何数据、不沿用任何条件
+  // 寒暄/确认类输入直接回应，不查任何数据、不沿用任何条件
   if (SMALLTALK_RE.test(q.trim())) {
     return {
       tool: '',
@@ -93,7 +91,7 @@ export function planDemo(question: string, intent: Intent, ds: Dataset): DemoPla
     };
   }
 
-  // F10：显式非法日期必须报错，绝不静默回落到今天或沿用上一问
+  // 显式非法日期必须报错，绝不静默回落到今天或沿用上一问
   if (intent.dateInvalid) {
     return {
       tool: '',
@@ -109,7 +107,7 @@ export function planDemo(question: string, intent: Intent, ds: Dataset): DemoPla
   if (wantsOccupancy || CHECKIN_DETAIL_RE.test(q)) {
     const disclosure = ['本回答由服务端规则引擎给出，未调用大模型'];
     if (!wantsOccupancy) {
-      // 「我签到了吗」类本人状态问法：批次1 已开放本人状态接口，未连通时如实说取不到，不再伪装成"无接口"
+      // 「我签到了吗」类本人状态问法：本人状态接口已开放，未连通时如实说取不到
       if (PERSONAL_CHECKIN_RE.test(q)) {
         return {
           tool: '',
@@ -173,11 +171,11 @@ export function planDemo(question: string, intent: Intent, ds: Dataset): DemoPla
     }
   }
 
-  // ---- ops.v1（阶段 2B）：业务办理路由 —— 只生成办理单，执行必须经提案卡确认 ----
+  // ---- 业务办理路由 —— 只生成办理单，执行必须经提案卡确认 ----
   const opsPlan = planOpsDemo(q, intent, ds);
   if (opsPlan) return opsPlan;
 
-  // ---- 找空房间：不要求房间号，也不继承单房间条件（F13/F16 范围语义）----
+  // ---- 找空房间：不要求房间号，也不继承单房间条件（范围语义不同）----
   if (FREE_ROOMS_RE.test(q)) {
     const disclosures = intent.date ? [] : ['你没有说明日期，我按服务端当天处理'];
     for (const n of intent.notes) if (n.includes('沿用')) disclosures.push(n);
@@ -195,7 +193,7 @@ export function planDemo(question: string, intent: Intent, ds: Dataset): DemoPla
     };
   }
 
-  // ---- N08：追问"那 E312 呢"仅替换房间，保留上一问的任务类型 ----
+  // ---- 追问"那 E312 呢"仅替换房间，保留上一问的任务类型 ----
   const isFollowUp = /^(那|换|再问|还有)?\s*.{0,12}(呢|呢？|怎么样|如何)\s*[？?！!。.]*$/.test(q.trim()) && Boolean(intent.labName);
   const defaultTool = isFollowUp && intent.lastTask === 'lab_status' ? 'query_lab_status' : 'query_schedule';
 
@@ -257,10 +255,10 @@ export function planDemo(question: string, intent: Intent, ds: Dataset): DemoPla
 }
 
 // ===========================================================================
-//  ops.v1 业务办理路由（阶段 2B）—— 规则解析，只产出 prepare 工具调用
+//  ops.v1 业务办理路由 —— 规则解析，只产出 prepare 工具调用
 // ============================================================================
 //  纪律：路由只负责"选工具 + 收敛参数"；用户原话作为事实描述原样传递，
-//  绝不代用户虚构内容（如通知正文、检查项状态）。缺关键条件就明确追问。
+//  绝不替用户编造内容（如通知正文、检查项状态）。缺关键条件就明确追问。
 // ===========================================================================
 
 const DUTY_CHECKLIST_KEYS = ['power', 'lights', 'doors', 'keys', 'todo'] as const;
@@ -315,7 +313,7 @@ function opsDisclosure(): string[] {
 }
 
 function planOpsDemo(q: string, intent: Intent, ds: Dataset): DemoPlan | null {
-  // ---- F06 值班开始 / 收尾交接 ----
+  // ---- 值班开始 / 收尾交接 ----
   if (/开始值班|开始.{0,12}值班|值个班|值班开始/.test(q)) {
     if (!intent.labName) {
       return {
@@ -352,7 +350,7 @@ function planOpsDemo(q: string, intent: Intent, ds: Dataset): DemoPlan | null {
     };
   }
 
-  // ---- F02b 开门/关门（即时开放状态，区别于长周期停用）----
+  // ---- 开门/关门（即时开放状态，区别于长周期停用）----
   if (intent.labName && /(开门|关门|打开|关闭|关着|开着)/.test(q)) {
     const closed = /(关门|关闭|把门关上|关着)/.test(q);
     return {
@@ -364,7 +362,7 @@ function planOpsDemo(q: string, intent: Intent, ds: Dataset): DemoPlan | null {
     };
   }
 
-  // ---- F02 临时停用 ----
+  // ---- 房间停用（长周期检修/封闭） ----
   if (intent.labName && /(停用|封闭|暂停开放|暂停使用)/.test(q)) {
     if (!intent.date) {
       return {
@@ -403,7 +401,7 @@ function planOpsDemo(q: string, intent: Intent, ds: Dataset): DemoPlan | null {
     };
   }
 
-  // ---- F01 报修 ----
+  // ---- 报修 ----
   const issueIntent =
     /(报修|报障|建单|创建工单|提交工单|工单|维修单|登记问题|登记故障)/.test(q) ||
     (intent.labName && /(坏了|故障|没有信号|开不了机|无法开机|黑屏|漏水|损坏|需要检修|要检修)/.test(q));
@@ -433,7 +431,7 @@ function planOpsDemo(q: string, intent: Intent, ds: Dataset): DemoPlan | null {
     };
   }
 
-  // ---- F03 站内通知 ----
+  // ---- 站内通知 ----
   if (/通知|公告|发布/.test(q)) {
     const titleM = /《(.+?)》/.exec(q);
     if (!titleM) {
@@ -498,7 +496,7 @@ function planOpsDemo(q: string, intent: Intent, ds: Dataset): DemoPlan | null {
     };
   }
 
-  // ---- F10 运营日报 ----
+  // ---- 运营日报 ----
   if (/日报|运营报告|运营情况|生成报告|总结报告|运营简报/.test(q)) {
     return {
       tool: 'create_operations_report',
@@ -527,7 +525,7 @@ type DemoRendererMap = {
   [K in SuccessfulResultKind]: (payload: ResultPayload<K>, extras: DemoRenderExtras) => string;
 };
 
-/** 实际分派表：新增成功 kind 或改动其载荷类型时，必须同步提供对应渲染器。 */
+/** 实际分派表：增加成功 kind 或改动其载荷类型时，必须同步提供对应渲染器。 */
 export const DEMO_RESULT_RENDERERS: DemoRendererMap = {
   schedule: renderScheduleAnswer,
   lab_status: renderLabStatusAnswer,
@@ -564,7 +562,7 @@ export function renderDemoAnswer(
   const base = renderer(payload, extras);
   if (!extras.textOnly) return base;
   const lines = [base.replace(/；?逐节明细见下方课表卡。?/g, '').replace(/明细见下方结果卡。?/g, '')];
-  // A8：聊天模式无结果卡 → 正文承担逐节明细；其他 kind 由其专用渲染器呈现。
+  // 聊天模式无结果卡 → 正文承担逐节明细；其他 kind 由其专用渲染器呈现。
   if (kind === 'schedule') {
     for (const r of (payload as ScheduleQueryResult).lessons) {
       lines.push(`- ${r.startTime}—${r.endTime} ${r.periodLabel}｜${r.courseName}｜${r.labName}｜班级 ${(r.classNames?.length ? r.classNames : [r.className]).join('、') || '未知'}｜教师 ${r.teacher || '未录入'}｜编号 ${r.timetableId}`);
@@ -638,7 +636,7 @@ function renderKeyRecordsAnswer(rows: unknown[], date: string, total: number): s
   return lines.join('\n');
 }
 
-/** 明细里的时间统一显示 yyyy-mm-dd hh:mm（2026-11-16 用户指定，不用 ISO 串） */
+/** 明细里的时间统一显示 yyyy-mm-dd hh:mm（不用 ISO 串） */
 function shortTimeText(v: string): string {
   const m = v.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/);
   return m ? `${m[1]} ${m[2]}` : v;
@@ -657,7 +655,7 @@ function renderRecordsAnswer(r: ResultPayload<'records'>): string {
   // 签到明细（主系统返回带 scope）：用户指定格式——按班级分区，学生只给掩码学号，志愿者只给姓名
   if (scalar(r['scope'])) return formatCheckinRecordsText(r as Record<string, unknown>);
   const fields: Array<[string, string[]]> = [
-    // 用户 2026-11-16：明细不再展示账号，只留姓名/时间/实验室/节次等事实字段
+    // 明细不展示账号，只留姓名/时间/实验室/节次等事实字段
     ['姓名', ['name']], ['时间', ['at', 'time', 'ts']],
     ['实验室', ['labName', 'labId']], ['节次', ['periodKey']], ['替班对象', ['substituteFor']]
   ];
@@ -683,7 +681,7 @@ function renderRecordsAnswer(r: ResultPayload<'records'>): string {
   if (!rows.length) lines.push('本次查询未返回记录，不据此推断现场状态。');
   if (rows.length > 30) lines.push('正文仅显示前 30 条，请缩小查询范围查看其余记录。');
   // 口径注释只在**本轮真的有记录**时给，且最多两句：0 条时用户只需要"没有记录"这一句，
-  // 长篇隐私/口径声明是在应付审计，不是在回答用户（2026-11-14 用户明确否掉这类噪音）。
+  // 长篇隐私/口径声明会挤占回答空间。
   const meta = r['meta'];
   if (rows.length && meta && typeof meta === 'object' && 'note' in meta && typeof meta.note === 'string') {
     const brief = String(meta.note).split(/[；;]/).filter(Boolean).slice(0, 2).join('；');
@@ -724,9 +722,8 @@ function renderDirectoryAnswer(r: ResultPayload<'records'>): string {
 /**
  * 学期安排/值班模板（只读档案）：只读档案与课表解算无关——空数组不得说成"无课/无人"。
  *
- * 只答问到的那一半（11-11 用户实机反馈）：问「周三下午56节哪个志愿者在值班」，
- * 旧呈现把「学期安排：尚未导入」+ 整张 27 人名单 + 出处说明一起倒出来，
- * 用户要的一行被埋在无关内容里。这里按问句取要回答的面：
+ * 只答问到的那一半：问「周三下午56节哪个志愿者在值班」时，若把「学期安排：尚未导入」+
+ * 整张 27 人名单 + 出处说明一起倒出来，用户要的一行会被埋在无关内容里。这里按问句取要回答的面：
  *   · 只问值班 → 该节应值班的人；不附整张名单，也不提学期安排；
  *   · 问名单/多少人 → 才列名单；
  *   · 只问课/学期安排 → 只给学期安排；
@@ -760,7 +757,7 @@ function renderTermScheduleAnswer(r: TermScheduleResult, extras: DemoRenderExtra
   const lines: string[] = [];
   const t = r.termSchedule, v = r.volunteerSchedule;
   const q = String(extras.question ?? '');
-  // 问句缺失（旧调用方/单元测试）时按完整档案呈现，不猜用户只想要哪一半
+  // 问句缺失（调用方未提供/单元测试）时按完整档案呈现，不猜用户只想要哪一半
   const noQuestion = !q.trim();
   const asksDuty = noQuestion || /值班|值守|志愿者|谁在/.test(q);
   const asksTerm = noQuestion || /课|排课|学期|实验|停课|取消|档案/.test(q);
@@ -780,7 +777,7 @@ function renderTermScheduleAnswer(r: TermScheduleResult, extras: DemoRenderExtra
       lines.push(`**周${wdOf(v.expected.weekday)} ${v.expected.slotCode} 节值班**：${named.length ? named.join('、') : '（表上这一格未填姓名）'}${unnamed > 0 ? ` · 另有 ${unnamed} 个席位未指名` : ''}`);
     } else {
       // 问"今天/明天/周X 的值班表"但没有指定节次时，用户要的是**那一天**的排班，
-      // 不是"模板已导入 + 全员名单"（2026-11-14 实机就是在这里答非所问）。
+      // 不是"模板已导入 + 全员名单"。
       const targetWd = resolveTargetWeekday(q, extras.today);
       const day = targetWd ? (v.days as Array<{ weekday?: number; slots?: Array<{ slotCode?: string; seats?: Array<{ name?: string; vacant?: boolean }> }> }>)
         .find((d) => Number(d.weekday) === targetWd) : null;
@@ -808,7 +805,7 @@ function renderTermScheduleAnswer(r: TermScheduleResult, extras: DemoRenderExtra
     }
   }
   // hint 是**给模型的处置指引**（原文是"请如实告知用户并提示联系管理员"），
-  // 原样印进正文会让用户读到一句对本机指令的复述（2026-11-10 真实数据实机实测到）。
+  // 原样印进正文会让用户读到一句对本机指令的复述。
   // 用户侧只给事实与下一步：哪一侧没导入、该找谁；两侧都在时才保留中性出处说明。
   const missing = [(!t.enabled && (both || asksTerm)) && '学期安排', (!v.enabled && (both || asksDuty)) && '志愿者周值班模板'].filter(Boolean) as string[];
   if (missing.length) lines.push(`- ${missing.join('、')}尚未导入，请联系管理员在学期数据接入里补齐后再查询。`);
@@ -878,18 +875,18 @@ function renderScheduleAnswer(
     return `**查不到课表：系统里没有这个班级。**\n\n可选的班级：${options}。请确认班级名称，或把房间号/日期告诉我，我按房间查。`;
   }
   if (result.lessons.length === 0) {
-    // F09：timetable_empty 是数据问题，不能先给"没有课"的确定结论
+    // timetable_empty 是数据问题，不能先给"没有课"的确定结论
     if (result.reason === 'timetable_empty') {
       return `**${head}无法判断是否有课**：系统内课表数据为空。本结果不构成"该房间没课"的结论。`;
     }
-    // 用户口径（2026-11-11）：查到没课就只回"没有课"，不解释"系统没编造"这类开发细节，
-    // 也不再引导"看下方结果卡"——空结果不再渲染结果卡。
+    // 查到没课就只回"没有课"，不解释"系统没编造"这类开发细节，
+    // 也不引导"看下方结果卡"——空结果不渲染结果卡。
     if (result.reason === 'no_class_in_that_period') return `**${head}本节没有课。**`;
     if (result.reason === 'lab_not_active') return `**${head}当前不是开放状态，当天也没有排课。**`;
     return `**${head}没有课。**`;
   }
 
-  // A8：重点先行（加粗结论句），明细列表化；数据来源/常规口径不上正文——
+  // 重点先行（加粗结论句），明细列表化；数据来源/常规口径不上正文——
   // 来源徽章与结构化卡已经在界面承担，正文只留改变结论的例外说明。
   const lines: string[] = [];
   const lastLesson = result.lessons[result.lessons.length - 1]!;
@@ -903,7 +900,7 @@ function renderScheduleAnswer(
   }
   if (extras.periodFiltered) lines.push('- 已按你指定的节次过滤');
   if (extras.dateWasDefaulted) lines.push(`- 你没有说明日期，以上按服务端当天 ${result.date} 计算`);
-  // A8：notes 白名单——只保留改变结论或口径的例外说明（警告/歧义消解/停用/
+  // notes 白名单——只保留改变结论或口径的例外说明（警告/歧义消解/停用/
   // 学生视角/周次不可确定）；常规口径（教学周、门态、在室统计说明）留在结构化卡
   for (const n of result.notes) {
     if (/⚠️|未带字母前缀|临时停用|仅为本人的课程|教学周不可确定|未做周次过滤/.test(n)) lines.push(`- ${n}`);
@@ -999,7 +996,7 @@ function renderLabStatusAnswer(r: LabStatusResult, extras: { question?: string }
   if (r.labName === null) {
     return `**查不到状态：系统里没有收录这个房间号。**\n\n可选的房间号：${r.suggestions.join('、') || '（当前未收录任何房间）'}。`;
   }
-  // A8：重点先行——"有人吗"的核心答案（在室人数）或排课概要放第一句加粗；
+  // 重点先行——"有人吗"的核心答案（在室人数）或排课概要放第一句加粗；
   // 在室统计长口径、门态说明留在结构化卡，正文只留一行短口径括注。
   // ⚠️ 保留 `在室人数：N 人` 字面（occupancy.test.ts 按它取值）。
   const lines: string[] = [];
@@ -1026,7 +1023,7 @@ function renderLabStatusAnswer(r: LabStatusResult, extras: { question?: string }
     const k=r.keySummary;const labels:Record<string,string>={in_cabinet:'在钥匙柜',borrowed:'登记借用',handover:'登记位置待交接',unknown:'位置未知'};
     lines.push(`- 钥匙登记：${labels[k.state]||'未知'}${k.location?`，位置 ${k.location}`:''}${k.holder?`，借用人 ${k.holder}`:''}`);
   }
-  // A8：notes 白名单（与课表渲染同口径）——只上例外说明，不上常规口径
+  // notes 白名单（与课表渲染同口径）——只上例外说明，不上常规口径
   for (const n of r.notes) {
     if (/⚠️|已按|临时停用|匹配到多个房间|未带字母前缀/.test(n)) lines.push(`- ${n}`);
   }
@@ -1040,7 +1037,7 @@ function renderLabStatusAnswer(r: LabStatusResult, extras: { question?: string }
 
 function renderFreeRoomsAnswer(r: FreeRoomsResult): string {
   const lines: string[] = [];
-  // F09：数据覆盖不足时禁止输出确定空闲名单
+  // 数据覆盖不足时禁止输出确定空闲名单
   if (r.coverage === 'missing') {
     lines.push(`**无法判断 ${r.date}（${r.weekdayLabel}）哪些房间空闲**：系统内课表数据为空，"没有记录"不能当成"没有课"。`);
     lines.push('请先导入课表数据后再使用找空闲房间功能。');

@@ -1,5 +1,5 @@
 /**
- * 会话上下文表 —— 「那 E312 呢？」的承接能力（阶段 2A 首片）
+ * 会话上下文表 —— 「那 E312 呢？」的承接能力
  * ============================================================================
  *  定位：**内存中的有界最近意图表**。不落盘、不含任何用户身份信息，
  *  只记录"这个会话最近一次问到的房间号 / 日期 / 节次"，供下一问缺省时显式沿用。
@@ -15,7 +15,7 @@ export interface SessionIntent {
   labName: string | null;
   date: string | null;
   periodKey: string | null;
-  /** 上一问的任务类型（schedule / lab_status / free_rooms）—— N08 追问继承 */
+  /** 上一问的任务类型（schedule / lab_status / free_rooms）—— 追问继承 */
   lastTask: string | null;
   /** 最近一次问题原文（截断，仅用于排查，不进界面） */
   question: string;
@@ -60,7 +60,7 @@ export function rememberSession(
     labName: intent.labName,
     date: intent.date,
     periodKey: intent.periodKey,
-    // R05：字段名全链路统一为 task（内存 SessionIntent.lastTask 是历史遗留名，赋值在此一处收敛）
+    // 对外字段统一为 task；内存结构里的 lastTask 只在此处赋值，保持单一入口
     lastTask: intent.task ?? null,
     question: intent.question.slice(0, 200),
     updatedAt: Date.now()

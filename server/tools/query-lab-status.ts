@@ -2,11 +2,11 @@ import { effectiveSchedule } from '../data/calendar.ts';
 import { closuresFor } from '../data/closures.ts';
 import { isBusinessConnected, businessRequest } from '../business/bridge.ts';
 /**
- * 只读工具：query_lab_status —— 房间档案 + 该日排课统计（阶段 2A）
+ * 只读工具：query_lab_status —— 房间档案 + 该日排课统计
  * ============================================================================
  *  数据全部来自现有的 labs / openLabs / timetable，零编造。
- *  ⚠️ 在室人数（occupancy）永远返回 null：本系统没有任何签到/门禁数据来源，
- *     无论是工具、界面还是模型话术都不允许给出人数 —— 没有数据就明说没有。
+ *  ⚠️ 在室人数（occupancy）只取主系统授权的签到数据；业务通道未连接或
+ *     取不到时保持 null —— 没有数据就明说没有，不给出估算人数。
  */
 
 import type { LabStatusArgs, LabStatusResult, ScheduleQueryResult } from '../../shared/types.ts';
@@ -64,11 +64,11 @@ export async function runQueryLabStatus(
           ? '实时数据：经授权读取原系统业务数据，来源见查询信息'
           : ds.sourceType === 'snapshot'
             ? '脱敏快照：从真实 state.json 导出后已脱敏，非实时'
-            : '模拟演示：内置构造的示例数据，与真实实验室无关'
+            : '内置示例：随仓库提供的示例数据，与真实实验室无关'
     } satisfies ScheduleQueryResult['provenance']
   };
 
-  // A7：裸数字房间号（"310有人吗"）按后缀解析——唯一命中自动收敛并在 notes
+  // 裸数字房间号（"310有人吗"）按后缀解析——唯一命中自动收敛并在 notes
   // 如实标注，多个命中如实报歧义（suggestions=候选，不替用户猜），零个走下方 lab_not_found。
   let bareResolved = false;
   if (!lab) {
@@ -126,10 +126,8 @@ export async function runQueryLabStatus(
     };
   }
 
-  // 2026-10-05：接入主系统实时在室人数。
-  //   此前工具恒返回 null（当时确实没有签到数据来源）→ 问「某房间现在有多少人」会落到
-  //   evidence_missing 兜底失败。0.5.0 打通业务通道后主系统已有签到数据，这里取值。
-  //   ⚠️ 仅在**业务通道已连接**（经主系统授权）时取；取不到就保持 null 并如实说明 —— 绝不编造。
+  // 在室人数来自主系统实时签到接口。
+  //   仅在**业务通道已连接**（经主系统授权）时取；取不到就保持 null 并如实说明 —— 绝不编造。
   let occupancy: LabStatusResult['occupancy'] = null;
   let keySummary:LabStatusResult['keySummary']={state:'unknown',location:null,recordedAt:null,note:'未取得授权钥匙登记，不推测位置或借用人'};
   if (isBusinessConnected()) {
@@ -156,9 +154,9 @@ export async function runQueryLabStatus(
   const notes: string[] = [week.note];
   if (!week.determinable) notes.push('⚠️ 教学周不可确定，以下排课统计未做周次过滤');
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
-  // A7：裸数字自动解析必须让用户看见（工具消息 reminder 要求 notes 原样转达）
+  // 裸数字自动解析必须让用户看见（工具消息 reminder 要求 notes 原样转达）
   if (bareResolved && lab) notes.push(`房间号「${rawLabName}」未带字母前缀，已按 ${lab.name} 理解`);
-  // F19：档案状态 ≠ 实时门禁。措辞必须避免把静态档案解释成"此刻能否进入"
+  // 档案状态 ≠ 实时门禁。措辞必须避免把静态档案解释成"此刻能否进入"
   const dynamic=ds.openLabStatus?.[lab.name]??ds.openLabStatus?.[lab.id],record=typeof dynamic==='object'?dynamic.status:dynamic;
   const actualStatus=['active','closed'].includes(record||'')?record!:lab.status;
   const doorNote=['active','closed'].includes(record||'')?'开放状态来自主系统人员动态登记，非门禁传感器状态':'无动态登记，回退房间档案，登记时间未知';
@@ -186,7 +184,7 @@ export async function runQueryLabStatus(
     });
   }
 
-  // 下一节课：仅对"今天"计算（F18）；非当天显式标注不适用，绝不冒充"当天无更多排课"
+  // 下一节课：仅对"今天"计算；非当天显式标注不适用，不得说成"当天无更多排课"
   let nextLesson: LabStatusResult['schedule']['nextLesson'] = null;
   let nextLessonReason: LabStatusResult['schedule']['nextLessonReason'];
   if (!week.determinable) {

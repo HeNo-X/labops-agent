@@ -13,7 +13,7 @@
  *
  *  设计原则（宁可不改，也不改错）：
  *  1) 房间号必须带字母前缀（E310 / D517）；裸数字一律不猜——那是日期、学号、容量的高发区
- *  2) 中文词条最短 4 字才参与纠错，避免把常用词改成罕见词
+ *  2) 中文词条最短 4 字才参与纠错，避免把常用词替换为罕见词
  *  3) 单次最多改 10 处；超出则整段放弃（宁可原样返回，也不做不可控改写）
  *  4) 每条改动都记录 from/to/kind/at，随响应回传
  */
@@ -28,8 +28,8 @@ export interface LexiconEntry {
   kind: TermKind;
   /**
    * Tier B 专用：逐字无声调音节的连写（如「移液枪」→ yiyeqiang）。
-   * 有它才允许 2–3 字短词参与纠错，且只接受**完全同音**；没有它的条目维持原来的
-   * ≥4 字 + 等长编辑距离 ≤1 规则，一字不改。
+   * 有它才允许 2–3 字短词参与纠错，且只接受**完全同音**；没有它的条目维持
+   * ≥4 字 + 等长编辑距离 ≤1 规则。
    */
   sy?: string;
   /** Tier B 专用：已登记的同音/近音误写，做表层精确替换 */
@@ -92,7 +92,7 @@ export function normalizeForKey(input: string): string {
   return out.replace(/[\s·・\-_—–/\\]/g, '');
 }
 
-/** 编辑距离（Levenshtein），带早期剪枝：长度差超过 max 直接返回 max+1 */
+/** 编辑距离（Levenshtein），带提前剪枝：长度差超过 max 直接返回 max+1 */
 export function editDistance(a: string, b: string, max = 2): number {
   if (a === b) return 0;
   if (Math.abs(a.length - b.length) > max) return max + 1;
@@ -199,7 +199,7 @@ export interface CorrectOptions {
   /**
    * 只跑用户登记的那一遍，跳过词典自动规则。
    * 界面上「本页不再自动调整术语」停的是**自动**改动，用户自己写的词对不该被一起关掉；
-   * 关掉它等于让一个明确的人类决定被一个"临时别再猜"的开关顺带否决。
+   * 关掉它等于让一个明确的人类决定被一个"先别再猜"的开关顺带否决。
    */
   skipLexicon?: boolean;
 }
@@ -288,7 +288,7 @@ function findAll(text: string, word: string): number[] {
  * 对转写文本做专有名词纠错。
  * @param text ASR 原始文本
  * @param lexicon buildLexicon / lexiconFromDataset / 术语表转换的产物
- * @param opts Tier B 同音纠错所需三份数据；不传则**只做原来的 Tier A 规则**，行为与升级前一致
+ * @param opts Tier B 同音纠错所需三份数据；不传则**只做 Tier A 规则**
  */
 export function correctTranscript(text: string, lexicon: readonly LexiconEntry[], opts: CorrectOptions = {}): CorrectResult {
   // 长的先占位：否则「叶枪」会把「一叶枪」切成两段各改一次，改完谁也认不出原句

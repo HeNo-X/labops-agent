@@ -10,7 +10,7 @@
  *    ④ 事件流水 —— 最近上报（异常线索高亮）
  *    ⑤ 合规脚注 —— 画面与人脸不出内网、云端只见剥离身份 JSON、二维码主链
  *
- *  数据全部来自本服务 /api/vision/*；未接入时给的是配置指引，不冒充数据。
+ *  数据全部来自本服务 /api/vision/*；未接入时给的是配置指引，不编造数据。
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { clientFetch } from '../client';
@@ -161,7 +161,7 @@ function draftIssue(lab: VisionLabSummary): void {
   emit('navigate', { view: 'assistant' });
 }
 
-/** 事件误报/确认回流（批C）；失败静默——下一轮轮询会还原服务端口径 */
+/** 事件误报/确认回流；失败静默——下一轮轮询会还原服务端口径 */
 async function sendFeedback(event: VisionEventRow, verdict: 'false_alarm' | 'confirmed'): Promise<void> {
   try {
     const res = await clientFetch('/api/vision/feedback', {
@@ -188,7 +188,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- 实验室监控：本地保留；线上部署（VISION_MODULE=off）不显示 -->
+  <!-- 实验室监控：本地保留；部署时 VISION_MODULE=off 不显示 -->
   <section v-show="visionAvailable" class="vision-view">
     <!-- ① 通道状态 -->
     <header class="vision-top" :class="`is-${channelTone}`">
@@ -206,7 +206,7 @@ onUnmounted(() => {
          未接入内场摄像头时，这是页面上唯一真实的画面来源；手机可切前/后置。 -->
     <BuiltInCamera compact />
 
-    <!-- 未接入：配置指引（诚实空态，不冒充数据） -->
+    <!-- 未接入：配置指引（诚实空态，不编造数据） -->
     <section v-if="status && !status.configured" class="vision-card vision-guide">
       <h2>{{ tr('把实验室摄像头接入 Agent') }}</h2>
       <ol>
@@ -234,7 +234,7 @@ onUnmounted(() => {
         <p v-else class="vision-live-note">{{ tr(liveProbe === null ? '正在探测内网画面…' : '内网画面暂时不可达（正常形态：云端只见结论，画面留在实验室）') }}</p>
       </section>
 
-      <!-- ②.5 待核查专区（批C）：告警房间聚合，一键起草工单（Agent 起草 → 本人确认） -->
+      <!-- ②.5 待核查专区：告警房间聚合，一键起草工单（Agent 起草 → 本人确认） -->
       <section v-if="alertCount" class="vision-todo" aria-label="待核查">
         <h2>{{ tr('待核查 {n} 处', { n: alertCount }) }}</h2>
         <ul>
@@ -487,7 +487,7 @@ onUnmounted(() => {
   padding: 0 4px;
 }
 
-/* ---- 待核查专区（批C）与事件回流 ---- */
+/* ---- 待核查专区与事件回流 ---- */
 .vision-todo {
   border: 1px solid var(--danger, #c0392b);
   border-radius: 14px;
@@ -537,7 +537,7 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-/* 交互反馈补齐（2026-11-07）；hover 限定指针设备，触屏用 :active 按压反馈 */
+/* hover 限定指针设备，触屏用 :active 按压反馈 */
 @media (hover: hover) {
   .vision-actions button:hover:not(:disabled) {
     background: var(--surface-3);

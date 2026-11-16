@@ -34,10 +34,10 @@ export interface BudgetApplyResult {
 /** 单条工具结果瘦身：只保留前若干字符（那是模型真正需要的结论段） */
 const TOOL_RESULT_KEEP_CHARS = 1200;
 /**
- * A3 结构感知窗口（借鉴 SWE-agent ACI 的 observation windowing）：
+ * 结构感知窗口（借鉴 SWE-agent ACI 的 observation windowing）：
  * 数组字段截到前 TOOL_ARRAY_WINDOW 项，并用 dataNote 如实告知
- * 「共几条、省了几条、下一步怎么拿」——绝不在记录中间盲切（旧实现会把
- * JSON 腰斩成残缺记录，模型既看不到总数，也不知道数据被切过）。
+ * 「共几条、省了几条、下一步怎么拿」——绝不在记录中间盲切：按字符切 JSON
+ * 会得到残缺记录，模型既看不到总数，也不知道数据被切过。
  */
 const TOOL_ARRAY_WINDOW = 8;
 
@@ -76,12 +76,11 @@ export function slimToolMessage(m: ChatMessage): ChatMessage {
   if (content.length <= TOOL_RESULT_KEEP_CHARS) return m;
 
   const parsed = parseToolContent(m.content);
-  // A4（借鉴 Manus「keep the wrong stuff in」）：失败消息**豁免瘦身**——
-  // code/message/suggestions/instruction 是模型换路与如实交代的依据，
+  // 失败消息**豁免瘦身**：code/message/suggestions/instruction 是模型换路与如实交代的依据，
   // 砍掉它等于把模型的学习信号剪掉；失败消息本来就小，不构成预算压力。
   if (parsed && parsed['ok'] === false) return m;
   if (!parsed) {
-    // 回退旧行为：非 JSON 内容只能按字符截断，但必须如实标注
+    // 非 JSON 内容只能按字符截断，但必须如实标注
     return {
       role: 'tool',
       tool_call_id: m.tool_call_id,

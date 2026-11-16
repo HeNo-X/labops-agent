@@ -1,4 +1,4 @@
-/** Real-model evaluation only. No silent demo replacement, no original-system commit. */
+/** Real-model evaluation only. A missing key is reported as not_run; the deterministic engine is never substituted silently. */
 import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import crypto from 'node:crypto';import {execFileSync} from 'node:child_process';
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'labops-model-eval-'));process.env.LABOPS_DB_PATH=path.join(temp,'eval.sqlite');process.env.LIVE_DATA='0';
 const {getConfig,PROJECT_ROOT}=await import('../server/config.ts');const cfg=getConfig();

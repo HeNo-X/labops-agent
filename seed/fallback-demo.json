@@ -2,7 +2,7 @@
   "meta": {
     "format": "labops-agent/snapshot@1",
     "sourceType": "demo",
-    "sourceLabel": "模拟演示",
+    "sourceLabel": "内置示例",
     "generatedAt": "2026-09-26T00:00:00+08:00",
     "generatedBy": "手工构造的示例数据（非真实、非脱敏）",
     "note": "当 seed/snapshot.json 不存在时加载本文件，保证空仓库也能跑通链路。房间号刻意使用 DEMO- 前缀，与真实房间号不冲突，避免被误认为真实数据。",
@@ -37,7 +37,7 @@
       "location": "演示数据·非真实房间·A区1层",
       "capacity": 60,
       "status": "active",
-      "description": "示例实验室（模拟演示数据）"
+      "description": "示例实验室（内置示例数据）"
     },
     {
       "id": "demo_lab_2",
@@ -46,7 +46,7 @@
       "location": "演示数据·非真实房间·B区2层",
       "capacity": 40,
       "status": "active",
-      "description": "示例实验室（模拟演示数据）"
+      "description": "示例实验室（内置示例数据）"
     }
   ],
   "openLabs": [
@@ -57,7 +57,7 @@
       "location": "演示数据·非真实房间·C区",
       "capacity": 30,
       "status": "closed",
-      "description": "示例开放实验室（模拟演示数据）"
+      "description": "示例开放实验室（内置示例数据）"
     }
   ],
   "timetable": [

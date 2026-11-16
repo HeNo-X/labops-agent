@@ -110,7 +110,7 @@
             /* 注册 Tab：降级为待机 + 眨眼，不做特殊编排 */
             set('purple'); set('black'); set('orange'); set('yellow');
         } else if (s.passwordFocused && s.showPassword) {
-            /* 明文聚焦（v3 改版）：密码可见 → 全员凑近偷看，比账号聚焦更靠近、更专注 */
+            /* 明文聚焦：密码可见 → 全员凑近偷看，比账号聚焦更靠近、更专注 */
             set('purple', { eyes: 'wide', mouth: 'line',  pose: 'curious', look: { x: 1, y: .12 } });
             set('black',  { eyes: 'wide', mouth: 'flat',  pose: 'curious', look: { x: .95, y: .12 } });
             set('orange', { eyes: 'wide', mouth: 'line',  pose: 'curious', look: { x: .9, y: .15 } });
@@ -358,13 +358,13 @@
     };
 
     /* ---------- 表单事件绑定（只读，不干预业务） ----------
-       R 修订：SPA 场景下脚本加载时表单可能尚未就绪，绑定支持延迟 rebind */
+       SPA 场景下脚本加载时表单可能尚未就绪，绑定支持延迟 rebind */
     var usernameInput = null;
     var passwordInput = null;
     var toggleBtn = null;
     var docBound = false;
 
-    /* R：绑定带元素级防重入守卫 —— rebind 幂等，绝不会双重绑定
+    /* 绑定带元素级防重入守卫 —— rebind 幂等，绝不会双重绑定
       （否则点击一次 = 两个处理器各切一次 = 看起来"无效"） */
     function bindFormEvents() {
         usernameInput = document.getElementById('username');

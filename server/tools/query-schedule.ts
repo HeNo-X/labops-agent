@@ -3,9 +3,9 @@ import { effectiveSchedule, calendar } from '../data/calendar.ts';
  * 只读工具：query_schedule
  * ============================================================================
  *  职责边界：**只查课表，只读，绝不写**。查询逻辑与模型适配层完全分离 ——
- *  拿掉 Agnes，这个函数照样能被单测直接调用（验收要求：可替换数据源的只读工具）。
+ *  拿掉 Agnes，这个函数照样能被单测直接调用（数据源可替换的只读工具）。
  *
- *  口径逐条对齐老系统 Pages/lib/lab-time.js（兼容性红线，不得"优化"）：
+ *  口径逐条对齐主系统 Pages/lib/lab-time.js（兼容性红线，不得"优化"）：
  *    · weekday 用 getDay() 语义（0=周日..6=周六）
  *    · term 不等则跳过（行有 term 且学期配置有 term 时才比）
  *    · status === 'cancelled' 跳过
@@ -71,7 +71,7 @@ export function runQuerySchedule(
   }
 
   const rawLabName = typeof args.labName === 'string' ? args.labName.trim() : '';
-  // 2026-11-08：允许**按班级**查（"智能本2501班的课表"）——用户脑子里最先想到的往往
+  // 允许**按班级**查（"智能本2501班的课表"）——用户脑子里最先想到的往往
   // 是"我这个班"，不是房间号。二者必须给一个，都没给才拒绝。
   const rawClassName = typeof args.className === 'string' ? args.className.trim() : '';
   // 去掉用户常带的"班/级"后缀，避免"智能本2501班"匹配不到"智能本2501"
@@ -85,7 +85,7 @@ export function runQuerySchedule(
   }
 
   // ---------- 2. 找房间（普通实验室 + 开放实验室都认）----------
-  // A7：裸数字房间号（"310今天有课吗"）按后缀解析——唯一命中自动收敛并在 notes
+  // 裸数字房间号（"310今天有课吗"）按后缀解析——唯一命中自动收敛并在 notes
   // 如实标注，多个命中如实报歧义（可选项给全），零个走下方 lab_not_found 结果。
   // 班级优先：同时给了房间号时以班级为准（用户问"我们班的课"，房间只是顺口带上）
   let lab: LabRow | null = classKey ? null : rawLabName ? (findLab(ds, rawLabName) ?? findOpenLab(ds, rawLabName)) : null;
@@ -115,7 +115,7 @@ export function runQuerySchedule(
     notes.push(week.note);
   }
   if (holiday) notes.push(`⚠️ ${date} 在学期配置中被标记为假期`);
-  // A7：裸数字自动解析必须让用户看见（工具消息 reminder 要求 notes 原样转达）
+  // 裸数字自动解析必须让用户看见（工具消息 reminder 要求 notes 原样转达）
   if (bareResolved && lab) notes.push(`房间号「${rawLabName}」未带字母前缀，已按 ${lab.name} 理解`);
   const classOf = (row: TimetableRow): string[] => (row.classNames.length ? row.classNames : row.className ? [row.className] : []);
   if (classKey) notes.push(`按班级「${classKey}」查询：同一时段多个教室的课会一起列出`);
@@ -133,7 +133,7 @@ export function runQuerySchedule(
         ? '实时数据：经授权读取原系统排课，来源与读取时间见查询信息'
         : ds.sourceType === 'snapshot'
           ? '脱敏快照：从真实 state.json 导出后已脱敏（教师姓名伪名化，不含用户/名册/凭据），非实时'
-          : '模拟演示：内置构造的示例数据，与真实实验室无关，仅用于验证链路'
+          : '内置示例：随仓库提供的示例数据，与真实实验室无关，仅用于验证链路'
   };
 
   const base: Omit<ScheduleQueryResult, 'lessons' | 'byPeriod' | 'reason'> = {
@@ -228,7 +228,7 @@ export function runQuerySchedule(
   notes.push(`统计口径：${statistics.recordCount} 条班级展开记录、${statistics.activityCount} 个教学活动、${statistics.classCount} 个班级、${statistics.occupiedPeriodCount} 个占用大节。`);
   if (statistics.conflicts.length) notes.push(`⚠️ 存在 ${statistics.conflicts.length} 个疑似冲突时段，须核实合班或导入数据；不能据此确认房间可用。`);
 
-    // ---------- 6. 展开成 lessons（合班时每班一条，与老系统一致）----------
+    // ---------- 6. 展开成 lessons（合班时每班一条，与主系统一致）----------
   const lessons: ScheduleLesson[] = [];
   for (const row of matched) {
     const p = periodByKey(row.periodKey);

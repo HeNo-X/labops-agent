@@ -1,7 +1,7 @@
 /**
  * 前后端共享类型 —— 事件契约、工具契约、数据来源标识
  * ============================================================================
- *  B3 要求：SSE 事件类型表先在文档里定死，前后端按同一份实现。本文件即那份契约。
+ *  SSE 事件类型表先在文档里定死，前后端按同一份实现。本文件即那份契约。
  */
 
 import type { PeriodKey } from './periods.ts';
@@ -12,19 +12,19 @@ import type { Proposal } from './operations-contract.ts';
 // ===========================================================================
 
 /**
- * - live     ：实时数据 —— 服务端直接读真实 state.json（LIVE_DATA=1，仅本地/校内演示）
+ * - live     ：实时数据 —— 服务端直接读真实 state.json（LIVE_DATA=1，仅本地/校内使用）
  * - snapshot ：脱敏快照 —— 默认。从真实 state.json 导出、已脱敏、随仓库入库
- * - demo     ：模拟演示 —— 快照文件缺失时的内置示例数据，构造出来的
+ * - demo     ：内置示例数据 —— 快照文件缺失时使用，由本地构造
  */
 export type DataSourceType = 'live' | 'snapshot' | 'demo';
 
 export const DATA_SOURCE_LABELS: Record<DataSourceType, string> = {
   live: '实时数据',
   snapshot: '脱敏快照',
-  demo: '模拟演示'
+  demo: '内置示例'
 };
 
-/** 推理引擎：agnes = 真实模型；demo = 服务端确定性规则（未配置 Key 时的诚实降级） */
+/** 推理引擎：agnes = 真实模型；demo = 服务端确定性规则引擎（未配置 Key 时兜底） */
 export type EngineType = 'agnes' | 'demo' | 'facts' | 'dashscope' | 'scope';
 
 // ===========================================================================
@@ -33,10 +33,10 @@ export type EngineType = 'agnes' | 'demo' | 'facts' | 'dashscope' | 'scope';
 
 /** 当前实现的事件类型 */
 export const RUN_EVENT_TYPES = [
-  /** 消息接受确认（会话端点专用）：payload 携带全部正式 ID（N01/N17） */
+  /** 消息接受确认（会话端点专用）：payload 携带全部正式 ID */
   'run_accepted',
   /**
-   * 跨会话并发第二片：全局并发闸门排队提示（协议层控制事件）。
+   * 全局并发闸门排队提示（协议层控制事件）。
    * ★ 不带 seq：SSE 解码器按 seq 去重，run_accepted 已占 -1、执行事件从 0 起，
    *   排队提示不进事件流编号空间；前端只显示可读提示，不交给 run.ingest。
    */
@@ -49,19 +49,19 @@ export const RUN_EVENT_TYPES = [
   'answer_delta',
   'run_completed',
   'run_failed',
-  /** R03：终态已执行但持久化失败 —— 前端必须展示"保存失败"，不得静默 */
+  /** 终态已执行但持久化失败 —— 前端必须展示"保存失败"，不得静默 */
   'save_failed',
   /**
-   * ops.v1（阶段 2B）：服务端产出一个待确认业务提案后发出。
+   * ops.v1：服务端产出一个待确认业务提案后发出。
    * payload 携带完整提案预览；实际执行只经受权 UI 的决策端点，模型无权提交。
    */
   'need_confirm',
-  /** ops.v1：任务状态变化（本轮由决策 REST 端点驱动；SSE 侧登记备用） */
+  /** ops.v1：任务状态变化（由决策 REST 端点驱动；SSE 侧登记备用） */
   'task_updated',
-  /** ops.v1：一次业务副作用的结果（SSE 侧登记备用；本轮经 REST 返回） */
+  /** ops.v1：一次业务副作用的结果（SSE 侧登记备用；经 REST 返回） */
   'operation_result',
   /**
-   * A5 任务计划复述（todo recitation）：模型经 maintain_task_plan 工具登记/更新
+   * 任务计划复述（todo recitation）：模型经 maintain_task_plan 工具登记/更新
    * 多步任务计划后发出。payload 是**模型自己的工作记录**，不是业务事实；
    * UI 呈现为计划面板，用户据此看到 Agent 打算做什么、做到了哪一步。
    */
@@ -71,8 +71,8 @@ export const RUN_EVENT_TYPES = [
 ] as const;
 
 /**
- * 预留但**本轮仍未发出**的事件（类型固定，便于后续阶段增量实现时前后端不用改契约）：
- *   run_cancelled —— 用户中途取消（本轮仍由前端合成）
+ * 预留但**当前仍未发出**的事件（类型先固定，前后端不必为此改契约）：
+ *   run_cancelled —— 用户中途取消（由前端合成）
  *   thinking      —— 内部推理步骤。注意：绝不把模型内部思维链展示给用户，
  *                    该事件若启用也只承载\"正在查询课表\"这类可观察的步骤摘要。
  */
@@ -138,12 +138,12 @@ export interface RunSnapshot {
   endedAt: string | null;
   /** 实际写出该回答的模型；未配置大模型（规则引擎）时为 null */
   assistantMessageId: string | null;
-  /** A5：该轮最后登记的任务计划（meta.plan）；没有就是 null */
+  /** 该轮最后登记的任务计划（meta.plan）；没有就是 null */
   plan: TaskPlanStep[] | null;
 }
 
 // ===========================================================================
-// A5 任务计划（todo recitation）
+// 任务计划（todo recitation）
 // ===========================================================================
 
 /** 模型自己的工作步骤记录；状态只有三种，UI 用 ○/✓/— 呈现 */
@@ -167,7 +167,7 @@ export interface RunStartedPayload {
   engine: EngineType;
   /** 本模式的模型标识（聊天=DashScope 链首，任务=Agnes）；未配置大模型时缺省。界面据此显示"谁在回答" */
   model?: string;
-  /** 本次结果的数据来源；前端据此显示"实时数据/脱敏快照/模拟演示" */
+  /** 本次结果的数据来源；前端据此显示对应的来源标签 */
   sourceType: DataSourceType;
   /** 服务端时间（Asia/Shanghai），不信任客户端时钟 */
   serverNow: {
@@ -178,7 +178,7 @@ export interface RunStartedPayload {
     weekdayLabel: string;
     timezone: string;
   };
-  /** 服务端预解析出的时间指代（难点 3：日期绝不让模型自己算） */
+  /** 服务端预解析出的时间指代（日期绝不让模型自己算） */
   resolvedTimeHint: {
     raw: string | null;
     date: string | null;
@@ -242,7 +242,7 @@ export interface RunCompletedPayload {
   model?: string;
   /**
    * ops.v1：本次运行结束时关联任务的业务状态。
-   * awaiting_confirmation 必须如实呈现——它**不是**"业务已办完"（任务书 §11.3）。
+   * awaiting_confirmation 必须如实呈现——它**不是**"业务已办完"。
    */
   taskStatus?: string;
   /** 模型用量（仅 agnes 引擎有） */
@@ -250,7 +250,7 @@ export interface RunCompletedPayload {
   /**
    * 上下文预算决策（估算口径，见 shared/context-budget.ts）。
    * 只用于**可观测**（界面显示"估算 X / 阈值 Y · 已精简 N 条"），
-   * 不参与终态判定，也绝不冒充 provider 的真实 usage。
+   * 不参与终态判定，也不等同于 provider 的真实 usage。
    */
   budget?: {
     shouldTrim: boolean;
@@ -293,7 +293,7 @@ export interface RunFailedPayload {
 }
 
 /**
- * run_cancelled：用户主动取消。第一阶段仍由**前端合成**（abort 后本地追加），
+ * run_cancelled：用户主动取消。仍由**前端合成**（abort 后本地追加），
  * 服务端预留此类型；接此 payload 时任务必须有确定的取消终态，不得呈现为故障。
  */
 export interface RunCancelledPayload {
@@ -303,7 +303,7 @@ export interface RunCancelledPayload {
 }
 
 // ===========================================================================
-//  阶段 2A 新增只读工具的输入与输出
+//  只读工具的输入与输出
 // ===========================================================================
 
 // ---------- query_lab_status ----------
@@ -339,7 +339,7 @@ export interface LabStatusResult {
     /** 下一节课（含今天剩余时间内的下一次；无则 null） */
     nextLesson: { periodLabel: string; startTime: string; courseName: string } | null;
     /**
-     * nextLesson 为 null 的原因（F18）：
+     * nextLesson 为 null 的原因：
      *   no_more_today = 今天且当天剩余无课；not_applicable = 非当天，不提供该字段；
      *   unknown = 教学周不可确定等无法统计的情况
      */
@@ -350,7 +350,7 @@ export interface LabStatusResult {
    * 无数据来源时为 null —— **任何情况下都不允许编造人数**。
    */
   occupancy: { present: number; source: 'authorized_api'; date: string; note: string } | null;
-  /** 档案状态口径说明（F19）：active/closed 来自房间档案快照，不是实时门禁 */
+  /** 档案状态口径说明：active/closed 来自房间档案快照，不是实时门禁 */
   registryStatusNote: string;
   term: string;
   weekNo: number | null;
@@ -516,7 +516,7 @@ export interface FreeRoomsArgs {
   date?: string;
   /** 缺省 = 查全天（返回每个节次的空闲名单）；指定则只看该节次 */
   periodKey?: PeriodKey;
-  /** 节次范围（F12）：如"下午"= ['pm1','pm2'] */
+  /** 节次范围：如"下午"= ['pm1','pm2'] */
   periodKeys?: PeriodKey[];
 }
 
@@ -528,7 +528,7 @@ export interface FreeRoomsResult {
   /** 实际参与统计的节次集合 */
   periodKeys: PeriodKey[];
   /**
-   * 数据覆盖（F09/N10）：'complete' = 课表非空且日期在合理学期范围内，可做无排课推断；
+   * 数据覆盖：'complete' = 课表非空且日期在合理学期范围内，可做无排课推断；
    * 'missing' = 课表为空；'out_of_range' = 日期超出可信学期范围；
    * 'unknown' = 教学周不可确定。非 complete 时 freeByPeriod.rooms 一律为空，
    * 候选只进 unknownCandidates，**不得展示成确认空闲**
@@ -540,7 +540,7 @@ export interface FreeRoomsResult {
   weekNo: number | null;
   weekDeterminable: boolean;
   /**
-   * 每节次的空闲房间。**只含档案状态为开放（active）的房间**（F11）；
+   * 每节次的空闲房间。**只含档案状态为开放（active）的房间**；
    * 关闭/停用进 excluded。指定单节次时只有一个元素。
    */
   freeByPeriod: Array<{
@@ -562,11 +562,11 @@ export interface FreeRoomsResult {
 
 export interface ToolSpec {
   name: string;
-  /** 给模型看的说明书。描述越精确，选得越准（难点 1 的第 6 条对策） */
+  /** 给模型看的说明书。描述越精确，选得越准 */
   description: string;
   /** JSON Schema */
   parameters: Record<string, unknown>;
-  /** true ⇒ 执行前必须人工二次确认。第一阶段没有任何 danger 工具 */
+  /** true ⇒ 执行前必须人工二次确认。当前没有 danger 工具 */
   danger: boolean;
 }
 
@@ -575,7 +575,7 @@ export interface ToolSpec {
 export interface QueryScheduleArgs {
   /** YYYY-MM-DD。缺省 = 服务端当天（Asia/Shanghai） */
   date?: string;
-  /** 房间号，如 E310。第一阶段必填（否则结果无法收敛到可读的规模） */
+  /** 房间号，如 E310。必填（否则结果无法收敛到可读的规模） */
   labName?: string;
   /** 可选：只查某个节次 */
   periodKey?: PeriodKey;

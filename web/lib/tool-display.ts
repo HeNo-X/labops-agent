@@ -8,7 +8,7 @@
  *
  *  ⚠️ 不持久化 display：LabOps 的 ToolCallRecord 已经是服务端结构化事实
  *  （tool/args/ok/ms/summary/resultKind/result），再存一层 display 是冗余。
- *  这里只做**前端派生**，不新增服务端契约。
+ *  这里只做**前端派生**，不改动服务端契约。
  *
  *  纯函数、无 Vue 依赖 —— 可直接单测。
  */
@@ -75,7 +75,7 @@ const FAMILY_BY_TOOL: Record<string, ToolFamily> = {
   query_vision_status: 'field',
   // 日报
   create_operations_report: 'report',
-  // A5 任务计划（工作记录，不是业务结果；完整内容由 PlanPanel 承担）
+  // 任务计划（工作记录，不是业务结果；完整内容由 PlanPanel 承担）
   maintain_task_plan: 'plan'
 };
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * mock-vision-feed —— 模拟视觉边缘上报（无摄像头联调 / 演示用）
+ * mock-vision-feed —— 视觉边缘上报联调工具（无摄像头时使用）
  * ============================================================================
  *  与实验室真实链路完全同构：按 Vision 侧 schemas.report_payload 的剥离身份
  *  字段 + HMAC-SHA256 签名（x-vision-ts / x-vision-nonce / x-vision-signature），
@@ -50,7 +50,7 @@ function buildReport(lab) {
     count = lab.capacity + 2;
     faces = { recognized: 1, unknown: count - 1 };
   } else if (phase === 'library_hit') {
-    // 底库命中事件：物品/场景条目名（非个人信息），演示"识别到什么"
+    // 底库命中事件：物品/场景条目名（非个人信息），用于验证"识别到什么"的上报形状
     library = tick % 2 === 0
       ? [{ kind: 'item', name: '投影仪遥控器', score: 0.94, mode: 'whole' }]
       : [{ kind: 'scene', name: 'E310 讲台区域', score: 0.91, mode: 'partial' }];

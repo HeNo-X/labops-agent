@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {t as tr} from "../i18n";
 /**
- * 单条消息渲染 —— 连续会话的基本单元（M2 / F01·F24·F34·F35）
+ * 单条消息渲染 —— 连续会话的基本单元
  * ============================================================================
  *  · user：右侧浅灰气泡
  *  · assistant：结论正文 + 工具调用卡（参数可展开）+ 状态 + 复制按钮；
@@ -40,7 +40,7 @@ const props = defineProps<{
   busy?: boolean;
   /** 本轮牵涉业务写入，内联面板给简短提醒 */
   businessWrites?: boolean;
-  /** 批次1：可删除本轮（顶部轮次条的删除入口迁移到助手回复底部） */
+  /** 可删除本轮（删除入口在助手回复底部） */
   canDelete?: boolean;
 }>();
 const emit = defineEmits<{
@@ -48,7 +48,7 @@ const emit = defineEmits<{
   (e: 'decided'): void;
   (e: 'round-edit', payload: { userMessageId: string; text: string; revertEffects: boolean }): void;
   (e: 'round-rewind', payload: { userMessageId: string; revertEffects: boolean }): void;
-  /** 批次1：删除本轮（父级走既有删除确认） */
+  /** 删除本轮（父级走既有删除确认） */
   (e: 'round-delete'): void;
 }>();
 const run = useRunStore();
@@ -62,12 +62,12 @@ const phaseLabel = computed(() => {
   if (p === 'answering') return '正在写答案…';
   return '正在执行…';
 });
-// 秒数显示已按要求移除（不再显示"已思考 N 秒"）；服务端权威耗时仍随 run_completed 带出，仅用于内部核对
+// 不显示"已思考 N 秒"；服务端权威耗时随 run_completed 带出，仅用于内部核对
 const session=useSessionStore();
 const copied = ref(false);
 const textOnly=computed(()=>session.currentMode()==='chat'||props.msg.responseMode==='chat');
 
-/** N03：每条消息拥有自己的结果卡（toolCalls[].result → 对应渲染器） */
+/** 每条消息拥有自己的结果卡（toolCalls[].result → 对应渲染器） */
 const queryArtifacts = computed(() =>
   props.msg.toolCalls
     .filter((t) => t.result && t.resultKind && ['schedule', 'lab_status', 'free_rooms'].includes(t.resultKind))
@@ -95,13 +95,11 @@ const checkinArtifacts=computed(()=>props.msg.toolCalls.filter(t=>t.result&&t.re
 
 const isUser = computed(() => props.msg.role === 'user');
 
-// 仅失败/中断/取消轮展开技术运行轨迹（排查用）；成功轮隐藏 token/耗时/工具调用等技术元信息
-// 2026-11-14：原来只有失败/中断才渲染轨迹块，导致正常回答永远看不到思维链与工具步骤。
-// 改为始终渲染，显隐交给 v-if 里的 steps.length 控制。
+// 技术运行轨迹始终渲染，显隐交给 v-if 里的 steps.length 控制
 const showTrace = true;
 
 /**
- * A5 计划步骤：活跃轮（streaming）读 run store 的 plan（plan_updated 实时更新），
+ * 计划步骤：活跃轮（streaming）读 run store 的 plan（plan_updated 实时更新），
  * 历史轮读消息 meta.plan（服务端终态落库）。谁有值用谁——历史轮回放与活跃轮同口径。
  */
 const planSteps = computed<TaskPlanStep[]>(() => {
@@ -111,11 +109,11 @@ const planSteps = computed<TaskPlanStep[]>(() => {
 });
 
 /**
- * 轮次渲染单元（T2）—— 活跃轮从 run store 的实时轨迹重建，历史轮从持久化的
+ * 轮次渲染单元 —— 活跃轮从 run store 的实时轨迹重建，历史轮从持久化的
  * toolCalls/ms/status 重建，**同一套口径**：
  *   · 运行中 = 展开、逐步带状态；完成 = 默认收起成一行"已工作 N 秒"；
  *   · 中断/取消/失败 = 强制展开，标题为"已停止"且**不带耗时**；
- *   · 历史轮缺完成时间 → interrupted（只显示"已停止"），绝不伪造"已完成"。
+ *   · 历史轮缺完成时间 → interrupted（只显示"已停止"），不把未完成显示为"已完成"。
  */
 const turnUnit = computed(() => {
   const live = run.runStatus === 'running' && props.msg.status === 'streaming';
@@ -161,8 +159,8 @@ const traceSummary = computed(() => {
 });
 
 /**
- * A6：token 用量后缀。provider 真实上报才显示（活跃轮来自 run_completed.usage，
- * 历史轮来自消息 meta.usage）；拿不到就是空串 —— 绝不前端估数冒充。
+ * token 用量后缀。provider 真实上报才显示（活跃轮来自 run_completed.usage，
+ * 历史轮来自消息 meta.usage）；拿不到就是空串 —— 绝不前端估算数字。
  */
 const usageSuffix = computed(() => {
   const u = turnUnit.value.live ? run.usage : (props.msg.usage ?? null);
@@ -171,8 +169,8 @@ const usageSuffix = computed(() => {
 });
 
 /**
- * 工具卡展示模型（T4）：按族分流摘要 —— 查询/知识/草稿/视觉/日报各有不同主语与
- * 引导语，不再让 18 个工具长得一模一样。完整结果仍由下方结果卡（TaskResult /
+ * 工具卡展示模型：按族分流摘要 —— 查询/知识/草稿/视觉/日报各有不同主语与
+ * 引导语，各工具有各自的摘要。完整结果仍由下方结果卡（TaskResult /
  * OperationCard / ReportCard / EvidenceObservationCard / 引用链接）承担，此处不重复渲染。
  */
 const toolDisplays = computed(() =>
@@ -235,7 +233,7 @@ function cancelEditor(): void {
 /**
  * 点击瞬间就把请求原样上抛（回档编排由父层完成）。
  * ⚠️ 不能在这里 await session.rollbackRound 再 emit：回档会清空消息列表并卸载本组件，
- * 卸载后 emit 会丢——「修改并重新发起」表现为只删不重发（2026-11-08 实测根因）。
+ * 卸载后 emit 会丢——「修改并重新发起」表现为只删不重发。
  */
 function onEditorSubmit(payload: { text: string; revertEffects: boolean }): void {
   const mode = editorMode.value;
@@ -251,9 +249,9 @@ function onEditorSubmit(payload: { text: string; revertEffects: boolean }): void
 
 /**
  * 引擎/模型标注 —— 必须显示**真正在回答的那个模型**。
- * 之前只在 engine==='agnes' 时硬编码"Agnes 3.0 Flash"：聊天模式走 DashScope 链时
+ * 若只按 engine==='agnes' 硬编码"Agnes 3.0 Flash"：聊天模式走 DashScope 链时
  * 标签直接是空的，用户无从知道是谁在回答，也无从核对模式分流是否生效。
- * 现在优先显示 run_completed 回带的真实模型 id；只有拿不到时才退回提供方名。
+ * 优先显示 run_completed 回带的真实模型 id；只有拿不到时才退回提供方名。
  */
 const engineLabel = computed(() => {
   const m = props.msg.model;
@@ -312,17 +310,17 @@ const engineTitle = computed(() => {
     <template v-else>
       <div class="msg__ahead">
         <span class="msg__who">Agent</span>
-        <!-- 正常完成不再挂"本轮回答已保存"这类系统状态；生成中/失败/中断仍需可见 -->
+        <!-- 正常完成不挂"本轮回答已保存"这类系统状态；生成中/失败/中断仍需可见 -->
         <StatusTag v-if="msg.status !== 'completed'" :tone="statusMeta.tone" :glyph="statusMeta.glyph" :label="statusMeta.label" />
-        <!-- PC-4：引擎与耗时收敛为一枚徽标，细节移入 hover 提示 -->
+        <!-- 引擎与耗时收敛为一枚徽标，细节移入 hover 提示 -->
         <span v-if="engineLabel || msg.ms" class="msg__engine" :title="engineTitle">i</span>
       </div>
 
-      <!-- A5 任务计划面板：活跃轮来自 plan_updated 事件（run store），历史轮来自
+      <!-- 任务计划面板：活跃轮来自 plan_updated 事件（run store），历史轮来自
            消息 meta.plan —— 同一组件同一口径。计划是模型的工作记录，不是业务结果。 -->
       <PlanPanel v-if="!textOnly && planSteps.length" :steps="planSteps" />
 
-      <!-- 执行过程（T2）：活跃轮与历史轮同一口径 —— 运行中/中断/失败强制展开，
+      <!-- 执行过程：活跃轮与历史轮同一口径 —— 运行中/中断/失败强制展开，
            正常完成默认收起成一行；每步带状态标签与耗时 -->
       <details
         v-if="!textOnly && showTrace && turnUnit.unit.steps.length"
@@ -352,7 +350,7 @@ const engineTitle = computed(() => {
         </ol>
       </details>
 
-      <!-- 工具调用卡（T4：按族分流摘要，18 个工具不再长一样；完整内容在下方结果卡） -->
+      <!-- 工具调用卡（按族分流摘要，各工具各有摘要；完整内容在下方结果卡） -->
       <details v-if="!textOnly && showTrace && msg.toolCalls.length" class="msg__tools">
         <summary>{{tr("已执行")}} {{ msg.toolCalls.length }} {{tr("次工具调用（点击看参数与依据）")}}</summary>
         <div v-for="t in toolDisplays" :key="t.key" class="msg__tool" :data-family="t.display.family">
@@ -388,7 +386,7 @@ const engineTitle = computed(() => {
           <div v-for="(k,i) in knowledgeArtifacts" :key="'knowledge-'+i"><p v-for="h in (k.hits||[]).slice(0,5)" :key="h.id"><a :href="h.url" target="_blank" rel="noopener">{{h.title}} · v{{h.version}}</a></p></div>
         </details>
       <template v-if="!textOnly"><BusinessPlanCard v-for="b in businessArtifacts" :key="b.key" :result="b.result" :card-id="msg.id+':'+b.key" :readonly="session.currentMode()==='chat'" />
-      <!-- N03：本条消息自己的结构化结果卡（实时与历史同一渲染器） -->
+      <!-- 本条消息自己的结构化结果卡（实时与历史同一渲染器） -->
       <OperationCard
         v-for="a in proposalArtifacts"
         :key="a.key"
@@ -409,7 +407,7 @@ const engineTitle = computed(() => {
         <button v-if="msg.text" type="button" class="msg__iconbtn" :title="tr(copied ? '已复制' : '复制')" :aria-label="tr('复制')" @click="copyAnswer">
           <UiIcon :name="copied ? 'check' : 'copy'" :size="16" />
         </button>
-        <!-- 批次1：删除轮入口迁移——垃圾桶在复制旁，父级走既有删除确认 -->
+        <!-- 删除本轮：垃圾桶在复制旁，父级走既有删除确认 -->
         <button
           v-if="canDelete && !busy"
           type="button"
@@ -435,7 +433,7 @@ const engineTitle = computed(() => {
   align-items: flex-end;
 }
 .msg__userbubble {
-  /* A8：margin-left:auto 双保险——即使外层覆写了 align-items，用户气泡也靠右 */
+  /* margin-left:auto 双保险——即使外层覆写了 align-items，用户气泡也靠右 */
   margin-left: auto;
   max-width: 78%;
   background: var(--surface-2);
@@ -462,7 +460,7 @@ const engineTitle = computed(() => {
   font-size: calc(var(--ui-font-size) * 0.84615);
   color: var(--text-faint);
 }
-/* PC-4：元数据徽标 —— 小圆 i，hover 有指针与边框反馈 */
+/* 元数据徽标 —— 小圆 i，hover 有指针与边框反馈 */
 .msg__engine {
   display: inline-flex;
   align-items: center;

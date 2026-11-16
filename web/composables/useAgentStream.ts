@@ -2,10 +2,10 @@ import {clientFetch} from '../client';
 /**
  * SSE 事件流消费
  * ============================================================================
- *  难点 6 的三条对策都在这里：
+ *  三条实现对策都在这里：
  *    ① 用明确的事件类型解析，不靠猜文本
  *    ② 用 TextDecoder({stream:true}) 增量解码 —— 中文 UTF-8 会被任意切断，
- *       逐块 toString() 一定出乱码或漏字（这是最容易踩的坑）
+ *       逐块 toString() 必然出乱码或漏字
  *    ③ 用 seq 去重，允许乱序重排
  *
  *  为什么不用 EventSource：EventSource 只能 GET，聊天必须 POST 带 body。
@@ -29,9 +29,9 @@ export interface StartOptions {
   runId?: string;
   /** 会话 id：服务端据此承接上一问的房间/日期 */
   sessionId?: string;
-  /** 持久会话：消息落库到该会话（M1） */
+  /** 持久会话：消息落库到该会话 */
   conversationId?: string;
-  /** 幂等键：重复提交同一 clientRequestId 服务端返回 409，不重复执行（A15） */
+  /** 幂等键：重复提交同一 clientRequestId 服务端返回 409，不重复执行 */
   clientRequestId?: string;
   onEvent: (ev: RunEvent) => void;
   onError: (err: StreamError) => void;
@@ -61,7 +61,7 @@ export function useAgentStream() {
           headers: {
             'Content-Type': 'application/json',
             Accept: 'text/event-stream',
-            // 沙盒演示身份随请求头传递（服务端校验并解析；模型参数不采信）
+            // 沙盒身份随请求头传递（服务端校验并解析；不采信模型参数）
             ...actorHeaders()
           },
           body: JSON.stringify({

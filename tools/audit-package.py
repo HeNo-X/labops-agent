@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""作品包审计器：对 zip 或目录做敏感项与体积审计，命中即失败。
+"""发布包审计器：对 zip 或目录做敏感项与体积审计，命中即失败。
 
-存在的原因：`labops-agent.zip` 曾是手工 zip 产出的，绕过了 tools/package-cloud-api.py
-的 safe() 拒绝清单，把 .env、.git/、server/credentials/business.key 一并打进了"全量源码
-分享包"。打包脚本写了排除规则不等于排除了，必须对**最终产物**独立复核。
+打包脚本的过滤规则不等于真的过滤了：手工 zip 会绕过 tools/package-labops-agent.py
+的拒绝清单，可能把 .env、.git/、server/credentials/business.key 一起打进
+"全量源码分享包"。因此必须对**最终产物**独立复核。
 
-规则与 package-cloud-api.py 的 safe() 保持同源口径，另加内容级扫描（防真 Key 写进
-.env.example 这类"模板文件"随包外发）。
+打包脚本直接复用本文件的 classify() 与 scan_content()，保证两处口径一致；后者另含
+内容级扫描（防真 Key 写进 .env.example 这类"模板文件"随包外发）。
 
 用法：
     python tools/audit-package.py <文件或目录> [--max-mb 100] [--allow 路径前缀]...
@@ -20,7 +20,7 @@ import sys
 import zipfile
 from pathlib import Path, PurePosixPath
 
-# 目录段：出现即判为构建产物/仓库元数据，不该进作品包
+# 目录段：出现即判为构建产物/仓库元数据，不该进发布包
 FORBIDDEN_PARTS = {
     ".git", "node_modules", "dist", "target", ".gradle", "__pycache__",
     "data-backups", ".venv", "venv", ".idea", ".vscode",
@@ -39,8 +39,8 @@ FORBIDDEN_SUFFIXES = (
     ".bak", ".pyc", ".tsbuildinfo", ".log", ".skill",
     ".raw.json", ".unredacted.json",
 )
-# 路径前缀：本项目已知的凭据落点与运行时数据落点（与 .gitignore 的 R34 口径一致：
-# 运行时数据——会话/业务数据/视觉事件流水——绝不进作品包）
+# 路径前缀：本项目已知的凭据落点与运行时数据落点（与 .gitignore 同一口径：
+# 运行时数据——会话/业务数据/视觉事件流水——绝不进发布包）
 FORBIDDEN_PATH_PREFIXES = (
     "server/credentials/", "credentials/", "Pages/data/", "Pages/lib/data/",
     "server/data/",

@@ -3,7 +3,7 @@
  * 设备内置摄像头（PC 与移动端共用）
  * ============================================================================
  *  抽成共享组件的原因：实验室监控有两套壳（PC 的 VisionPanel / 移动端 MobileVision），
- *  如果各自实现一遍相机预览，就又回到"同一能力两份代码"的老问题（本仓库审计已点名）。
+ *  合并为一份相机预览实现，避免同一能力两份代码。
  *
  *  行为：
  *    · 点「开启内置摄像头」才采集，默认不开启
@@ -276,7 +276,7 @@ async function openCamera(): Promise<void> {
   background: var(--primary) !important;
   border-color: var(--primary) !important;
   /* 深色模式 --primary 翻转为近白：文字必须用对比色令牌（硬编码 #fff 会白底白字，
-     违反 tokens.css『按钮文字一律用 --primary-contrast』规约——2026-11-07 实测踩坑） */
+     违反 tokens.css『按钮文字一律用 --primary-contrast』规约） */
   color: var(--primary-contrast) !important;
   font-weight: 600;
 }
@@ -296,7 +296,7 @@ async function openCamera(): Promise<void> {
   }
 }
 
-/* 交互反馈补齐（2026-11-07） */
+/* 操作按钮的悬浮与聚焦反馈 */
 .builtin__actions button:hover:not(:disabled) {
   background: var(--surface-3);
   border-color: var(--primary-border);

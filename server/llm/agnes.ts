@@ -1,10 +1,10 @@
 /**
  * Agnes 3.0 Flash 适配器 —— 独立一层，可整体替换
  * ============================================================================
- *  接口事实（已核对官方文档 agnes-ai.com/zh-Hans/docs/agnes-30-flash，非凭记忆）：
+ *  接口事实（来源：官方文档 agnes-ai.com/zh-Hans/docs/agnes-30-flash）：
  *    Base URL          https://api.agnes-ai.cn/v1
- *                      （⚠️ 2026-09-28 实测：旧写的 apihub.agnes-ai.com 对本项目 Key 返回 401，
- *                        正确的端点是 api.agnes-ai.cn；改前先用 /v1/models 验一次）
+ *                      （⚠️ apihub.agnes-ai.com 对本项目 Key 返回 401，
+ *                        正确端点是 api.agnes-ai.cn；更换前先用 /v1/models 验一次）
  *    Chat Completions  POST /v1/chat/completions   （OpenAI 兼容结构）
  *    模型名称          agnes-3.0-flash
  *    请求字段          model / messages / temperature / top_p / max_tokens
@@ -13,8 +13,8 @@
  *    上下文 512K，最大输出 65,536 Token
  *  官方明确写了：执行完工具后要把工具结果追加回 messages，再发起下一次请求。
  *
- *  C4 要求落在这里：显式超时数值 + 重试（次数/指数退避/抖动）+ 失败降级路径。
- *  C6 要求落在这里：API Key 只在服务端内存里，不进日志、不进响应。
+ *  本层负责：显式超时数值 + 重试（次数/指数退避/抖动）+ 失败降级路径。
+ *  安全约束：API Key 只在服务端内存里，不进日志、不进响应。
  *
  *  ⚠️ 重试边界：只在**尚未产生任何输出**时重试。流一旦开始吐字就不再重试，
  *     否则会把重复内容拼进回答里（这是流式最容易翻的车）。
@@ -57,7 +57,7 @@ export class AgnesError extends Error {
   readonly code: string;
   readonly status: number | null;
   readonly retryable: boolean;
-  /** A10：出错的是哪条链（dashscope=聊天 / agnes=任务）。错误文案与修复提示都按它区分，聊天模式不得出现"Agnes"字样 */
+  /** 出错的是哪条链（dashscope=聊天 / agnes=任务）。错误文案与排查提示都按它区分，聊天模式不得出现"Agnes"字样 */
   provider?: string;
   constructor(code: string, message: string, status: number | null, retryable: boolean) {
     super(message);
@@ -68,16 +68,16 @@ export class AgnesError extends Error {
   }
 }
 
-/** A10：用户可见的供应商称谓——错误消息里必须说清是哪条链出问题 */
+/** 用户可见的供应商称谓——错误消息里必须说清是哪条链出问题 */
 export function providerLabel(name?: string): string {
   return name === 'dashscope' ? '聊天模型（DashScope）' : name === 'agnes' ? '工作模型（Agnes）' : '大模型';
 }
 
 /**
- * A6 配额感知（2026-10-30 部署实测教训）：账号级配额/额度耗尽（403 +
+ * 配额感知：账号级配额/额度耗尽（403 +
  * AllocationQuota.FreeTierOnly 等）与"鉴权失败"是两回事 —— 密钥是好的，
  * 重试与换模型都不会自愈，提示必须指路充值/调整配额模式，而不是让用户
- * 去检查 KEY。签名覆盖实测案例与两家供应商的常见措辞。
+ * 去检查 KEY。签名覆盖两家供应商的常见措辞。
  */
 const QUOTA_BODY_RE = /AllocationQuota|FreeTierOnly|Arrearage|quota[_. ]?(exhaust|exceed|used[_ ]?up)|insufficient[_. ]?quota|欠费|额度已?用?(尽|完)/i;
 
@@ -114,7 +114,7 @@ function classify(status: number, body: string, provider?: { name: string; model
 /**
  * 从上游 400 正文里认出"这个模型不支持某个采样参数"，返回参数名。
  *
- * 真实案例（2026-10-31，kimi-k3 走百炼兼容端点）：
+ * 示例（kimi-k3 走百炼兼容端点）：
  *   HTTP 400 InternalError.Algo.InvalidParameter:
  *   Parameter 'temperature'=0.3 is not supported for kimi-k3 model.
  * 若照原样抛错，模型链会把它当成"这个模型坏了"直接跳过 —— 实际上只差一个参数。
@@ -181,7 +181,7 @@ export function agnesStatus(): { configured: boolean; model: string; baseUrl: st
 export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGenerator<AgnesStreamEvent> {
   const base = getConfig().agnes;
   // provider 由 router 按会话模式注入（聊天模式=DashScope / 任务模式=Agnes）；
-  // 未注入时行为与改造前完全一致（默认 Agnes），保证任务模式零变化。
+  // 未注入时默认 Agnes。
   const c = opts.provider
     ? { ...base, apiKey: opts.provider.apiKey, baseUrl: opts.provider.baseUrl, model: opts.provider.model }
     : base;
@@ -199,7 +199,7 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
   const url = `${c.baseUrl}/chat/completions`;
   /**
    * 输出预算。工具轮要写完"思考 + 工具名 + 参数 JSON"，预算不够时模型会被从中间剪断
-   * （finish_reason=length），上层只能判为整轮失败并换提供方——一次演示因此白烧两轮。
+   * （finish_reason=length），上层只能判为整轮失败并换提供方——一次请求因此白烧两轮。
    * 所以这里除了抬高默认值，还在截断时**就地翻倍重试一次**（见 catch 里的 escalation 分支）。
    */
   let maxTokens = c.maxTokens;
@@ -215,11 +215,11 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
       type: 'function',
       function: { name: t.name, description: t.description, parameters: t.parameters }
     }));
-    // 第一阶段只有 1 个工具，用 auto 让模型自己决定要不要查；强制 required 会在
+    // 工具选择用 auto 让模型自己决定要不要查；强制 required 会在
     // 寒暄类问题上逼它乱调工具，反而更糟。
     body['tool_choice'] = 'auto';
   }
-  // Thinking 默认关闭：第一阶段不展示内部推理，且思考 token 会挤占正文预算
+  // Thinking 默认关闭：不展示内部推理，且思考 token 会挤占正文预算
   if (c.enableThinking) body['chat_template_kwargs'] = { enable_thinking: true };
 
   let payload = JSON.stringify(body);
@@ -270,7 +270,7 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
           attempt -= 1; // 抵消本轮 for 自增：降级重发不计入重试次数
           continue;
         }
-        // A10：错误消息与 provider 标注按实际调用链（聊天=DashScope / 任务=Agnes）
+        // 错误消息与 provider 标注按实际调用链（聊天=DashScope / 任务=Agnes）
         const e = classify(res.status, text, { name: opts.provider?.name ?? 'agnes', model: c.model });
         e.provider = opts.provider?.name ?? 'agnes';
         throw e;
@@ -309,7 +309,7 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
 
       // 截断不是模型坏了，是输出预算不够：先在**同一个提供方**把预算翻倍重试一次，
       // 仍截断才让链换提供方。否则 spark 截断 → glm → agnes 429 退避，同一问法耗时翻倍。
-      // 守既有不变量（router.ts:189「已经吐过内容就不换、不重发」）：只在尚未交付任何正文时升级，
+      // 守住不变量「已经吐过内容就不换、不重发」：只在尚未交付任何正文时升级，
       // 否则重发会把已显示过的半句再接一遍。
       if (e.code === 'truncated_response' && !outerAborted && !yieldedText && !escalated && maxTokens < TRUNCATION_ESCALATION_CAP) {
         escalated = true;
@@ -344,7 +344,7 @@ export async function* streamChat(opts: StreamOptions, log?: Logger): AsyncGener
 /**
  * 解析 OpenAI 兼容的 SSE 流。
  * 用 TextDecoder({stream:true}) 增量解码 —— 中文 UTF-8 会被任意切断，逐块 toString()
- * 一定出乱码（难点 6 第 3 条）。
+ * 一定出乱码。
  */
 export async function* parseSseStream(
   body: ReadableStream<Uint8Array>,

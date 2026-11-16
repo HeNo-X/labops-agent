@@ -8,9 +8,9 @@
  *  Agent 工具 query_vision_status 与 HTTP /api/vision/live-* 共用本模块，
  *  保证「监控面板看到的」与「Agent 说的」是同一份实时数据。
  *
- *  上一版抓帧调 /api/count（单帧重推理）与画面上的检测框不是同一套参数：
- *  同一帧 live 会话检出 23 人、单帧重推理只给 3 人，卡片数字与画面矛盾。
- *  现直接读 /api/live/status——画框循环自己的结论，与画面天然一致。
+ *  直接读 /api/live/status（画框循环自己的结论，与画面天然一致）：
+ *  抓帧调 /api/count 做单帧重推理与画面上的检测框不是同一套参数——
+ *  同一帧 live 会话检出 23 人、单帧重推理只给 3 人，卡片数字会与画面矛盾。
  */
 
 export const LIVE_FEED_URL = (process.env.VISION_LIVE_FEED_URL || 'http://127.0.0.1:5000/live/video_feed').replace(/\/+$/, '');
@@ -20,7 +20,7 @@ export interface LiveSnapshot {
   inferFps: number | null; frameAgeMs: number | null; p95Ms: number | null;
   /** 画面是回放（历史录像）而非此刻现场——Agent 须据此区分「过去」与「现在」 */
   isPlayback: boolean;
-  /** 回放时段（可读，如 "2026-11-14 10:27 ~ 10:40"）；非回放/解析不出为 null */
+  /** 回放时段（可读，如 "yyyy-mm-dd hh:mm ~ hh:mm"）；非回放/解析不出为 null */
   playbackWindow: string | null;
 }
 

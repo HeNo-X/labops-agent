@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""LabOps Agent 作品包打包器 —— 唯一允许的打包路径。
+"""LabOps Agent 发布包打包器 —— 唯一允许的打包路径。
 
-存在的原因：`labops-agent.zip` 此前是手工 zip 产出的，绕过了任何审计，把 `.env`、
-`.git/`、`server/credentials/business.key` 一并打进了标注"全量源码分享包"的文件里。
-本脚本用 audit-package.py 的同一套规则**在写入前过滤、写入后复核**，并产出可复现的
-清单，使"打包"这件事只有一条受审计的路径可走。
+打包脚本的排除规则不等于真的排除了：手工 zip 绕过了任何审计，就可能把 `.env`、
+`.git/`、`server/credentials/business.key` 一并打进去。本脚本用 audit-package.py 的
+同一套规则**在写入前过滤、写入后复核**，并产出可复现的清单，使"打包"这件事只有一条
+受审计的路径可走。
 
-复现性：固定时间戳与权限位，源码不变则两次产出的 zip 字节一致（评委复验、版本比对都用得上）。
+复现性：固定时间戳与权限位，源码不变则两次产出的 zip 字节一致（复验、版本比对都用得上）。
 
 用法：
     python tools/package-labops-agent.py --out <仓库外目录> [--allow-dirty] [--label TAG]
 
-收编说明（2026-11-09）：本脚本与 audit-package.py 自工作区 tools/ 收编进仓，
-使参赛仓库自包含（clone 后 npm run pack:submit 直接可用）。打包对象 = 本仓根。
+本脚本与 audit-package.py 随仓库分发，使仓库自包含（clone 后 npm run pack:submit 直接可用）。
+打包对象 = 本仓根。
 """
 import argparse
 from datetime import datetime
@@ -36,7 +36,7 @@ _spec.loader.exec_module(audit)
 # 固定时间戳保证可复现；取项目发布日，非文件系统时间
 ZIP_TIMESTAMP = (2026, 11, 1, 0, 0, 0)
 FILE_MODE = 0o100644 << 16
-MAX_MB = 100.0  # 官方表单字段 6：单文件 100MB 以内
+MAX_MB = 100.0  # 单文件 100MB 上限
 WARN_AT_MB = 60.0
 # 工作区脏文件数超过此值时，说明有在途改动未冻结，默认拒绝打包
 DIRTY_LIMIT = 0
@@ -53,7 +53,7 @@ def git(*args: str) -> str:
 
 
 def assert_reproducible_source(allow_dirty: bool) -> dict:
-    """作品包必须对应一个明确的代码状态，否则"可复现"只是口号。"""
+    """发布包必须对应一个明确的代码状态，否则"可复现"只是口号。"""
     if not (AGENT / ".git").is_dir():
         raise SystemExit("labops-agent 不是 git 仓库，无法确定代码状态")
     dirty = [line for line in git("status", "--porcelain").splitlines() if line.strip()]
@@ -176,7 +176,7 @@ def main() -> int:
     if size_mb > WARN_AT_MB:
         print(f"⚠ 已用掉官方 100MB 上限的 {size_mb / MAX_MB * 100:.0f}%，加演示物料前留意余量。")
 
-    # 写入后复核：过滤逻辑有 bug 也要在这里被拦住，而不是等评委发现
+    # 写入后复核：过滤逻辑有 bug 也要在这里被拦住，而不是等打包后才发现
     rc = subprocess.run(
         (sys.executable, str(HERE / "audit-package.py"), str(target), "--max-mb", str(MAX_MB)),
         capture_output=True, text=True, encoding="utf-8",

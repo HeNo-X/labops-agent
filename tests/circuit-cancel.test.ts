@@ -1,7 +1,7 @@
 /**
  * 熔断记账时机验收 —— 用户取消不得算模型失败
  * ============================================================================
- *  旧实现把"未吐出内容前的一切异常"都记成失败，其中**包含用户主动取消**。
+ *  若把"未吐出内容前的一切异常"都记成失败，其中**包含用户主动取消**。
  *  后果不是数字难看：signal 已 abort，链上其余模型会秒抛秒记账，
  *  取消 3 次就能把一个健康模型冷却 20 秒 —— 与 circuit.ts 自己写的
  *  "不该让模型替后续请求背锅"直接矛盾。
@@ -41,7 +41,7 @@ test('用户取消：不记熔断失败，也不继续试链上其余模型', as
   resetCircuitForTests();
   cancelCalls.length = 0;
   const ac = new AbortController();
-  ac.abort(); // 模拟"这一轮已被用户取消"
+  ac.abort(); // 构造"这一轮已被用户取消"
   let threw: unknown = null;
   try {
     for await (const _ of streamChatWithFallback({ messages: [], signal: ac.signal }, 'chat')) void _;

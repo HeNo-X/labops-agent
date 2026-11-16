@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 interface InstalledEnvironment {mainApiBase:string;agentApiBase:string;mainPublicBase:string}
 interface InstalledDiagnostic {service:'main'|'agent';label:string;ok:boolean;status:number;message:string}
 interface InstalledRuntime {

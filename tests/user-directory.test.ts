@@ -1,5 +1,5 @@
 /**
- * 批次3（整合执行方案 2026-11-09）——名册账号只读工具 + RAG 全量注入
+ * 名册账号只读工具 + RAG 全量注入
  * 运行：node --test tests/user-directory.test.ts
  */
 process.env.LABOPS_SKIP_ENV_FILE = '1';

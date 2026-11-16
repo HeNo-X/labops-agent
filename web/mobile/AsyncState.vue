@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 加载/错误/空态容器（批次 A 升级）：
+ * 加载/错误/空态容器：
  *  · loading → 骨架屏（shimmer，reduced-motion 下静态）
  *  · empty   → 结构化空态（圆形图标位 + 文案 + 可选行动钮插槽）
  *  · error   → 保持原文案 + 重试按钮

@@ -1,5 +1,5 @@
 /**
- * routeTurn 单一裁决点（整合方案 §4）——每条规则的命中样例与反例
+ * routeTurn 单一裁决点 —— 每条规则的命中样例与反例
  * 运行：node --test tests/route-turn.test.ts
  */
 process.env.LABOPS_SKIP_ENV_FILE = '1';
@@ -53,7 +53,7 @@ test('R4 单程往返白名单：只读单调用允许；多调用/多意图/写
   assert.equal(one.singlePassEligible('query_schedule', 2), false, '多调用说明还要更多信息');
   assert.equal(one.singlePassEligible('prepare_issue_ticket', 1), false, '写类工具绝不单程定稿');
   // 逐人明细与目录都是"一问一工具"的只读查询，渲染器已有 records 分支：
-  // 不给单程资格就等于每次多烧一轮模型往返（实测 4.4s 对 15~30s）。
+  // 不给单程资格就等于每次多烧一轮模型往返（4.4s 对 15~30s）。
   for (const tool of ['query_checkin_records', 'query_openlab_records', 'query_key_records', 'query_user_directory', 'query_term_schedule']) {
     assert.equal(one.singlePassEligible(tool, 1), true, `${tool} 应可单程定稿`);
     assert.equal(one.singlePassEligible(tool, 2), false, `${tool} 多调用时仍需第二轮`);

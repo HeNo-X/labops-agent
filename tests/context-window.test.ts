@@ -1,10 +1,10 @@
 /**
- * A3 结构感知的工具结果窗口 —— 替代 1200 字符盲切
+ * 结构感知的工具结果窗口 —— 不做字符数盲切
  * ============================================================================
- *  借鉴 SWE-agent ACI（observation windowing）：截断必须让模型知道
+ *  参考 SWE-agent ACI（observation windowing）：截断必须让模型知道
  *  「后面还有数据」「共有多少条」「下一步怎么拿到」，且绝不能把 JSON
- *  腰斩成残缺记录。旧实现在 1200 字符处盲切 —— 模型看到半个课表却以为
- *  只有那几条，这是"截断造出的假数据"。
+ *  腰斩成残缺记录。按固定字符数盲切会让模型看到半个课表却以为
+ *  只有那几条，读到的是截断留下的残缺数据。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -40,7 +40,7 @@ test('A3-01 大数组开窗：保前 8 项 + dataNote 带总数与省略量，�
   const m = toolMsg(JSON.stringify({ ok: true, summary: '查询到 100 条课表记录', data: bigScheduleData(100), dataSource: '演示快照', reminder: '只能依据本结果作答' }));
   const slim = slimToolMessage(m);
   assert.notEqual(slim, m, '超长消息必须被瘦身');
-  // 关键契约：裁剪后的内容必须仍是合法 JSON（旧实现会腰斩）
+  // 关键契约：裁剪后的内容必须仍是合法 JSON（按字符腰斩就会坏掉）
   const parsed = JSON.parse(String(slim.content)) as Record<string, unknown>;
   const data = parsed['data'] as { lessons: unknown[] };
   assert.equal(data.lessons.length, 8, '数组只保留前 8 项');

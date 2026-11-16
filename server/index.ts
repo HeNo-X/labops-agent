@@ -5,8 +5,8 @@
  *  中间件生态和 100+ 传递依赖。少一个依赖就少一类供应链风险。
  *
  *  ⚠️ 静态托管用**白名单**（只放行已知安全扩展名）+ **显式禁区**（/server /seed
- *     /docs /node_modules .env）。老系统踩过的坑：静态服务是黑名单式，serve.js
- *     落在站点根且 .js 在放行名单里 → 后端源码被公网直接下载（HTTP 200 / 77,850 B）。
+ *     /docs /node_modules .env）。静态服务若用黑名单式，serve.js 落在站点根且
+ *     .js 在放行名单里 → 后端源码可被公网直接下载（HTTP 200 / 77,850 B）。
  *     黑名单永远会漏，白名单不会。
  */
 
@@ -129,8 +129,7 @@ function serveStatic(res: http.ServerResponse, urlPath: string): void {
   // 缓存策略：只有 Vite 产出的 /assets/<name>-<hash>.<ext> 才能长缓存 —— 它的内容变了名字必变。
   // 判据用"是否在 assets/ 目录下"，**不要猜文件名里有没有哈希**：
   //   login-characters.js 里的 "-characters" 长得完全像哈希，猜文件名会误判成可长缓存，
-  //   于是 public/ 拷进来的固定名文件被永久缓存，用户侧永远看不到新版本
-  //   （2026-10-04 实际踩过：修了登录页 bug，用户"没反应"）
+  //   于是 public/ 拷进来的固定名文件被永久缓存，改动上线后用户侧看不到变化。
   // 其余（public/ 拷来的、favicon、index.html）一律 no-cache：每次带条件请求回来校验，成本极低。
   const relToDist = path.relative(DIST_DIR, finalPath).split(path.sep).join('/');
   const cacheControl = relToDist.startsWith('assets/')
@@ -152,7 +151,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
   if(p==='/api/shared-chat/history-import'||p==='/api/chat/history-import'){await importHistory(req,res);return;}
   if(p.startsWith('/api/shared-chat/conversations')){await handleConversations(req,res,p.replace('/api/shared-chat/','/api/'));return;}
 
-  // RAG 批次2：向量索引管理端点（reindex/vec-status）——必须排在下面的
+  // 向量索引管理端点（reindex/vec-status）——必须排在下面的
   // 「/api/knowledge/:id 文档读取」之前，否则 reindex 会被当成文档 id
   if (p.startsWith('/api/knowledge/') && (p === '/api/knowledge/reindex' || p === '/api/knowledge/vec-status')) { await handleKnowledgeApi(req, res, p); return; }
   if (p.startsWith('/api/knowledge/') && req.method === 'GET') { const doc=documents().find(d=>d.id===p.slice('/api/knowledge/'.length)&&d.roles.includes(effectiveRole(currentActor()?.role||'student'))); json(res,doc?200:404,doc||{error:'document_not_found'}); return; }
@@ -195,7 +194,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
       sourceType: ds.sourceType,
       sourceLabel: ds.sourceLabel,
       // 引擎必须在第一次任务之前就能告诉前端 —— 否则页面会默认声称"在用 Agnes"，
-      // 而服务端其实处于演示引擎模式（界面上的机制说明就成了假话）。
+      // 而服务端其实处于规则引擎模式（界面上的机制说明就会失真）。
       engine: engineForMode('task'),
       engineByMode: { chat: engineForMode('chat'), task: engineForMode('task') },
       // 分模式的**模型清单**（只有模型 id，绝不含任何密钥）：运维与界面据此核对
@@ -257,7 +256,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     return;
   }
 
-  // ops.v1（阶段 2B）：任务 / 提案决策 / 回执 / 能力协商
+  // ops.v1：任务 / 提案决策 / 回执 / 能力协商
   if (
     p === '/api/capabilities' ||
     p.startsWith('/api/tasks') ||
@@ -270,7 +269,7 @@ async function route(req: http.IncomingMessage, res: http.ServerResponse): Promi
     return;
   }
 
-  // 会话 API（M1 持久化）：列表/创建/详情/改名/软删除 + 带落库的消息 SSE
+  // 会话 API（持久化）：列表/创建/详情/改名/软删除 + 带落库的消息 SSE
   if (p.startsWith('/api/conversations') || /^\/api\/runs\/[^/]+(\/cancel)?$/.test(p)) {
     if (await handleConversations(req, res, p)) return;
     await readJsonBody(req).catch(() => undefined);

@@ -1,15 +1,15 @@
 /**
- * ops.v1 REST API —— 任务 / 提案决策 / 回执 / 能力（任务书 §11.1 的本轮子集）
+ * ops.v1 REST API —— 任务 / 提案决策 / 回执 / 能力
  * ============================================================================
  *  · POST /api/tasks/:id/decisions：受权 UI 触发，模型无权调用；幂等（clientRequestId）
  *  · GET  /api/tasks / /api/tasks/:id：任务中心与恢复（待人工跨重启可查）
  *  · GET  /api/proposals/:id：历史消息里的提案卡刷新状态（已执行→显示回执，过期→不可确认）
- *  · GET  /api/operations/:id：回执查询（T06：业务已提交、HTTP 中断时按此找回）
- *  · GET  /api/capabilities：当前身份、能力清单与环境标识（T01：环境由服务端说了算）
+ *  · GET  /api/operations/:id：回执查询（业务已提交、HTTP 中断时按此找回）
+ *  · GET  /api/capabilities：当前身份、能力清单与环境标识（环境由服务端说了算）
  *
- *  身份：全部取服务端解析的沙盒演示身份（X-LabOps-Sandbox-Role 仅沙盒内可切换视角）。
+ *  身份：全部取服务端解析的沙盒身份（X-LabOps-Sandbox-Role 仅沙盒内可切换视角）。
  *  决策请求体只允许 proposalId / proposalVersion / decision / clientRequestId
- *  ——业务参数从服务端持久化提案读取，前端不可能夹带（T04）。
+ *  ——业务参数从服务端持久化提案读取，前端不可能夹带。
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -50,7 +50,7 @@ export async function handleTasksApi(req: IncomingMessage, res: ServerResponse, 
   const actor = resolveActor(req.headers['x-labops-sandbox-role']);
 
   try {
-    // ---- 能力协商：环境/身份/能力一次说清（T01）----
+    // ---- 能力协商：环境/身份/能力一次说清 ----
     if (pathname === '/api/capabilities' && method === 'GET') {
       json(res, 200, {
         operationsContractVersion: 'ops.v1',
@@ -101,7 +101,7 @@ export async function handleTasksApi(req: IncomingMessage, res: ServerResponse, 
         json(res, 400, { ok: false, code: 'bad_request', message: `提案 ${input.proposalId} 不属于任务 ${taskId}` });
         return true;
       }
-      // 生产写回（整合方案 §8.5）：本地台账提交成功后，已接通的动作类型真实写入主系统，
+      // 生产写回：本地台账提交成功后，已接通的动作类型真实写入主系统，
       // 回执按事实改写环境/送达/说明；幂等重放（executedNow 缺省）不再推送。
       if (outcome.ok && outcome.decision === 'confirm' && outcome.executedNow && outcome.receipt) {
         const stored = getOpsProposal(input.proposalId);
@@ -143,7 +143,7 @@ export async function handleTasksApi(req: IncomingMessage, res: ServerResponse, 
       return true;
     }
 
-    // ---- 回执查询（T06/T07 恢复用）----
+    // ---- 回执查询（恢复用）----
     const opMatch = /^\/api\/operations\/([^/]+)$/.exec(pathname);
     if (opMatch && method === 'GET') {
       const receipt = getOpsOperation(decodeURIComponent(opMatch[1]!));

@@ -2,7 +2,7 @@ import { useSessionStore } from './session';
 import {clientFetch} from '../client';
 import {formatDateTime} from '../business/automation-format';
 /**
- * 任务状态机 —— 「运行生命周期」与「结果类型」正交拆分（工作台改造 P0 修复）
+ * 任务状态机 —— 「运行生命周期」与「结果类型」正交拆分
  * ============================================================================
  *  runStatus 回答「这次任务还开着吗」：
  *    idle       初始
@@ -14,12 +14,12 @@ import {formatDateTime} from '../business/automation-format';
  *  resultKind 回答「结果长什么样」，只驱动结果区渲染：
  *    none / schedule_hit / schedule_empty / config_insufficient / lab_status / free_rooms
  *
- *  phase（T1 相位机）回答「现在在等谁」：planning / model / tool / awaiting_confirm /
+ *  phase（相位机）回答「现在在等谁」：planning / model / tool / awaiting_confirm /
  *    answering / 终态。只做展示与计时口径（awaiting_confirm 暂停工作计时），
  *    不参与输入锁判断；转移白名单见 PHASE_TRANSITIONS。
  *
  *  隔离规则：每次 beginRun 生成新的 runId 随请求发送；ingest 丢弃一切
- *  runId 不等于当前任务的事件 —— 旧流迟到的事件绝不可能污染新任务。
+ *  runId 不等于当前任务的事件 —— 过期的流事件绝不可能污染新任务。
  */
 
 import { defineStore } from 'pinia';
@@ -62,8 +62,8 @@ export type ResultKind = 'none' | 'schedule_hit' | 'schedule_empty' | 'config_in
 /**
  * 运行相位 —— 回答「现在到底在等谁」，与 RunStatus（回答「任务还开着吗」）正交并存。
  * need_confirm 到达时 runStatus 仍是 running（输入互斥不放宽），但相位进入
- * awaiting_confirm：UI 把"任务执行中"换成"等待你的确认"，工作计时暂停累计。
- * 相位只来自已存在的真实事件（不新增服务端事件类型），run_cancelled 归为正常结束。
+ * awaiting_confirm：UI 改显示"等待你的确认"，工作计时暂停累计。
+ * 相位只来自已存在的真实事件（不引入新的服务端事件类型），run_cancelled 归为正常结束。
  */
 export type RunPhase =
   | 'idle' | 'planning' | 'model' | 'tool'
@@ -175,17 +175,17 @@ function resultKindFromSchedule(r: ScheduleQueryResult): ResultKind {
 export const useRunStore = defineStore('run', () => {
   // ------------------------------ 运行生命周期 ------------------------------
   const runStatus = ref<RunStatus>('idle');
-  /** 输入锁定 = 任务还在跑。只有终态事件 + 流收尾才解锁（P0 修复） */
-  /** 正在跑的那个会话 id（跨会话并发第一片：锁从全局改成只锁当前会话） */
+  /** 输入锁定 = 任务还在跑。只有终态事件 + 流收尾才解锁 */
+  /** 正在跑的那个会话 id：输出锁只针对当前会话 */
 const runningConversationId = ref<string | null>(null);
 const inputLocked = computed(() => {
   if (runStatus.value !== 'running') return false;
-  // 旧数据/未带 convId 的 run 保守地全锁
+  // 未带 convId 的 run 保守地全锁
   if (!runningConversationId.value) return true;
   return runningConversationId.value === useSessionStore().currentId;
 });
   /**
-   * 运行相位（T1）：只用于展示与计时口径，**不接入 inputLocked 判断** ——
+   * 运行相位：只用于展示与计时口径，**不接入 inputLocked 判断** ——
    * 锁的语义保持 RunStatus 原样，避免 6 处消费点行为漂移。
    */
   const phase = ref<RunPhase>('idle');
@@ -199,17 +199,17 @@ const inputLocked = computed(() => {
   const elapsedMs = ref(0);
   /**
    * 服务端权威耗时（run_completed.payload.ms）。只用来判定 completed 与 interrupted，
-   * 不拼进文案（11-14 起显示「已完成」，不再显示秒数）；
-   * 前端本地时钟的 elapsedMs 只用于运行中的进度感与取消前的时长，不冒充服务端事实。
+   * 不拼进文案（界面显示「已完成」，不显示秒数）；
+   * 前端本地时钟的 elapsedMs 只用于运行中的进度感与取消前的时长，不作为服务端事实。
    */
   const serverMs = ref<number | null>(null);
   /**
-   * A6：本轮 token 用量（run_completed.payload.usage，provider 上报的真实值）。
-   * 只为展示；拿不到（流中断/老服务端）就是 null，绝不前端估数冒充。
+   * 本轮 token 用量（run_completed.payload.usage，provider 上报的值）。
+   * 只为展示；拿不到（流中断/不支持的服务端）就是 null，不做前端估算。
    */
   const usage = ref<{ promptTokens: number; completionTokens: number; totalTokens: number } | null>(null);
   /**
-   * A5 任务计划（plan_updated 事件载荷）：模型自己的工作步骤记录，UI 计划面板展示。
+   * 任务计划（plan_updated 事件载荷）：模型自己的工作步骤记录，UI 计划面板展示。
    * 不是业务事实；历史轮不走这里（历史轮读消息 meta.plan）。
    */
   const plan = ref<TaskPlanStep[]>([]);
@@ -242,7 +242,7 @@ const inputLocked = computed(() => {
   const labs = ref<Lab[]>([]);
   const openLabs = ref<Lab[]>([]);
   const overviewSourceType = ref<DataSourceType | null>(null);
-  /** 服务端**当前**的推理引擎。第一次任务之前就知道，界面不能靠 run_started 才敢说实话。 */
+  /** 服务端**当前**的推理引擎。第一次任务之前即可获取，界面不必等 run_started 才能显示真实引擎。 */
   const overviewEngine = ref<EngineType | null>(null);
   const overviewTerm = ref<{ term: string; termStart: string | null; holidays: string[] } | null>(null);
   const overviewLoaded = ref(false);
@@ -261,7 +261,7 @@ const inputLocked = computed(() => {
 
   const lessons = computed<ScheduleLesson[]>(() => lastResult.value?.lessons ?? []);
 
-  // 房间清单调整（用于验证 APP 已更新）：去掉 D533/D532，补充 D530/D531
+  // 房间清单本地调整：隐藏 D533/D532，补入 D530/D531（缺项在本地补齐，避免清单空白）
   const ROOM_HIDE = new Set(['D533', 'D532']);
   const ROOM_EXTRA: Lab[] = [
     { id: 'demo-d530', sortOrder: 90530, name: 'D530', location: '文渊D区5层D530', capacity: 40, status: 'active', description: '' },
@@ -289,7 +289,7 @@ const inputLocked = computed(() => {
     return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key, 'zh-Hans-CN'));
   });
 
-  /** 演示日期：取学期第 4 教学周的周三 —— 由 termStart 推导，不硬编码日期 */
+  /** 示例日期：取学期第 4 教学周的周三 —— 由 termStart 推导，不硬编码日期 */
   const demoDate = computed<string | null>(() => {
     const t = overviewTerm.value?.termStart ?? term.value?.termStart;
     if (!t) return null;
@@ -300,14 +300,14 @@ const inputLocked = computed(() => {
     const room = selectedLab.value ?? labs.value[0]?.name ?? 'E310';
     const other = labs.value.find((l) => l.name !== room)?.name ?? 'D517';
     const list: string[] = [];
-    // 2026-11-08 口径：示例固定两条日期查询（过去 10-27、未来 11-25），
-    // 让评审一眼看到能跨周/跨月查课表；其余示例保留相对时间（明天下午…）。
+    // 示例固定两条具体日期的查询（一过去、一未来），覆盖跨周/跨月查课表；
+    // 其余示例保留相对时间（明天下午…）。
     list.push(`${room} 2026-10-27 有哪些课？`);
     list.push(`E315 2026-11-25 有哪些课？`);
     list.push(`${other} 现在开放吗？`);
     list.push(`明天下午第二大节哪些实验室空着？`);
-    // 首屏示例原本全是只读查询，评委看不到本项目最有区分度的"提案→本人确认"链路。
-    // 这里补一条办理类示例，并在界面注明它只会生成待确认提案、不会直接改数据。
+    // 补一条办理类示例，让"提案→本人确认"链路可见，并在界面注明它只会生成
+    // 待确认提案、不会直接改数据。
     list.push(`D517 投影仪没有信号，帮我报修`);
     return list;
   });
@@ -416,7 +416,7 @@ const inputLocked = computed(() => {
         }
         case 'run_completed': {
           if (answerIdx !== null && steps[answerIdx]?.status === 'running') {
-            // F04：完成后关闭回答步骤并把标题改掉，不再叫"正在生成回答"
+            // 完成后关闭回答步骤并把标题改掉，不再叫"正在生成回答"
             steps[answerIdx] = { ...steps[answerIdx]!, status: 'done', title: '回答完成', detail: `回答完成（${stream.value.length} 字）` };
             answerIdx = null;
           }
@@ -465,7 +465,7 @@ const inputLocked = computed(() => {
           break;
       }
     }
-    // F04 修复：**没有**终态事件时不再擅自把回答步骤标成失败 ——
+    // **没有**终态事件时不擅自把回答步骤标成失败 ——
     // 流式进行中本来就没有终态；真正的断流由 finishRun() 合成 run_failed 事件，
     // cancelRun() 合成 run_cancelled，终态在这里统一关闭，不在计算属性里猜。
     return steps;
@@ -490,8 +490,7 @@ const inputLocked = computed(() => {
   });
 
   /**
-   * 工具中文名由 web/lib/turn-view.ts 统一提供（此前本文件与 ChatMessage.vue
-   * 各有一份映射表，会漂移 —— 合并为单一事实源）。
+   * 工具中文名由 web/lib/turn-view.ts 统一提供（单一事实源，避免映射漂移）。
    */
 
 
@@ -506,7 +505,7 @@ const inputLocked = computed(() => {
 
   let timer: number | null = null;
   /**
-   * 工作计时两段式：awaiting_confirm（等人拍板）的时间**不计入工作时长**。
+   * 工作计时两段式：awaiting_confirm（等待确认）的时间**不计入工作时长**。
    * workSince === 0 表示当前处于暂停段；stopTimer 把剩余段折进 workAccum 收尾。
    */
   let workSince = 0;
@@ -612,7 +611,7 @@ const inputLocked = computed(() => {
     question.value = q;
     runId.value = newRunId();
     runStatus.value = 'running';
-    // 跨会话并发第一片：记住谁在跑，输出锁只锁这个会话
+    // 记住谁在跑，输出锁只锁这个会话
     runningConversationId.value = useSessionStore().currentId;
     movePhase('planning'); // 乐观相位：run_started 到达后重申（同态重入幂等）
     ensureSessionId();
@@ -625,7 +624,7 @@ const inputLocked = computed(() => {
     return runId.value;
   }
 
-  /** N01：会话端点的 runId 由服务端生成 —— 通过 run_accepted 事件采纳，事件过滤随之切换 */
+  /** 会话端点的 runId 由服务端生成 —— 通过 run_accepted 事件采纳，事件过滤随之切换 */
   function adoptRunId(serverRunId: string): void {
     if (serverRunId && serverRunId !== runId.value) runId.value = serverRunId;
   }
@@ -634,7 +633,7 @@ const inputLocked = computed(() => {
     events.value = [...events.value, ev];
   }
 
-  /** 事件入口：runId 不匹配的一律丢弃（旧任务迟到事件不得污染新任务） */
+  /** 事件入口：runId 不匹配的一律丢弃（过期任务的迟到事件不得污染新任务） */
   function ingest(ev: RunEvent): void {
     if (runId.value && ev.runId !== runId.value) return;
     lastEventAt.value = Date.now();
@@ -688,7 +687,7 @@ const inputLocked = computed(() => {
         break;
       }
       case 'plan_updated': {
-        // A5：计划面板数据源。只接受带 steps 数组的合法载荷（R4：宁可空缺不造假）
+        // 计划面板数据源。只接受带 steps 数组的合法载荷（宁可空缺也不编造）
         const pp = ev.payload as { steps?: unknown };
         if (Array.isArray(pp.steps)) plan.value = pp.steps as TaskPlanStep[];
         break;
@@ -696,19 +695,19 @@ const inputLocked = computed(() => {
       case 'run_completed': {
         movePhase('completed');
         if (runStatus.value === 'running') runStatus.value = 'completed';
-        // R03/C04：以服务端权威全文对齐（delta 可能漏块；durable 确认在保存成功后发出）
+        // 以服务端权威全文对齐（delta 可能漏块；durable 确认在保存成功后发出）
         const p2 = ev.payload as { answer?: string; engine?: EngineType; model?: string; ms?: number; usage?: { promptTokens: number; completionTokens: number; totalTokens: number } };
         if(p2.engine) engine.value=p2.engine;
         // model 反映 fallback 之后真正生效的模型，覆盖 run_started 的计划值
         if(p2.model) model.value=p2.model;
         if (typeof p2.ms === 'number') serverMs.value = p2.ms;
-        // A6：provider 真实 usage（服务端拿不到时不下发，前端不估数冒充）
+        // provider 上报的 usage（服务端拿不到时不下发，前端不做估算）
         if (p2.usage && typeof p2.usage.totalTokens === 'number') usage.value = p2.usage;
         if (typeof p2.answer === 'string' && p2.answer) stream.value = p2.answer;
         break;
       }
       case 'save_failed': {
-        // R03：保存失败必须可见 —— 保留已生成内容，但明确"刷新后可能丢失"
+        // 保存失败必须可见 —— 保留已生成内容，但明确"刷新后可能丢失"
         const p3 = ev.payload as { message?: string; answer?: string };
         if (runStatus.value !== 'cancelled') runStatus.value = 'failed';
         movePhase('failed');
@@ -717,7 +716,7 @@ const inputLocked = computed(() => {
         break;
       }
       case 'end': {
-        // R03：end 是传输收尾 + 保存确认。saved=false 时状态转为 failed（可见错误），输入解锁
+        // end 是传输收尾 + 保存确认。saved=false 时状态转为 failed（可见错误），输入解锁
         const p4 = ev.payload as { saved?: boolean; saveError?: string; status?: string };
         if (p4.saved === false) {
           error.value = {
@@ -739,7 +738,7 @@ const inputLocked = computed(() => {
         // ops.v1：活跃轮待确认提案。卡片本体渲染在消息流内（OperationCard），
         // 这里保存载荷供"有未确认办理单"类提示使用
         pendingConfirm.value = ev.payload as NeedConfirmPayload;
-        // T1：等人拍板是显式相位 —— UI 据此停 loading、暂停工作计时；runStatus 不动（输入互斥不变）
+        // 等待确认是显式相位 —— UI 据此停 loading、暂停工作计时；runStatus 不动（输入互斥不变）
         movePhase('awaiting_confirm');
         break;
       }
@@ -755,7 +754,7 @@ const inputLocked = computed(() => {
         break;
       }
       case 'run_cancelled': {
-        // F05：服务端发出的取消同样是终态。此前缺这个分支会让输入永久锁住。
+        // 服务端发出的取消同样是终态；缺此分支会让输入永久锁住。
         // 终态幂等：只在运行中才收敛到 cancelled。取消是**正常结束**（中性态）：
         // 不置 error、不进服务端熔断计数（router.ts 对 run_cancelled 直接透传）。
         if (runStatus.value === 'running') runStatus.value = 'cancelled';
@@ -804,7 +803,7 @@ const inputLocked = computed(() => {
   }
 
   /**
-   * 用服务端快照把本轮收敛到真实终态（T5）。
+   * 用服务端快照把本轮收敛到真实终态。
    * 不合成假事件：只改生命周期与耗时事实，步骤/正文由调用方按快照整段替换消息。
    * 未拿到明确终态时调用方**不得**调用本函数（仍运行 → 继续等）。
    */
@@ -835,7 +834,7 @@ const inputLocked = computed(() => {
   function clearOverview(){overviewGeneration++;labs.value=[];openLabs.value=[];selectedLab.value=null;overviewLoaded.value=false;overviewError.value=null;overviewTerm.value=null;overviewSourceType.value=null;overviewEngine.value=null;timetableCount.value=0;}
   async function loadOverview(): Promise<void> {
     const generation = ++overviewGeneration;
-    // 账号变更时立即移除旧来源；迟到的请求不得覆盖新身份的概览。
+    // 账号变更时立即清空已有来源；迟到的请求不得覆盖新身份的概览。
     labs.value = [];
     openLabs.value = [];
     overviewSourceType.value = null;

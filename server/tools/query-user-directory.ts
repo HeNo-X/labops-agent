@@ -1,7 +1,7 @@
 /**
- * query_user_directory —— 名册与账号目录（整合方案批次3，2026-11-10）
+ * query_user_directory —— 名册与账号目录
  * ============================================================================
- *  主系统新增的只读端点 GET /user-directory（Pages/server/operations.js）：
+ *  主系统的只读端点 GET /user-directory（Pages/server/operations.js）：
  *    · 账号列表：username 已掩码（保留前 4 后 2）、姓名、身份、状态
  *    · 名册汇总：每班级人数（不回传逐条学号清单）
  *  隐私红线（服务端已强制，工具侧同样不得越）：

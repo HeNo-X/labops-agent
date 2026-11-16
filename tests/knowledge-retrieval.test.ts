@@ -1,5 +1,5 @@
 /**
- * 知识检索验收（WS1.2 / WS1.3）
+ * 知识检索验收
  * ============================================================================
  *  锁三件事，都是"RAG 名不副实"最容易翻车的地方：
  *   ① 中文短查询必须能命中（两字词是 unicode61 的死角）；
@@ -26,8 +26,8 @@ test('CJK 双字切分：两字词成为可检索单元，拉丁词不被切碎'
 test('回归：双字必须**重叠**生成（旧实现只出非重叠对，"值班"永远召不回）', () => {
   const toks = cjkBigrams('课程管理与值班').split(' ');
   assert.ok(toks.includes('课程') && toks.includes('程管') && toks.includes('管理'), '应逐字滑动生成');
-  assert.ok(toks.includes('值班'), '奇数偏移处的词也必须能被生成 —— 这是旧实现的漏召根因');
-  // 重复字不得产生空 token（旧实现 prev!==ch 会把"妈妈"整对丢掉）
+  assert.ok(toks.includes('值班'), '奇数偏移处的词也必须能被生成 —— 否则是漏召');
+  // 重复字不得产生空 token（不判 prev!==ch 会把"妈妈"整对丢掉）
   const dup = cjkBigrams('妈妈来了').split(' ');
   assert.ok(dup.includes('妈妈') && dup.includes('来了'), '重复相邻字要正常出词');
   assert.ok(!dup.includes(''), '不得产生空 token');

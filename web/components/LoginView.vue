@@ -4,13 +4,13 @@ import {clientFetch,isInstalledClient} from '../client';
 import {t as tr} from "../i18n";
 import {responseError} from '../http';
 /**
- * LabOps 专用登录页 —— 移植自心灵共鸣舱 LogIn.html 的成熟角色动画实现
+ * LabOps 专用登录页
  * ============================================================================
- *  · 表演层：public/login-characters.css + public/login-characters.js（原样移植，
- *    含状态机/眨眼/偷瞄/捂眼/惊呆节拍/成功转场，与演示录屏逐帧一致）
+ *  · 表演层：public/login-characters.css + public/login-characters.js
+ *    （含状态机/眨眼/偷瞄/捂眼/惊呆节拍/成功转场）
  *  · 接线：登录组件挂载后动态加载 js（脚本在加载时绑定 #username/#password/#pwdToggle
  *    并自启）；对外只调 triggerSadState / playSuccessTransition 两个接口
- *  · 正常部署复用主系统认证；仅显式 demo 模式使用演示门面
+ *  · 正常部署复用主系统认证；仅显式 demo 模式使用沙盒登录门面
  */
 import { onMounted, ref } from 'vue';
 
@@ -27,7 +27,7 @@ declare global {
 
 const emit = defineEmits<{ done: [account: string] }>();
 const props=defineProps<{mode?:'native'|'demo'}>();
-// 安装版：登录页只保留一个低调的「连接设置」文字入口（原「应用设置」悬浮按钮已取消）；
+// 安装版：登录页只保留一个低调的「连接设置」文字入口；
 // 网页版 isInstalledClient() 恒为 false，不渲染该入口。
 const installed=isInstalledClient();
 function openAdvanced(): void { location.assign('/client/settings.html#advanced'); }
@@ -42,8 +42,7 @@ onMounted(() => {
     booted = true;
     const s = document.createElement('script');
     // ⚠️ public/ 里的文件名是固定的，必须带版本参数，否则浏览器会一直用旧缓存
-    //    （2026-10-04 实际踩过：改了本文件但用户侧"没反应"）
-    //    改 public/login-characters.js 时把这里和 index.html 的 css 版本一起往上加
+    //    修改 public/login-characters.js 时把这里和 index.html 的 css 版本一起往上加
     s.src = '/login-characters.js?v=20261004c';
     s.addEventListener('load', () => window.LoginCharacters && window.LoginCharacters.rebind());
     document.body.appendChild(s); // 挂载后加载：rebind 确保 #username/#password/#pwdToggle 绑定生效

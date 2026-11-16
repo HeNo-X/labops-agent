@@ -1,14 +1,14 @@
 /**
- * RAG 批次 1：向量召回与三路混合检索
+ * 向量召回与三路混合检索
  * ============================================================================
  *  锁死的契约：
  *    ① 余弦：同向 1 / 正交 0 / 零向量 0 / 维度不齐 0（绝不 NaN 污染排序）；
  *    ② embedTexts：批量切分、按上游 index 重排（不信任响应顺序）、配额类 403 不重试；
  *    ③ 索引幂等：重跑不重复、语料变更清剪陈旧键、批内失败整体回滚；
  *    ④ 三路 RRF：向量路命中会带 via:'vector'；向量路关闭/未建索引/失败 →
- *       静默退回两路词法检索（via 不含 vector，结果与旧实现一致）；
+ *       静默退回两路词法检索（via 不含 vector，结果与词法两路一致）；
  *    ⑤ 语义召回补盲区：换说法（"显示设备信号接入" vs "投影仪怎么连线"）
- *       词法不中、向量能中——这是本批次存在的理由。
+ *       词法不中、向量能中——这是向量路存在的理由。
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,7 +27,7 @@ test('A11-01 余弦：同向 1 / 正交 0 / 零向量 0 / 维度不齐 0', () =>
   assert.equal(cosine([1, 2], [1, 2, 3]), 0, '维度不齐返回 0');
 });
 
-/** 进程内假 embedding 上游：把每条文本哈希成确定性向量，并记录收到的批次数 */
+/** 进程内 stub embedding 上游：把每条文本哈希成确定性向量，并记录收到的批次数 */
 function fakeEmbeddingUpstream(dim = 8) {
   let batches = 0;
   const server = http.createServer((req, res) => {
@@ -155,13 +155,13 @@ test('A11-07 向量路失败静默降级：embed 抛错不影响检索', async (
 
 test('A11-08 searchChunks 向量路显式传入：无权限/过期候选不因向量分高而漏进来', () => {
   const expired: KnowledgeDocument = { ...DOC_B, effectiveFrom: '2027-01-01' };
-  void indexKnowledge; // 索引过的旧向量仍在库（模拟：直接查未过滤集也查不到过期文档）
+  void indexKnowledge; // 索引过的陈旧向量仍在库（直接查未过滤集也查不到过期文档）
   const ranks = new Map<string, number>([[`${expired.id}#1`, 1]]);
   const chunks = searchChunks('投影', 'admin', '2026-10-31', [expired], 8, ranks);
   assert.equal(chunks.length, 0, '过期文档的向量名次再高也不得通过检索');
 });
 
-// ==================== RAG 批次 2：分块器与手册摄取 ====================
+// ==================== 分块器与手册摄取 ====================
 
 import { chunkLongText, docChunks, type ManualDoc } from '../server/tools/knowledge-chunker.ts';
 

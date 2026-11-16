@@ -1,5 +1,5 @@
 /**
- * 聊天链 / 工作链的**结构性隔离** —— 回归防护（2026-10-31）
+ * 聊天链 / 工作链的**结构性隔离** —— 回归防护
  * ============================================================================
  *  用户问：「这些模型只用于文本聊天，不参与工作模式吧？」
  *
@@ -9,7 +9,7 @@
  *  两侧在结构上互斥，"聊天模型被工作模式拿去用"在类型层面就不可能发生。
  *
  *  但结构正确不等于永远正确 —— 以后有人为了"兜底"给 task 分支加一行
- *  `|| c.dashscope.models[0]` 就能悄悄破坏它，而线上表现只是"工作模式换了个模型在跑"，
+ *  `|| c.dashscope.models[0]` 就能悄悄破坏它，而生产上只表现为"工作模式换了个模型在跑"，
  *  没人会发现。这组测试把该不变量钉死：
  *    ① 聊天链 == DASHSCOPE_MODELS（顺序一致），且全部 name==='dashscope'
  *    ② 工作链 == [AGNES_MODEL]，且 name==='agnes'
@@ -83,9 +83,8 @@ test('聊天链 = DASHSCOPE_MODELS，顺序一致，且全部是 dashscope 提�
 
 test('工作链首位是 qwen3.8-flash（2026-11-14 口径：有意跨链取用百炼端点）', () => {
   const r = probe({ ...DASHSCOPE, ...AGNES });
-  // 旧不变量「工作链只有 Agnes、与聊天链无交集」已被用户推翻：
-  // 工作模式首位改为 qwen3.8-flash，目的是它能返回 reasoning_content，
-  // 展示时同时看得到思维链与工具调用。Agnes 退到第二位。
+  // 工作模式首位是 qwen3.8-flash：它能返回 reasoning_content，
+  // 展示时同时看得到思维链与工具调用。Agnes 保留在第二位。
   assert.deepEqual(r.plan.task, ['qwen3.8-flash', 'agnes-3.0-flash']);
   assert.equal(r.task[0]!.model, 'qwen3.8-flash');
   assert.ok(r.task[0]!.baseUrl.includes('dashscope'), '首位必须打百炼端点');
@@ -96,8 +95,8 @@ test('每条链都带 Key；工作链首位与聊天链可共用百炼端点（2
   const r = probe({ ...DASHSCOPE, ...AGNES });
   assert.ok(r.chat.every((p) => p.hasKey), '聊天链每个模型都要带上 Key');
   assert.ok(r.task.every((p) => p.hasKey), '工作链要带上 Key');
-  // 旧断言「两条链不能共用同一个端点」已不成立：工作链首位就是百炼 qwen。
-  // 改为验证工作链里仍有一个**非百炼**的独立端点（Agnes），避免整链单点。
+  // 工作链首位就是百炼 qwen，与聊天链共用端点；这里验证工作链里仍有一个
+  // **非百炼**的独立端点（Agnes），避免整链单点。
   assert.ok(r.task.some((p) => p.baseUrl.includes('agnes-ai')), '工作链需保留 Agnes 作为独立端点');
 });
 
@@ -111,13 +110,13 @@ test('只配了 Agnes：聊天链必须为空，不借 Agnes 顶上', () => {
 
 test('只配了百炼：工作链首位是 qwen3.8-flash，不再为空（2026-11-14 口径）', () => {
   const r = probe({ ...DASHSCOPE, AGNES_API_KEY: '' });
-  // 旧口径要求工作链为空、回落规则引擎；新口径允许百炼的 qwen 顶上工作链。
+  // 只配了百炼时，工作链首位由 qwen3.8-flash 顶上，不回落到空。
   assert.deepEqual(r.plan.task, ['qwen3.8-flash']);
   assert.equal(r.chat.length, 3, '聊天链不受工作链影响');
 });
 
 // ---------------------------------------------------------------------------
-// 备用链（2026-10-31）：BigModel(glm-4.7-flash) + 星火(两个模型共用一个 Key)
+// 备用链：BigModel(glm-4.7-flash) + 星火(两个模型共用一个 Key)
 // ---------------------------------------------------------------------------
 const BIGMODEL = {
   BIGMODEL_API_KEY: 'bigmodel-key-for-chain',
@@ -133,13 +132,13 @@ const XFYUN = {
 
 test('全配置：两条链都是"主链在前、备用在后"，且备用顺序符合约定', () => {
   const r = probe({ ...DASHSCOPE, ...AGNES, ...BIGMODEL, ...XFYUN });
-  // 2026-11-14 口径：聊天链里原来的 qwen3.8-flash 位换成星火 spark-x2.6
+  // 聊天链口径：qwen3.8-flash 位由星火 spark-x2.6 承担
   assert.deepEqual(
     r.chat.map((p) => p.model),
     ['kimi-k3', 'spark-x2.6', 'qwen3.8-max-0902', 'glm-4.7-flash', 'spark-x2.6-4b'],
     '聊天链：kimi → 星火(spark-x2.6，接替原 qwen3.8-flash 位) → qwen-max → BigModel → 星火(chat)'
   );
-  // 2026-11-14 口径：工作链首位改为 qwen3.8-flash（能出思维链），其后 spark → glm → agnes
+  // 工作链口径：首位 qwen3.8-flash（能出思维链），其后 spark → glm → agnes
   assert.deepEqual(
     r.task.map((p) => p.model),
     ['qwen3.8-flash', 'spark-x2.6', 'glm-4.7-flash', 'agnes-3.0-flash', 'spark-x2.6-4b'],

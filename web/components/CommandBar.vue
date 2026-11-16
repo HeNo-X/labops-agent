@@ -6,9 +6,9 @@ import {t as tr} from "../i18n";
  *  · variant="hero"：空态居中的大输入框（主区主角）
  *  · variant="dock"：任务开始后吸底的紧凑输入栏
  *  · 中文自然语言输入，Enter 提交（Shift+Enter 换行）
- *  · 示例问题来自真实数据（房间号取自 /api/state，演示日期由 termStart 推导），
- *    **点击即发起任务**，不再只填充
- *  · 运行中**不再锁死输入框**：仍不允许并发提交（提交锁不变），但允许"补一句" ——
+ *  · 示例问题来自真实数据（房间号取自 /api/state，日期由 termStart 推导），
+ *    **点击即发起任务**
+ *  · 运行中不锁死输入框：仍不允许并发提交（提交锁不变），但允许"补一句" ——
  *    运行中输入的那句进入待发送（单条、按会话隔离），本轮结束后由父组件决定
  *    自动发出还是填回草稿。示例 chips 在运行中仍禁用。
  */
@@ -19,7 +19,7 @@ import ComposerBar from './ComposerBar.vue';
 
 // ⚠️ Boolean prop 必须显式给默认值：Vue 对未传入的 Boolean 类型 prop 会直接置为
 // false（而不是 undefined），不写 withDefaults 会让 `examples?: boolean` 的
-// "不传=显示" 语义失效（实测踩坑：任务模式示例因此消失）。
+// "不传=显示" 语义失效。
 const props = withDefaults(
   defineProps<{
     variant?: 'hero' | 'dock';
@@ -55,18 +55,18 @@ const props = withDefaults(
   }
 );
 const store = useRunStore();
-/** 草稿由父组件 v-model 持有：房间点击可回填、失败可恢复、切会话可分别保存（F27/F29） */
+/** 草稿由父组件 v-model 持有：房间点击可回填、失败可恢复、切会话可分别保存 */
 const text = defineModel<string>('draft', { default: '' });
 
 const isHero = computed(() => props.variant !== 'dock');
-/** 输入锁定只看运行生命周期；工具结果到达不解锁（P0 修复） */
-// R16：提交状态（创建会话/等待接受）也要锁输入并可见，避免"点了没反应"或重复提交
+/** 输入锁定只看运行生命周期；工具结果到达不解锁 */
+// 提交状态（创建会话/等待接受）也要锁输入并可见，避免"点了没反应"或重复提交
 const canSubmit = computed(() => text.value.trim().length > 0 && !store.inputLocked && !props.submitting);
 const busy = computed(() => store.inputLocked || Boolean(props.submitting));
 /**
- * 等待你拍板 ≠ 机器在算（T1 相位机）：need_confirm 到达后 runStatus 仍是 running
- * （输入互斥不放宽），但状态标签换成"等待你的确认"、glyph 换 ⏸（StatusTag 本就无动画，
- * 不新增 CSS 动效），工作计时由 store 暂停累计。
+ * 等待你确认 ≠ 机器在算：need_confirm 到达后 runStatus 仍是 running
+ * （输入互斥不放宽），但状态标签显示为"等待你的确认"、glyph 用 ⏸（StatusTag 本就无动画，
+ * 不另加 CSS 动效），工作计时由 store 暂停累计。
  */
 const awaitingConfirm = computed(() => store.phase === 'awaiting_confirm');
 
@@ -83,7 +83,7 @@ function submit(): void {
   }
   if (!canSubmit.value) return;
   emit('submit', q);
-  // F27：发出即清空草稿（父组件已在会话内保存该轮消息）
+  // 发出即清空草稿（父组件已在会话内保存该轮消息）
   text.value = '';
 }
 
@@ -95,7 +95,7 @@ function useExample(q: string): void {
 }
 
 // ---- 语音输入：与移动端 MobileConversation 同一 composable、同一套错误码文案 ----
-// F27：不再在任务结束时抢焦点 —— 用户可能正在读历史或操作其他控件
+// 任务结束时不抢焦点 —— 用户可能正在读历史或操作其他控件
 </script>
 
 <template>
@@ -177,7 +177,7 @@ function useExample(q: string): void {
 </template>
 
 <style>
-/* 2026-11-07：输入行 DOM 已移入 ComposerBar。scoped 样式带 data-v 属性，
+/* 输入行 DOM 在 ComposerBar 中。scoped 样式带 data-v 属性，
    子组件元素匹配不到，故本组件样式改为全局；类名均为 bar__* 前缀，不会外泄到别处。 */
 .bar {
   background: var(--surface);
@@ -317,7 +317,7 @@ function useExample(q: string): void {
   flex: 1;
   min-width: 0;
   resize: vertical;
-  /* 2026-11-06：高度 ×1.5（40→60、上限 140→210），长问题更好读 */
+  /* 输入区高度 60px，上限 210px，长问题更好读 */
   min-height: 60px;
   max-height: 210px;
   padding: 9px var(--sp-3);
@@ -441,7 +441,7 @@ function useExample(q: string): void {
   .bar--hero {
     padding: var(--sp-3);
   }
-  /* 示例问题改成单行横向滚动 —— 换行会把吸底栏撑到 250px+，挡住正文 */
+  /* 示例问题单行横向滚动 —— 换行会把吸底栏撑到 250px+，挡住正文 */
   .bar__examples {
     flex-wrap: nowrap;
     justify-content: flex-start;

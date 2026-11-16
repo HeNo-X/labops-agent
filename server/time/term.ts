@@ -1,16 +1,16 @@
 /**
  * 时间与教学周解算 —— 服务端唯一事实来源
  * ============================================================================
- *  难点 3 的对策：日期与周次**绝不让模型自己算**。所有时间判断走这里，
+ *  设计原则：日期与周次**绝不让模型自己算**。所有时间判断走这里，
  *  结果以人话摘要注入模型上下文；模型只负责"选工具 + 组织语言"。
  *
  *  三点纪律：
  *   1. 不信任客户端时钟 —— 全部以服务端 Asia/Shanghai 为准。
  *   2. 日期运算用它自己的 'YYYY-MM-DD' 串 + UTC 基准，绝不用 Date 隐式解析
- *      （历史坑：`new Date('2026-09-26T9:50')` 在某些引擎得到 NaN，必须补零）。
+ *      （`new Date('2026-09-26T9:50')` 在某些引擎得到 NaN，必须补零）。
  *   3. 教学周算不出来就返回 null，并如实说明"无法确定"，不猜。
  *
- *  口径来源：老系统 Pages/lib/lab-time.js 的 weekNo / weekMatches（兼容性红线）。
+ *  口径来源：主系统 Pages/lib/lab-time.js 的 weekNo / weekMatches（兼容性红线）。
  *    · weekNo = floor((目标日 - termStart) / 7天) + 1；termStart 缺失或目标日早于
  *      termStart → null。
  *    · weekMatches：wn 为 null 时**返回 true**（宁可宽松，不可误判无课）；
@@ -105,7 +105,7 @@ export function daysBetween(fromDate: string, toDate: string): number {
 export interface TermConfig {
   term: string;
   termStart: string | null;
-  /** 学期结束日（R09）：缺省时无法证明远期日期的课表完整覆盖 */
+  /** 学期结束日：缺省时无法证明远期日期的课表完整覆盖 */
   termEnd?: string | null;
   holidays: string[];
   specialDays?: Array<{date:string;teachingDate?:string;isTeachingDay?:boolean}>;

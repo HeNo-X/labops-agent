@@ -1,5 +1,5 @@
 /**
- * RAG 批次 1：知识向量索引命令（npm run knowledge:index）
+ * 知识向量索引命令（npm run knowledge:index）
  * ============================================================================
  *  对知识库全量段落向量化并写入持久库（knowledge_chunks_vec），幂等可重跑。
  *  需要 DASHSCOPE_API_KEY（走 DashScope text-embedding，OpenAI 兼容端点）。

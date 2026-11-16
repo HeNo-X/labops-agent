@@ -4,7 +4,7 @@
  *  纯函数结论已由 tests/asr-lexicon-report.test.ts 钉死；这里只补三件只有真服务能证的事：
  *    ① 路由确实注册了（不是 404），且只认 POST；
  *    ② 没有登录身份时拿不到报告（内置表指纹、配置开关这些不该对匿名暴露）；
- *    ③ **只读**：调完之后术语表文件与临时库都没被动过 —— 端点说"我不写任何东西"，
+ *    ③ **只读**：调完之后术语表文件与测试数据库都没被动过 —— 端点说"我不写任何东西"，
  *       这句话必须被验证，不能只写在注释里。
  *
  *  运行：node --test tests/asr-lexicon-check-route.test.ts
@@ -69,7 +69,7 @@ test('路由已注册：GET 走 405 而不是 404，方法限制说得很具体'
 });
 
 test('鉴权是 handler 自己判的：不经 withHttpIdentity 直接调用就是 401', async () => {
-  // 演示模式下整条链走通后匿名也能拿到报告（与转写同一档沙盒口径），所以这里把
+  // demo 模式下整条链走通后匿名也能拿到报告（与转写同一档沙盒口径），所以这里把
   // "没有身份就没有报告"这条判据单独测：绕开统一鉴权包裹，直接敲 handler。
   const { handleAsrLexiconCheck } = await import('../server/api/asr-lexicon-report.ts');
   const req = Readable.from([JSON.stringify({ keywords: ['门禁'], pairs: [] })]) as unknown as IncomingMessage;

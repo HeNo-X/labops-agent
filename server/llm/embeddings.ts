@@ -1,8 +1,8 @@
 /**
- * Embedding 客户端（RAG 批次 1）
+ * Embedding 客户端
  * ============================================================================
  *  走 DashScope 的 OpenAI 兼容端点 `POST {baseUrl}/embeddings`（复用
- *  DASHSCOPE_API_KEY / DASHSCOPE_BASE_URL，不新增任何依赖，R1 ✓）。
+ *  DASHSCOPE_API_KEY / DASHSCOPE_BASE_URL，不引入额外依赖）。
  *  模型 text-embedding-v3，维度可配（缺省 1024）。
  *
  *  设计约束：
@@ -10,7 +10,7 @@
  *     index 字段重排——绝不依赖响应顺序恰与请求一致；
  *   · 可重试：网络错误 / 5xx / 429 各重试一次（指数退避），配额类 403 不重试；
  *   · 测试可注入：embedTexts 的第二参允许覆盖 endpoint 配置（进程内起假上游
- *     即可测，不需要子进程——execFileSync 死锁教训见 tests/fixtures/quota-probe.ts）；
+ *     即可测，不需要子进程——避免 execFileSync 死锁，见 tests/fixtures/quota-probe.ts）；
  *   · 关闭（EMBEDDING_ENABLED=0）或无 Key 时调用方必须走纯词法路（本模块
  *     不做兜底决策，只如实抛错/报状态）。
  */

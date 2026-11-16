@@ -14,7 +14,7 @@ function audienceText(raw:unknown):string{
  if(a['kind']==='user')return tr('本人账号')+' '+String(a['userId']||'');
  return tr('全体用户');
 }
-/** U02：移动端确认走底部弹层（拇指区主按钮 + 摘要预览）；桌面维持原内联直提 */
+/** 移动端确认走底部弹层（拇指区主按钮 + 摘要预览）；桌面端内联直接提交 */
 async function confirmAndCommit(){
  if(!commitAllowed.value)return;
  const current=plan.value;

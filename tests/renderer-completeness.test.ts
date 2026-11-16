@@ -13,7 +13,7 @@ type Fixtures = { [K in Kind]: { payload: Payload<K>; includes: string[] } };
 // 仅测试夹具，不写入业务数据；所有强类型载荷由 ToolExecution 校验，禁止 as never 掩盖缺字段。
 const date = '2026-11-08';
 const at = '2026-11-08T08:30:00+08:00';
-/** 明细时间按 2026-11-16 用户指定格式显示：yyyy-mm-dd hh:mm */
+/** 明细时间按 yyyy-mm-dd hh:mm 格式显示 */
 const atShort = '2026-11-08 08:30';
 const provenance: ScheduleQueryResult['provenance'] = {
   sourceType: 'snapshot', sourceLabel: '渲染测试快照', queryTime: at,
@@ -164,7 +164,7 @@ const kinds = Object.keys(fixtures) as Kind[];
 const extras = { dateWasDefaulted: false, periodFiltered: false };
 function verifyFixture(kind: Kind, textOnly: boolean): void {
   const fixture = fixtures[kind];
-  // 不用工具 summary 兜底冒充专用分支输出。
+  // 不用工具 summary 代替专用分支输出。
   const out = renderDemoAnswer({ kind, payload: structuredClone(fixture.payload), summary: '不应替代真实呈现的摘要' }, { ...extras, textOnly });
   assert.doesNotMatch(out, /暂无专用呈现|不应替代真实呈现的摘要|undefined|\[object Object\]/);
   for (const text of fixture.includes) assert.ok(out.includes(text), `${kind} 缺少实际数据：${text}\n${out}`);
@@ -271,7 +271,7 @@ test('records 覆盖开放实验室历史字段与钥匙台账，保留掩码、
     assert.doesNotMatch(out, /账号：/, '明细不再展示账号（2026-11-16 用户要求）');
     const keyOut = renderDemoAnswer({ kind: 'records', payload: keys }, { ...extras, textOnly });
     for (const expected of ['钥匙台账：共 2 条', '夹具钥匙甲', '测试柜A', '2026****06', '夹具备注', '已借出', '夹具钥匙乙', '未借出']) assert.ok(keyOut.includes(expected), expected);
-    // 用户口径（2026-11-11）：钥匙答案只留"哪把、借没借出、在谁手里/在哪"，
+    // 钥匙答案只留"哪把、借没借出、在谁手里/在哪"，
     // 内部编号、labType 与掩码口径说明不再混进正文
     for (const forbidden of ['key-0', 'key-1', 'labType', 'student', '借用人已掩码', '身份字段按服务端返回原样展示']) {
       assert.ok(!keyOut.includes(forbidden), `不应出现内部字段：${forbidden}`);
@@ -320,7 +320,7 @@ test('空知识命中、空工作计划及未导入档案仍保留能力边界',
     assert.match(out, /学期安排.*尚未导入/);
     assert.match(out, /周值班模板.*尚未导入/);
     assert.doesNotMatch(out, /没有课|无人值班/);
-    // 未导入时 hint 是给模型的处置指引，不许被原样印进用户正文（2026-11-10 真实数据实机实测到泄漏）
+    // 未导入时 hint 是给模型的处置指引，不许被原样印进用户正文（真实数据里出现过这种泄漏）
     const withRealHint: TermScheduleResult = { ...term, hint: '学期安排或志愿者值班表尚未导入，请如实告知用户并提示联系管理员；不得把空数组表述为「无课/无人值班」。' };
     const leaked = renderDemoAnswer({ kind: 'term_schedule', payload: withRealHint }, options);
     assert.doesNotMatch(leaked, /请如实告知用户|不得把空数组表述为/, '模型侧指引文本泄漏进用户正文');
@@ -373,8 +373,8 @@ test('只答问到的那一半：问一格值班不得附带学期安排与整�
 
 test('线上真实形态：名单是姓名字符串数组，问"这节谁值班"要给出该节姓名', async () => {
   const { normalizePersons } = await import('../server/tools/query-term-schedule.ts');
-  // 线上 /term-schedule 的 volunteerSchedule.persons 是 ["尉佳琳","于宏",…]，旧夹具才是对象数组；
-  // 只按对象取 name 会把 31 人整体丢成空表（2026-11-10 彩排实测到"0 名志愿者"）
+  // 生产 /term-schedule 的 volunteerSchedule.persons 是 ["尉佳琳","于宏",…]，夹具里是对象数组；
+  // 只按对象取 name 会把 31 人整体丢成空表（会出现"0 名志愿者"）
   const mixed = normalizePersons(['尉佳琳', '  ', { name: '周有蓉', className: '计本2401', group: 'A组' }, { name: '' }, null, 7]);
   assert.deepEqual(mixed, [{ name: '尉佳琳', className: '', group: '' }, { name: '周有蓉', className: '计本2401', group: 'A组' }]);
   assert.deepEqual(normalizePersons(undefined), []);

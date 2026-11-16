@@ -1,18 +1,18 @@
 /**
- * 通知受众口径 —— 回归防护（2026-10-06）
+ * 通知受众口径 —— 回归防护
  * ============================================================================
- *  用户现象：「帮我发一条通知：值班同学到5楼来」→
+ *  问题形态：「帮我发一条通知：值班同学到5楼来」会失败：
  *    Agnes 3.0 Flash · 5815 ms · 失败
  *    失败原因：evidence_missing 你要求的操作没有完成：接收对象无效
  *             （工具 prepare_business_workflow｜错误码 bad_audience）
  *
- *  根因（代码可证，两处口径不一致）：
+ *  两侧词表不一致（代码可证）：
  *   · 沙盒工具 prepare_notification 的受众是 {kind:'class_ids'|'role_scope'|'all'}；
  *   · 原系统 /workflow/preview 的 validateAudience 只认 {kind:'all'|'role'|'class'|'user'}；
  *   · prepare_business_workflow 的 audience 在工具清单里**没有任何 schema**（{type:'object'}），
  *     两个工具同处一份清单 ⇒ 模型照沙盒词表写 ⇒ 原系统直接拒。
  *
- *  修复：给工具补上精确 enum schema，并在服务端做**语义等价的词表翻译**；
+ *  现在的做法：给工具补上精确 enum schema，并在服务端做**语义等价的词表翻译**；
  *  有歧义（多班级、给管理员群发、收件人不明）一律明确报错并列出可选形式 —— 收件人不能猜。
  *
  *  运行：node --test tests/notice-audience.test.ts
@@ -58,7 +58,7 @@ test('沙盒词表 role_scope → 原系统 role（这是用户那次失败的�
 });
 
 test('沙盒词表 class_ids → 原系统 class（单班级无歧义才翻译）', () => {
-  assert.deepEqual(normalizeNoticeAudience({ kind: 'class_ids', classIds: ['评审示例班'] }), { ok: true, audience: { kind: 'class', className: '评审示例班' } });
+  assert.deepEqual(normalizeNoticeAudience({ kind: 'class_ids', classIds: ['测试示例班'] }), { ok: true, audience: { kind: 'class', className: '测试示例班' } });
   const many = normalizeNoticeAudience({ kind: 'class_ids', classIds: ['A班', 'B班'] });
   assert.equal(many.ok, false);
   assert.match(many.ok ? '' : many.message, /一次只能给一个班级/);

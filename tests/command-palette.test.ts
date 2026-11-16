@@ -20,7 +20,7 @@ const {
 import type {CommandContext} from '../web/lib/command-registry.ts';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-/** 每个 run 都换成可观测的桩，同时记录被调用次数 */
+/** 每个 run 都用可观测的桩，同时记录被调用次数 */
 function ctx(over:Partial<CommandContext>={}):CommandContext & {calls:Record<string,number>}{
   const calls:Record<string,number>={};
   const hit=(k:string)=>()=>{calls[k]=(calls[k]??0)+1;};
@@ -54,7 +54,7 @@ test('T7-01 注册表 id 唯一、分组合法、run 可调用，且每条都能
     assert.equal(typeof x.run,'function');
     await x.run();
   }
-  // 演示身份：当前角色不重复挂出
+  // demo 身份：当前角色不重复挂出
   assert.ok(ids.includes('switch-actor-volunteer'));
   assert.ok(!ids.includes('switch-actor-admin'));
   // 最近会话 ≤3，且不挂空标题
@@ -122,7 +122,7 @@ test('T7-07 命令引用的 store 成员真实存在（对 store 源码做轻量
   // 侧栏聚焦通道必须是可调用函数（命令面板"聚焦会话搜索"依赖它）
   const focus=fs.readFileSync(path.join(root,'web/lib/sidebar-focus.ts'),'utf8');
   assert.match(focus,/export function requestSidebarSearchFocus/);
-  // 命令面板引用的 labops-target 通道在三个面板里都已存在（不新增机制）
+  // 命令面板引用的 labops-target 通道在三个面板里都已存在（不引入新机制）
   for(const panel of ['web/components/VisionPanel.vue','web/components/automation/AutomationPanel.vue','web/components/NativeWorkPanel.vue']){
     assert.match(fs.readFileSync(path.join(root,panel),'utf8'),/labops-target/,`${panel} 未接入 labops-target`);
   }

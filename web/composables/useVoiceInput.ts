@@ -23,8 +23,8 @@ import { currentUserTermPairs, currentKeywords } from './useUserTerms';
  */
 /**
  * 上一次语音请求的真实偏置结果。放在模块级而不是 composable 实例里，
- * 因为「常用语音热词」面板现在住在 设置 → 个性化，与输入条不是同一棵组件树 ——
- * 用实例级 ref 的话面板只能拿到 null，然后理直气壮地显示一句错话。
+ * 因为「常用语音热词」面板位于 设置 → 个性化，与输入条不是同一棵组件树 ——
+ * 用实例级 ref 的话面板只能拿到 null，界面就会显示一句错话。
  */
 export const lastAsrBias = ref<VoiceBias | null>(null);
 export const lastAsrProtocol = ref<string>('');
@@ -152,7 +152,7 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
           ...(suppressCorrection.value ? { skipTermCorrect: true } : {}),
           // 登记过的写法随请求带上去：服务端只在本条转写里用，不落盘、不影响别人。
           // 词对（termPairs）走纠正层精确替换；常用词（extraTerms）只进事前偏置。
-          // 两者为空时整个字段不出现，保持与改造前的请求体逐字一致。
+          // 两者为空时整个字段不出现，请求体保持最小形态。
           ...(() => {
             const termPairs = currentUserTermPairs();
             const extraTerms = currentKeywords();

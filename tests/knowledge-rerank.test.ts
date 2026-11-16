@@ -1,5 +1,5 @@
 /**
- * RAG 批次 3：LLM 重排 + 引用脚注
+ * LLM 重排 + 引用脚注
  * ============================================================================
  *  锁死的契约：
  *    ① 重排缺省关（RERANK_LLM）；开启且模型给出合法 JSON → 按分数重排；
@@ -27,7 +27,7 @@ const HIT_B: RankedHit = {
   via: ['vector', 'bm25'], score: 0.03
 };
 
-/** 假模型链：按脚本吐文本事件 */
+/** 模型链替身：按脚本吐文本事件 */
 function fakeChat(script: string) {
   return async function* (): AsyncGenerator<AgnesStreamEvent> {
     yield { type: 'text', text: script } as AgnesStreamEvent;

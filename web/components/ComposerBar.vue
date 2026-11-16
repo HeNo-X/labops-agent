@@ -2,9 +2,9 @@
 /**
  * ComposerBar —— 三处输入条的唯一实现（PC hero / PC dock / 移动端）
  * ============================================================================
- *  2026-11-07 从 CommandBar 与 MobileConversation 各搬一份出来合并。
- *  为什么必须合一：同一套"语音模式 / 长按说话 / 停止占位 / 继续发送"以前散在三处，
- *  改一处必漏另外两处（已真实发生：改了会话页、首页没改）。
+ *  由 CommandBar 与 MobileConversation 的共同部分抽取而来，三处宿主共用。
+ *  为什么必须合一：同一套"语音模式 / 长按说话 / 停止占位 / 继续发送"若分散在多处，
+ *  改一处必漏另外几处。
  *
  *  职责边界（刻意收窄）：
  *   · 只管"输入行 + 语音模式 + 录音遮罩"；
@@ -22,7 +22,7 @@ import VoiceCorrectionBar from './VoiceCorrectionBar.vue';
 const props = withDefaults(
   defineProps<{
     draft: string;
-    /** 本轮正在跑：发送键换成停止，空输入时出现"继续发送" */
+    /** 本轮正在跑：发送键变为停止，空输入时出现"继续发送" */
     busy?: boolean;
     /** 额外禁用（如会话列表加载失败） */
     disabled?: boolean;
@@ -73,7 +73,7 @@ const hold = useHoldToTalk({
   }
 });
 
-/** 与旧实现同口径的错误文案（不改语义，只搬家） */
+/** 错误文案与输入条其它宿主保持一致 */
 const voiceHint = computed(() => {
   const code = voice.errorCode.value;
   if (!code || code === 'aborted') return '';

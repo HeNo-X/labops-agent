@@ -1,7 +1,7 @@
 /**
  * 运行配置 —— 所有可调参数集中在这里，且**都有安全默认值**
  * ============================================================================
- *  C6：凭据只从环境变量读取，禁止硬编码、禁止进日志。
+ *  凭据只从环境变量读取，禁止硬编码、禁止进日志。
  *  服务端启动时用 loadEnvFile 读项目根的 .env（不存在就跳过，不报错）。
  */
 
@@ -21,8 +21,8 @@ function ensureEnv(): void {
   const envPath = path.join(PROJECT_ROOT, '.env');
   // 测试要验证的是"给定 env → 链长什么样"这条纯函数关系，.env 是部署配置，
   // 不该参与单测。loadEnvFile 只补「未设置」的变量 —— 测试把变量删干净后反而会被
-  // .env 全部补回（实测：夹具 3 个百炼模型，链里冒出 glm-4.7-flash / spark-x2.6-4b，
-  // 且带真实 Key 真连外网）。LABOPS_SKIP_ENV_FILE=1 由测试入口统一注入。
+  // .env 全部补回（链里会混入部署配置的模型，并带真实 Key 连外网）。
+  // LABOPS_SKIP_ENV_FILE=1 由测试入口统一注入。
   if (fs.existsSync(envPath) && process.env.LABOPS_SKIP_ENV_FILE !== '1') {
     try {
       process.loadEnvFile(envPath);
@@ -82,14 +82,14 @@ export interface AppConfig {
     taskModel: string;
     chatModel: string;
   };
-  /** RAG 批次1：知识检索的向量召回（DashScope text-embedding，OpenAI 兼容端点；复用 DASHSCOPE_API_KEY） */
+  /** 知识检索的向量召回（DashScope text-embedding，OpenAI 兼容端点；复用 DASHSCOPE_API_KEY） */
   embeddings: {
     enabled: boolean;
     model: string;
     dimensions: number;
     batchSize: number;
   };
-  /** RAG 批次3：LLM 重排（对三路召回的 top 候选做一次打分重排；缺省关——配额敏感） */
+  /** LLM 重排（对三路召回的 top 候选做一次打分重排；缺省关——配额敏感） */
   rerank: {
     llm: boolean;
   };
@@ -115,7 +115,7 @@ export interface AppConfig {
     maxCooloffMs: number;
   };
   agent: {
-    /** 单次任务最多几步（工具调用 + 收尾）。硬上限，不允许无界循环（C5） */
+    /** 单次任务最多几步（工具调用 + 收尾）。硬上限，不允许无界循环 */
     maxSteps: number;
     /** 单次任务墙钟上限 */
     wallClockMs: number;
@@ -134,8 +134,8 @@ export interface AppConfig {
   /**
    * 视觉理解（多模态证据）。独立于任务/聊天两条主链路：
    * 主链路的模型不接图，图只走这一条受控通道，产出结构化观察而非自由文本。
-   * 默认复用 DashScope 端点与 Key，但**模型名单独配**（聊天链那 7 个是纯文本模型）。
-   * 未配置 Key ⇒ 工具如实返回"视觉未启用"，绝不用规则引擎冒充看图结果。
+   * 默认复用 DashScope 端点与 Key，但**模型名单独配**（聊天链的模型都是纯文本模型）。
+   * 未配置 Key ⇒ 工具如实返回"视觉未启用"，不用规则引擎代替看图结果。
    */
   vision: {
     apiKey: string;
@@ -146,17 +146,17 @@ export interface AppConfig {
     maxImageBytes: number;
   };
   data: {
-    /** true ⇒ 直接读真实 state.json（实时数据），仅本地/校内演示 */
+    /** true ⇒ 直接读真实 state.json（实时数据），仅供本地/校内联调 */
     live: boolean;
     liveStatePath: string;
     snapshotPath: string;
     fallbackDemoPath: string;
   };
   /**
-   * ops.v1 沙盒身份（任务书 §7.2 的最小版）。
-   * 老系统没有可复用的登录体系 → 沙盒用演示身份：默认角色由 .env 决定，
-   * 前端可在沙盒内切换演示视角（学生/志愿者/管理员），能力边界由服务端校验。
-   * production 环境未接入；接入后此处必须换成真实身份委托，绝不能沿用演示身份。
+   * 沙盒身份。
+   * 沙盒默认角色由 .env 决定，前端可在沙盒内切换视角（学生/志愿者/管理员），
+   * 能力边界由服务端校验。production 环境未接入；接入后此处必须替换为真实身份委托，
+   * 不能沿用沙盒身份。
    */
   sandbox: {
     defaultRole: 'admin' | 'volunteer' | 'student';
@@ -182,25 +182,17 @@ export function getConfig(): AppConfig {
       enableThinking: bool('AGNES_ENABLE_THINKING', false)
     },
     /**
-     * DashScope（阿里云百炼）OpenAI 兼容端点 —— 2026-10-05 按负责人要求新增。
+     * DashScope（阿里云百炼）OpenAI 兼容端点。
      * 用途：**仅聊天模式**使用（见 llm/router.ts：mode==='chat' 才走这里，工作模式只走 Agnes，
      *       两侧在代码结构上互斥，不存在"聊天模型被工作模式拿去用"的可能）。
-     * 顺序口径：负责人给的是界面自上而下的列表，要求**从下往上**依次调用 →
-     * 故默认值按"最下面那个最先调用"排列。
-     * 说明：模型名已用真实 Key 调 GET /models 核对存在，且逐条实调 /chat/completions 验证可用。
+     * 顺序口径：默认值按"列表最下面的最先调用"排列（从下往上）。
      *
-     * 2026-10-31 更替：上一批（deepseek-v4-flash-0731 / qwen3.8-max / qwen3.8-2.4t-a95b /
-     * deepseek-v4-pro-0813 / qwen3.8-27b / glm-5.3）免费额度已全部耗尽（403
-     * AllocationQuota.FreeTierOnly），逐条实调确认不可用 → 换成截图里这批新模型，
-     * 截图自上而下：
-     *   deepseek-v4.1-flash-1017 / deepseek-v4.1-flash / qwen3.8-max-0902 / qwen3.8-flash / kimi-k3
-     *
-     * ⚠️ 唯一偏离"自下而上"的地方：kimi-k3 从第 1 位挪到**最后**。实测三条硬理由：
+     * ⚠️ 唯一偏离"自下而上"的地方：kimi-k3 排在**最后**。理由三条：
      *   ① 它**不认 temperature**（400 InternalError.Algo.InvalidParameter）→ 每轮白跑一次
      *      （已在 llm/agnes.ts 加"摘参数重发"兜底，但没必要把每次请求都赌在兜底上）；
      *   ② 同样的问题它平均 **23~32 秒**，其余四个 1.5~4.4 秒；
      *   ③ 问「E310 今天的签到记录」它**不调工具**，直接回"请说明房间"，正是要避免的死路。
-     *   其余 4 个严格自下而上。要完全照原顺序，把 kimi-k3 挪回第一位即可。
+     *   其余 4 个严格自下而上。要完全照列表顺序，把 kimi-k3 挪回第一位即可。
      */
     dashscope: {
       apiKey: str('DASHSCOPE_API_KEY'),
@@ -210,7 +202,7 @@ export function getConfig(): AppConfig {
     },
     /**
      * 备用提供方 1：智谱 BigModel（OpenAI 兼容 v4 端点）。
-     * 角色：**聊天模式与工作模式共用的备用**——主链全挂时才轮到它（2026-10-31 负责人指定）。
+     * 角色：**聊天模式与工作模式共用的备用**——主链全挂时才轮到它。
      */
     bigmodel: {
       apiKey: str('BIGMODEL_API_KEY'),
@@ -229,7 +221,7 @@ export function getConfig(): AppConfig {
       chatModel: str('XFYUN_CHAT_MODEL', 'spark-x2.6-4b')
     },
     /**
-     * RAG 批次1：知识检索向量召回。enabled 缺省关——生效需同时具备
+     * 知识检索向量召回。enabled 缺省关——生效需同时具备
      * DASHSCOPE_API_KEY 与已建索引（npm run knowledge:index）；任一不满足时
      * 检索自动退回关键词+BM25 两路，向量路任何失败都不影响检索本身。
      */
@@ -249,11 +241,11 @@ export function getConfig(): AppConfig {
       maxCooloffMs: int('LLM_CIRCUIT_MAX_COOLLOFF_MS', 300000, 5000, 3600000)
     },
     agent: {
-      maxSteps: int('AGENT_MAX_STEPS', 8, 1, 12), // 批5 灰度 6→8（三段任务撞顶；计划联动见 run.ts）
+      maxSteps: int('AGENT_MAX_STEPS', 8, 1, 12), // 三段任务会达到默认预算上限，故默认 8（计划联动见 run.ts）
       wallClockMs: int('AGENT_WALL_CLOCK_MS', 120000, 5000, 600000),
       /**
        * 上下文预算（确定性截断，不做 LLM 摘要压缩）。
-       * 关闭开关（CONTEXT_TRIM_ENABLED=0）时行为与改造前完全一致 —— 只保留决策可观测。
+       * 关闭开关（CONTEXT_TRIM_ENABLED=0）时不做任何裁剪 —— 只保留决策可观测。
        */
       context: {
         enabled: bool('CONTEXT_TRIM_ENABLED', true),
@@ -311,17 +303,17 @@ export function describeConfig(c: AppConfig): string[] {
   ];
 }
 
-/** 方案B（2026-11-08）：上下文继承改造开关——false 时回退旧的"沿用直接写槽位"行为 */
+/** 上下文继承开关：false 时直接把承接值写入槽位（legacy 行为） */
 export function contextHintsEnabled(): boolean {
   return bool('CONTEXT_HINTS', true);
 }
 
-/** 批次2（答案生成权回交）：模型基于工具证据组织最终答复（核对层校验数字）。
- *  默认 render：核对层目前只覆盖**数字**，编造的课程名等实体尚无机械校验
- *  （stream-facts 回归钉死该契约）——待实体核对扩展+真模型评测后切 model。 */
+/** 答案生成权：模型基于工具证据组织最终答复（核对层校验数字与名称）。
+ *  默认 model；ANSWER_GENERATION=render 时直接使用工具渲染结果。
+ *  核对层覆盖数字与有明确标记的实体（stream-facts 回归钉死该契约）。 */
 export function answerGeneration(): 'model' | 'render' {
   ensureEnv();
-  // 2026-11-14 用户裁定：**禁止系统直接给答案**。默认改 model——工具结果只作为证据，
-  // 由模型组织答复；系统只做数字/名称核对与兜底。要退回旧行为显式设 ANSWER_GENERATION=render。
+  // 工具结果只作为证据，由模型组织答复；系统只做数字/名称核对与兜底。
+  // 要改为直接渲染工具结果，显式设 ANSWER_GENERATION=render。
   return process.env['ANSWER_GENERATION'] === 'render' ? 'render' : 'model';
 }

@@ -1,5 +1,5 @@
 /**
- * 中文时间/房间指代解析 —— 服务端预解析（难点 3 的对策 1）
+ * 中文时间/房间指代解析 —— 服务端预解析
  * ============================================================================
  *  「本周三下午第二大节」这种话**绝不能让模型自己算**：模型跨周跨月算日期极易错。
  *  所以进模型之前先在这里解算成精确的 YYYY-MM-DD + periodKey，连同人话标注一起
@@ -25,7 +25,7 @@ export interface DateResolution {
   source: string;
 }
 
-/** 显式非法的日期输入（如 2026-02-30 / 2026-13-01）——绝不允许静默回落到今天（F10） */
+/** 显式非法的日期输入（如 2026-02-30 / 2026-13-01）——绝不允许静默回落到今天 */
 export interface DateInvalid {
   invalid: true;
   raw: string;
@@ -38,15 +38,14 @@ export interface Intent {
   dateInvalid: DateInvalid | null;
   /** 单一节次（与 periodKeys 二选一） */
   periodKey: PeriodKey | null;
-  /** 节次范围（"上午"= am1+am2；"下午"= pm1+pm2；"晚上"= eve_ab+eve_cd）—— F12 */
+  /** 节次范围（"上午"= am1+am2；"下午"= pm1+pm2；"晚上"= eve_ab+eve_cd） */
   periodKeys: PeriodKey[] | null;
   labName: string | null;
   /** 按班级查（"智能本2501班"）—— 与 labName 二选一 */
   className: string | null;
-  /** 方案B（2026-11-08）：上下文线索。carried 线索**只进这里、不写槽位**——
-   *  沿用与否由模型结合上文判断（见 docs/上下文继承改造-方案B-20261108.md）。 */
+  /** 上下文线索。carried 线索**只进这里、不写槽位**——沿用与否由模型结合上文判断。 */
   hints?: IntentHint[];
-  /** 上一问任务类型（由 run.ts 从会话上下文注入，N08 追问继承） */
+  /** 上一问任务类型（由 run.ts 从会话上下文注入，供追问继承） */
   lastTask?: string | null;
   /** 一句多问（"周一上二…周三早八和下一"）：每段各自的日期与节次，供只读组合逐段查询 */
   timeSegments?: TimeSegment[];
@@ -54,7 +53,7 @@ export interface Intent {
   notes: string[];
 }
 
-/** 一句多问里的一个"日期+节次"片段（2026-11-11：多段问句不再被合并成一个大范围） */
+/** 一句多问里的一个"日期+节次"片段（多段问句按段保存，不合并成一个大范围） */
 export interface TimeSegment {
   /** 原文片段，便于把依据说清 */
   raw: string;
@@ -63,7 +62,7 @@ export interface TimeSegment {
   periodKeys: PeriodKey[];
 }
 
-/** 方案B：规则从决策者降级为提议者——每条线索都带来源与一句话依据 */
+/** 规则只做提议者：每条线索都带来源与一句话依据 */
 export interface IntentHint {
   slot: 'date' | 'labName' | 'periodKey' | 'className';
   value: string;
@@ -74,7 +73,7 @@ export interface IntentHint {
 }
 
 /**
- * 签到红线（2026-11-08 用户拍板）：Agent **不得**帮学生补录/代签。
+ * 签到红线：Agent **不得**帮学生补录/代签。
  * 确定性拦截而非靠模型自觉——保证这类请求得到一致的婉拒，而不是答非所问。
  * 误报防线：纯查询（查/看/情况/记录/汇总/统计）不命中动作子句。
  */
@@ -99,9 +98,9 @@ const HINT_ORIGIN_LABEL: Record<IntentHint['origin'], string> = {
 };
 
 /**
- * 会话承接（方案B）：上一问的房间/日期在 hints 模式下**只写线索不写槽位**，
- * 沿用与否由模型判断；legacy 模式（CONTEXT_HINTS=0）保持旧的原样写槽位行为。
- * 纪律与旧逻辑一致：找空闲房间/寒暄不承接；非法日期绝不承接；班级明确时与房间互斥。
+ * 会话承接：上一问的房间/日期在 hints 模式下**只写线索不写槽位**，
+ * 沿用与否由模型判断；legacy 模式（CONTEXT_HINTS=0）直接把承接值写入槽位。
+ * 纪律：找空闲房间/寒暄不承接；非法日期绝不承接；班级明确时与房间互斥。
  */
 export function applySessionCarry(
   intent: Intent,
@@ -142,8 +141,8 @@ export function applySessionCarry(
 }
 
 /**
- * 方案B：确定性引擎（无模型）没有"结合上文判断"的能力——把 carried 线索
- * 落回槽位，行为与旧继承完全一致（文档 §7 风险表的既定口径）。
+ * 确定性规则引擎（无模型）没有"结合上文判断"的能力——把 carried 线索
+ * 落回槽位，行为与 legacy 直接写槽位一致。
  */
 export function applyHintsToSlots(intent: Intent): void {
   for (const h of intent.hints ?? []) {
@@ -178,7 +177,7 @@ function stripDateLike(text: string): string {
     .replace(/\d{1,2}\s*[-/]\s*\d{1,2}(?!\d)/g, ' ');
 }
 
-// N08："现在/此刻/当前"是显式时间条件，必须覆盖上下文里的历史日期
+// "现在/此刻/当前"是显式时间条件，必须覆盖上下文里的历史日期
 const NOW_WORDS = /现在|此刻|当前|目前|刚刚|这会儿|眼下/;
 
 const REL_DAYS: Array<[RegExp, number, string]> = [
@@ -192,7 +191,7 @@ const REL_DAYS: Array<[RegExp, number, string]> = [
 /**
  * 解析用户问题里的日期指代。解析不出来返回 null —— 由调用方决定是否回退到"今天"，
  * 绝不悄悄假定一个日期然后当成事实说出来。
- * 写了日期但日期非法（2026-02-30 / 2026-13-01）→ 返回 DateInvalid，调用方必须显式报错（F10）。
+ * 写了日期但日期非法（2026-02-30 / 2026-13-01）→ 返回 DateInvalid，调用方必须显式报错。
  */
 export function resolveDate(text: string, now: ServerNow): DateResolution | DateInvalid | null {
   const t = String(text ?? '');
@@ -256,7 +255,7 @@ export function resolveDate(text: string, now: ServerNow): DateResolution | Date
     if (re.test(t)) return { date: addDays(now.date, delta), raw: t.match(re)![0], source: src };
   }
 
-  // ④ "现在"类指代：显式取服务端当天（N08），不允许沿用上一问的日期
+  // ④ "现在"类指代：显式取服务端当天，不允许沿用上一问的日期
   if (NOW_WORDS.test(t)) {
     return { date: now.date, raw: t.match(NOW_WORDS)![0], source: `「${t.match(NOW_WORDS)![0]}」= 服务端当前日期 ${now.date}（Asia/Shanghai）` };
   }
@@ -282,7 +281,7 @@ const PERIOD_PHRASES: Array<[RegExp, PeriodKey]> = [
 
 
 /**
- * 节次编号口径（2026-11-08 用户给定，务必照此实现）：
+ * 节次编号口径（务必照此实现）：
  *   上午第一大节=第1-2节　上午第二大节=第3-4节
  *   下午第一大节=第5-6节　下午第二大节=第7-8节
  *   晚上AB节=第AB节　　　　晚上CD节=第CD节
@@ -354,7 +353,7 @@ export function resolvePeriodKey(text: string): PeriodKey | null {
 }
 
 /**
- * 半天范围指代（F12）：上午=am1+am2，下午=pm1+pm2，晚上=eve_ab+eve_cd。
+ * 半天范围指代：上午=am1+am2，下午=pm1+pm2，晚上=eve_ab+eve_cd。
  * "上午第二大节"这类精确指代由 resolvePeriodKey 先命中，不走范围。
  */
 const PERIOD_RANGE_PHRASES: Array<[RegExp, PeriodKey[]]> = [
@@ -375,10 +374,10 @@ export function resolvePeriodRange(text: string): PeriodKey[] | null {
 }
 
 /**
- * 一句多问拆段（2026-11-11 实机问题修复）
+ * 一句多问拆段
  * ============================================================================
  *  「周一上二应该是哪两个志愿者值班？周三早八和下一呢」里有两个日期、三个节次缩写。
- *  旧实现把整句交给 resolvePeriodKey/resolvePeriodRange：三个节次被合并成一个
+ *  若把整句交给 resolvePeriodKey/resolvePeriodRange：三个节次会被合并成一个
  *  "时间范围 am1/am2/pm1"，日期只剩第一个「周一」——于是模型无法按段查询，
  *  最终只回一句"请说明房间、日期或要办理的事项"。
  *
@@ -410,7 +409,7 @@ export function resolveTimeSegments(text: string, now: ServerNow): TimeSegment[]
 
 
 // ===========================================================================
-//  输入归一化（2026-11-08）：容忍全角、大小写、OCR 混淆与高频错别字
+//  输入归一化：容忍全角、大小写、OCR 混淆与高频错别字
 // ===========================================================================
 /**
  * 用户是"说话/打字"的，不是"填表单"的。这里只做**高置信、可逆**的修正：
@@ -462,7 +461,7 @@ export function normalizeQuery(raw: string): { text: string; fixes: string[] } {
 const LAB_CODE_RE = /(?<![A-Za-z0-9])([A-Za-z]{1,3})\s?-?\s?(\d{3,4})(?![0-9])/g;
 
 /**
- * A7：无字母前缀的裸房间号（用户口语"310有人吗"，真实房间是 E310）。
+ * 无字母前缀的裸房间号（用户口语"310有人吗"，真实房间是 E310）。
  * 只取 3 位连续数字——4 位几乎都是年份/时间；前后不得再贴字母数字
  * （字母前缀形态归 LAB_CODE_RE 管，更长数字串是编号/年份不是房间）。
  * 返回的是"候选"而非定论：工具层按系统收录的房间做后缀解析，
@@ -522,7 +521,7 @@ export function parseIntent(text: string, now: ServerNow): Intent {
   if (dateInvalid) notes.push(`日期输入非法：${dateInvalid.reason}`);
   if (!date && !dateInvalid) notes.push('未识别到日期指代 → 缺省按服务端当天处理，并在上下文里标明这是缺省值');
   if (labName && !date && !dateInvalid) notes.push(`识别到房间号 ${labName}，但未识别到日期`);
-  // A7：裸数字候选不是定论——工具层按系统收录的房间做后缀解析，唯一命中会如实标注
+  // 裸数字候选不是定论——工具层按系统收录的房间做后缀解析，唯一命中会如实标注
   if (labName && /^\d/.test(labName)) notes.push(`房间号 ${labName} 未带字母前缀，将按系统收录的房间推断（如 310 → E310）`);
   if (periodKeys) notes.push(`识别到时间范围（${periodKeys.join('/')}）——"整个范围都空闲"与"其中一节空闲"含义不同，需按口径处理`);
 
@@ -561,7 +560,7 @@ export function buildTimeContext(now: ServerNow, intent: Intent, weekNote: strin
     });
   }
 
-  // 方案B：有线索时追加"线索不是结论"块——规则摊开依据，沿用与否由模型判断
+  // 有线索时追加"线索不是结论"块——规则摊开依据，沿用与否由模型判断
   const hints = intent.hints ?? [];
   if (hints.length) {
     lines.push(`【本句可用的线索】（这些是**线索不是结论**，你可以不采纳）`);

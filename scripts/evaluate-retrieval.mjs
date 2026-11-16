@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * 检索评测：新混合召回 vs 原有子串匹配，同一套标注下对比。
+ * 检索评测：混合召回与子串匹配，在同一套标注下对比。
  * ============================================================================
- *  为什么要跑两个：只报"新算法 Recall@4 = X"没有信息量。必须给出**升级前**的
- *  同一个数字，才说明这次改动到底解决了什么；也才经得起"你是不是只挑了对自己有利的指标"。
+ *  为什么要跑两种：只报单一算法的"Recall@4 = X"没有信息量。必须给出同一套标注下
+ *  子串匹配的对照数字，才能说明混合召回带来了多少增益，也才能排除只挑有利指标的可能。
  *
  *  指标：
- *   · Recall@4 —— 期望文档是否出现在前 4 个结果里（与线上 top4 口径一致）
+ *   · Recall@4 —— 期望文档是否出现在前 4 个结果里（与生产查询的 top4 口径一致）
  *   · MRR      —— 首个命中的名次倒数均值，衡量"排得靠不靠前"
  *   · 空结果正确率 —— 权限外/未生效/语料外问题，必须返回空；返回了就是越权或编造
  *
@@ -31,11 +31,11 @@ const corpus = {
   roles: [...new Set(docs.flatMap((d) => d.roles))].sort()
 };
 
-/** 旧算法：文档级子串打分（升级前的真实实现） */
+/** 子串匹配：文档级打分基线 */
 function legacyTop(query, role, date, k = 4) {
   return retrieve(query, role, date, docs).slice(0, k).map((d) => d.id);
 }
-/** 新算法：CJK 双字 BM25 + 关键词，RRF 融合，段落级 */
+/** 混合召回：CJK 双字 BM25 + 关键词，RRF 融合，段落级 */
 function hybridTop(query, role, date, k = 4) {
   const seen = [];
   for (const h of retrieveRanked(query, role, date, docs, k, 4)) if (!seen.includes(h.doc.id)) seen.push(h.doc.id);

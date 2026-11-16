@@ -14,7 +14,7 @@ const suggestions=computed(()=>business.profile?.identity==='volunteer'
 /** 快捷胶囊只填入不发送 */
 function fill(t:string):void{if(busy.value)return;draft.value=t;}
 /**
- * L1 跨端状态共享（2026-11-07）：会话详情带回 activeRunId；不是本端发起的，
+ * 跨端状态共享：会话详情带回 activeRunId；不是本端发起的，
  * 说明另一台设备正在跑这一轮 → 横幅 + 停止入口 + 3 秒轮询收敛。只读，不重发消息。
  */
 const externalRunId=computed(()=>{
@@ -38,8 +38,8 @@ async function stopExternalRun():Promise<void>{
   if(props.conversationId)void session.syncConversation(props.conversationId);
 }
 const mode=computed(()=>session.currentMode()),busy=computed(()=>run.inputLocked||props.controller.submitting.value||Boolean(session.activeRuns[props.conversationId]));
-// A10：移动端模式开关——与会话页顶部的说明标签并排，点击即切（服务端已解锁，
-// 模式随发送时刻生效、历史消息语义不变）；运行中/切换中禁用，失败走既有 error 行。
+// 移动端模式开关——与会话页顶部的说明标签并排，点击即切
+// （模式随发送时刻生效、历史消息语义不变）；运行中/切换中禁用，失败走既有 error 行。
 const switching=ref(false);
 async function setMode(m:'chat'|'task'):Promise<void>{if(m===mode.value||switching.value||busy.value)return;switching.value=true;try{if(props.conversationId)await session.changeConversationMode(props.conversationId,m);}catch(e){error.value=(e as Error).message;}finally{switching.value=false;}}
 async function load(){
@@ -116,10 +116,10 @@ watch(()=>run.runStatus,value=>{if(value!=='running')draft.value=session.draftFo
       @submit="send"
       @stop="controller.stop"
     />
-    <!-- 回档/修改已改为气泡内联（InlineRoundEditor，见 ChatMessage），不再使用居中弹窗 -->
+    <!-- 回档/修改使用气泡内联编辑器（InlineRoundEditor，见 ChatMessage） -->
   </div></template>
 <style scoped>
-/* A10：会话模式开关——与说明标签同行右对齐，紧凑分段（左=工作/右=聊天） */
+/* 会话模式开关——与说明标签同行右对齐，紧凑分段（左=工作/右=聊天） */
 .mobile-conversation-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .m-mode-switch{display:flex;gap:2px;padding:2px;background:var(--m-tonal,var(--surface-3));border:1px solid var(--m-hairline,var(--border));border-radius:999px;flex-shrink:0}
 .m-mode-switch__opt{border:0;background:transparent;border-radius:999px;padding:4px 12px;font:600 calc(var(--ui-font-size) * 0.84615) var(--font-sans);color:var(--text-muted);cursor:pointer;white-space:nowrap}

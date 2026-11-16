@@ -1,5 +1,5 @@
 /**
- * 移动端手势层 —— 批次 C（方案 4.3）
+ * 移动端手势层
  * ============================================================================
  *  · useSwipeBack：二级页左缘右滑返回（跟手位移 + 松手判定回弹/POP）
  *  · useDragClose：底部弹层拖拽关闭（顶部区域跟手，>120px 或快甩即关）
@@ -177,7 +177,7 @@ export function useDragClose(onClose: () => void): DragClose {
         if (!drag || e.pointerId !== drag.id) return;
         dy = Math.max(0, e.clientY - drag.y0);
         // 指针捕获必须在**首次显著位移**时才设置：down 时捕获会把派生的 click
-        // 重定向到弹层本体，吞掉弹层内所有按钮的点击（H 批实测事故）。
+        // 重定向到弹层本体，吞掉弹层内所有按钮的点击。
         if (dy > 4) (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
         offset.value = dy;
       },
@@ -221,7 +221,7 @@ export function usePullRefreshRegistration(view: string, fn: () => void | Promis
 }
 
 /**
- * H2：左缘拖出会话抽屉 —— 从屏幕左缘向右拖 ≥56px 即触发 onOpen（一次性触发，
+ * 左缘拖出会话抽屉 —— 从屏幕左缘向右拖 ≥56px 即触发 onOpen（一次性触发，
  * 抽屉随后以标准动画滑入；不跟手渲染抽屉本体，避免与视图层耦合）。
  * 仅在 enabled() 为真（助手视图、无弹层）时接管；与 swipe-back 互斥使用场景不同。
  */

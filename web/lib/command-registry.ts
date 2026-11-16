@@ -1,7 +1,7 @@
 /**
  * 命令面板注册表 —— 纯数据 + 纯函数（可单测，无 Vue 依赖）
  * ============================================================================
- *  只挂**已真实存在**的动作，不造占位命令：每条 run 都由调用方传入的 ctx 实现，
+ *  只挂**真实存在**的动作，不设占位命令：每条 run 都由调用方传入的 ctx 实现，
  *  因此注册表本身可以被单测遍历（id 唯一、分组合法、run 可调用）。
  *
  *  范围 tabs 是**筛选而非前缀快捷**：空搜索切 tab 也要展示该范围的默认内容；
@@ -23,7 +23,7 @@ export interface Command {
 
 export interface CommandContext {
   busy: boolean;
-  /** 聚焦侧栏会话搜索（原 Ctrl+K 的语义，功能不减只换路径） */
+  /** 聚焦侧栏会话搜索（命令面板中的对应动作） */
   focusSidebarSearch: () => void;
   newChat: (mode?: 'chat' | 'task') => void;
   openOperations: () => void;
@@ -93,7 +93,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
       run: ctx.stopRun
     }
   ];
-  // 演示身份切换：只在确有可切换身份时挂出（原生登录下没有这个概念）
+  // 身份切换：仅在存在可切换身份时挂出（原生登录下没有该概念）
   for (const opt of ctx.actorOptions) {
     if (opt.role === ctx.actorRole) continue;
     list.push({

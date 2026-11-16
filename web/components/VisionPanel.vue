@@ -10,7 +10,7 @@
  *  ① 【实验室内场摄像头】= 边缘机上报（/api/vision/*）
  *     **未接入就只显示"尚未接入实验室场内摄像头"**，不显示任何人数/告警。
  *     理由：没有真实画面来源时"有没有人""有没有告警"都是不清楚的，
- *     拿演示数据充数会让人误以为真的在监控 —— 这比"看起来有数据"重要得多。
+ *     宁可不显示，也不让人误以为真的在监控 —— 这比"看起来有数据"重要得多。
  */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { t as tr } from '../i18n';
@@ -33,13 +33,13 @@ const open = ref(false);
 const feedFailed = ref(false);
 /** 画面流断线重连：MJPEG 流一旦结束（会话停止/Vision 重启/代理断开），<img> 会触发
  *  load/error 且**不会自动重连**——这是"画面莫名消失"的根因。3s 后带新时间戳重设
- *  src 重连（Vision 侧已配合改为无会话时占位帧保活，连接不再主动收尾） */
+ *  src 重连（Vision 侧在无会话时发占位帧保活，连接不会主动收尾） */
 const feedBust = ref(Date.now());
 let feedRetryTimer: number | null = null;
 const failedSnapshots = ref<Set<string>>(new Set());
 const guideOpen = ref(false);
 /**
- * 实时画面识别结果（2026-11-14）：边缘没在上报时，卡片会显示"离线"，
+ * 实时画面识别结果 —— 边缘没在上报时，卡片会显示"离线"，
  * 但画面本身是通的。这里直接向后端要"从当前画面现识别一次"的人数，
  * 20 秒刷新一次，抽屉关闭时不请求。
  */
@@ -54,7 +54,7 @@ const liveCountText = computed(() => {
 });
 let liveTimer: number | null = null;
 async function refreshAll(): Promise<void> {
-  // 2026-11-14：刷新按钮此前只重拉"边缘上报"，实时卡片/事件不动 → 用户点它没反应
+  // 刷新按钮同时重拉边缘上报与实时画面识别，避免点了没反应
   await Promise.allSettled([vision.refresh(), refreshLiveCount()]);
 }
 async function refreshLiveCount(): Promise<void> {
@@ -81,7 +81,7 @@ watch(open, (v) => {
 });
 onUnmounted(() => { if (liveTimer !== null) window.clearInterval(liveTimer); });
 /**
- * 实时画面识别结果（2026-11-14）：边缘没在上报时，卡片会显示"离线"，
+ * 实时画面识别结果：边缘没在上报时，卡片会显示"离线"，
  * 但画面本身是通的。这里直接向后端要"从当前画面现识别一次"的人数，
  * 20 秒刷新一次，抽屉关闭时不请求。
  */
@@ -151,11 +151,11 @@ function draftIssue(lab: { labId: string; count: number; capacity: number | null
   );
   window.dispatchEvent(new CustomEvent('labops-vision-draft', { detail: question }));
   // 派发后立即关闭抽屉：否则抽屉遮罩盖住主界面，用户看不到命令栏已被填入，
-  // 会以为按钮没生效（2026-11-07 用户实测反馈）
+  // 会以为按钮没生效
   close();
 }
 
-/** 事件误报/确认回流（批C）；失败给出行内提示，下一轮轮询还原服务端口径 */
+/** 事件误报/确认回流；失败给出行内提示，下一轮轮询还原服务端口径 */
 function show(): void {
   open.value = true;
   // 无条件启动轮询：未配置密钥时 status 也会如实返回 configured=false（带接入指引），
@@ -188,7 +188,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <!-- 实验室监控：本地保留；线上部署（VISION_MODULE=off）不显示入口 -->
+  <!-- 实验室监控：本地保留；部署时 VISION_MODULE=off 不显示入口 -->
   <div v-if="visionAvailable && business.connected" class="vision-entry">
     <button
       type="button"
@@ -732,7 +732,7 @@ onUnmounted(() => {
   }
 }
 
-/* 交互反馈补齐（2026-11-07）：头部刷新/关闭此前无悬浮/按压/键盘焦点反馈 */
+/* 头部刷新/关闭按钮的悬浮、按压与键盘焦点反馈 */
 .vision-head button:hover:not(:disabled),
 .vision-entry button:hover {
   background: var(--surface-3);

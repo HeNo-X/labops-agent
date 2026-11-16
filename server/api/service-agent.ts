@@ -1,8 +1,8 @@
 /**
  * /api/service/agent-run —— 供主系统调度器"到点让 Agent 真跑一轮"的服务端入口
  * ============================================================================
- *  为什么需要它：定时任务现在只把一段静态文本投递出去；要变成 ZCode 那种
- *  "到点 Agent 自己去查、去想、去写结论"，就必须让**主系统的调度器**能代某个用户
+ *  为什么需要它：若定时任务只把一段静态文本投递出去，Agent 无法到点自行查询与成文；
+ *  要支持后一种形态，就必须让**主系统的调度器**能代某个用户
  *  触发一轮 Agent。而 LabOps 只认 SSO 票和用户 Bearer，服务端无法自称"我是为用户 X 跑的"。
  *
  *  鉴权：机器到机器，HMAC-SHA256（`ts.nonce.rawBody` + 300 秒时间窗 + nonce 防重放 +
@@ -11,7 +11,7 @@
  *
  *  权限：**默认只读**。调用方必须显式列出 `allowedTools` 才可能拿到写类工具，
  *        而且"写"在这里只是 `prepare_*`（出草稿、待人确认），LabOps 从来不存在
- *        无人值守直接改业务状态的工具——这是架构事实，不是本次的保守选择。
+ *        无人值守直接改业务状态的工具——这是架构约束。
  *
  *  幂等：`jobRunId` 是幂等键。同一 jobRunId 第二次进来直接回缓存结果，不会重跑；
  *        正在跑时返回 409 in_progress，让调度器下轮再来（它本来就有三次退避）。
@@ -340,8 +340,8 @@ export async function handleServiceAgent(req: IncomingMessage, res: ServerRespon
     .prepare('INSERT INTO service_runs(jobRunId,status,payload,startedAt,updatedAt) VALUES(?,?,?,?,?) ON CONFLICT(jobRunId) DO UPDATE SET status=excluded.status,payload=NULL,startedAt=excluded.startedAt,updatedAt=excluded.updatedAt')
     .run(body.jobRunId, 'running', null, nowIso, nowIso);
 
-  // —— 到点自动化的会话落库（整合方案 §5）：先建会话+消息三件套，再执行。
-  //    落库不可用就**不执行**——"跑了但结果没落在任何会话里"正是本次修的根因。
+  // —— 到点自动化的会话落库：先建会话+消息三件套，再执行。
+  //    落库不可用就**不执行**——"跑了但结果没落在任何会话里"是必须排除的状态。
   const runIdHint = newTraceId('run');
   const convMode: 'chat' | 'task' = body.allowedTools.length ? 'task' : 'chat';
   const conversationOwner = resolveConversationOwner(body.owner);
@@ -381,7 +381,7 @@ export async function handleServiceAgent(req: IncomingMessage, res: ServerRespon
         headline: [...tools].reverse().find((t) => t.ok && t.summary)?.summary ?? null
       });
     } catch (persistErr) {
-      // 结果已缓存供调度器对账；会话终态写失败如实记日志，不假装已保存，也不阻断对调度器的应答。
+      // 结果已缓存供调度器对账；会话终态写失败如实记日志，不声称已保存，也不阻断对调度器的应答。
       log.warn('service_run_conversation_finalize_failed', { jobRunId: body.jobRunId, message: persistErr instanceof Error ? persistErr.message : String(persistErr) });
     }
     reply(res, 200, { ...cached, replayed: false });

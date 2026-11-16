@@ -1,13 +1,13 @@
 /**
- * 会话持久化 —— node:sqlite（Node >= 22.13 内置，零依赖）（M1 / F01·F08）
+ * 会话持久化 —— node:sqlite（Node >= 22.13 内置，零依赖）
  * ============================================================================
- *  范围（阶段 2A.2，见任务书第 8 节与勘误⑤）：
+ *  范围：
  *    Conversation / Message / Run 三类实体；ToolCall 与产物嵌入 message.meta（JSON）；
- *    Task 实体待 2B 写操作引入时再拆。
+ *    Task 实体在 ops.v1 中独立建表。
  *  规则：
  *    · 服务端是历史权威；前端刷新/重启后恢复
  *    · (clientRequestId) 唯一 → 重复提交不产生重复任务（幂等）
- *    · 服务重启时，遗留 running 的 run 与 streaming 的消息统一标为 interrupted（不假装还在跑）
+ *    · 服务重启时，遗留 running 的 run 与 streaming 的消息统一标为 interrupted（不谎称仍在运行）
  *    · 删除为软删除（deletedAt），误触可恢复
  */
 
@@ -58,13 +58,13 @@ export interface MessageRow {
 }
 
 const DB_DIR = path.join(PROJECT_ROOT, 'server', 'data');
-/** R25-lite：测试用独立库路径（LABOPS_DB_PATH），不写真实用户数据 */
+/** 测试用独立库路径（LABOPS_DB_PATH），不写真实用户数据 */
 const DB_PATH = process.env['LABOPS_DB_PATH'] ?? path.join(DB_DIR, 'labops.sqlite');
 
 let db: DatabaseSync | null = null;
 let dbInitError: string | null = null;
 
-/** R01：初始化是否成功；失败时 API 层返回 503 与恢复说明，健康检查不再谎报就绪。
+/** 初始化是否成功；失败时 API 层返回 503 与恢复说明，健康检查如实报告未就绪。
  *  初始化是惰性的 —— 首次调用 getDb() 才建库，所以"就绪"必须现场探测一次。 */
 export function dbReady(): boolean {
   try {
@@ -86,9 +86,9 @@ export function getDb(): DatabaseSync {
 }
 
 /**
- * R01/C01–C02：在**局部连接**上完成全部初始化（建表 → 恢复遗留 running → 版本迁移 → 约束），
+ * 在**局部连接**上完成全部初始化（建表 → 恢复遗留 running → 版本迁移 → 约束），
  * 全部成功后才发布为单例；任何一步失败关闭连接、记录原因，绝不保留半初始化对象。
- * 顺序要点：旧版允许同会话多条 running，必须**先**恢复中断、**后**建唯一部分索引。
+ * 顺序要点：存量库可能有同会话多条 running，必须**先**恢复中断、**后**建唯一部分索引。
  */
 function initDatabase(): DatabaseSync {
   fs.mkdirSync(DB_DIR, { recursive: true });
@@ -98,7 +98,7 @@ function initDatabase(): DatabaseSync {
     conn.exec('PRAGMA journal_mode = WAL;');
     conn.exec('PRAGMA foreign_keys = ON;');
 
-    // R25-lite：版本化迁移。schema 已存在的判定读 schema，不靠 catch ALTER 推进版本
+    // 版本化迁移。schema 已存在的判定读 schema，不靠 catch ALTER 推进版本
     const convCols = (
       conn.prepare(`PRAGMA table_info(conversations)`).all() as Array<Record<string, unknown>>
     ).map((r) => String(r['name']));
@@ -149,14 +149,14 @@ function initDatabase(): DatabaseSync {
         }
       }
       if (!convCols.includes('mode')) {
-        // 会话类型（阶段 2B）：task=任务工作台（默认）；chat=纯聊天，不能执行任务操作
+        // 会话类型：task=任务工作台（默认）；chat=纯聊天，不能执行任务操作
         conn.exec(`ALTER TABLE conversations ADD COLUMN mode TEXT NOT NULL DEFAULT 'task'`);
       }
     }
 
     const columns = conn.prepare('PRAGMA table_info(conversations)').all() as Array<Record<string, unknown>>;
     if (!columns.some(c => c['name'] === 'ownerId')) conn.exec("ALTER TABLE conversations ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'legacy-unassigned'");
-    // 到点自动化（2026-11-09 整合方案 §5）：会话来源标记与任务号，供列表徽标与对账
+    // 到点自动化：会话来源标记与任务号，供列表徽标与对账
     if (!columns.some(c => c['name'] === 'source')) conn.exec("ALTER TABLE conversations ADD COLUMN source TEXT");
     if (!columns.some(c => c['name'] === 'jobId')) conn.exec("ALTER TABLE conversations ADD COLUMN jobId TEXT");
     conn.exec(`
@@ -176,7 +176,7 @@ function initDatabase(): DatabaseSync {
       CREATE TABLE IF NOT EXISTS verified_facts (ownerId TEXT NOT NULL, sessionId TEXT NOT NULL, fact TEXT NOT NULL, updatedAt INTEGER NOT NULL, PRIMARY KEY(ownerId, sessionId));
     `);
     // 关键顺序：**先**把遗留 running/streaming 恢复为 interrupted（记录原因），
-    // **再**建同会话唯一活跃索引 —— 旧库多条 running 不会炸迁移（C01）
+    // **再**建同会话唯一活跃索引 —— 存量库多条 running 不会炸迁移
     const migrated = recoverInterrupted(conn);
 
     conn.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_active ON runs(conversationId) WHERE status = 'running';`);
@@ -188,12 +188,12 @@ function initDatabase(): DatabaseSync {
       conn.exec('PRAGMA user_version = 1');
       conn.exec('COMMIT');
     }
-    // ops.v1（阶段 2B）：提案/决策/操作/审计/outbox + 沙盒业务表。
-    // 全部 IF NOT EXISTS —— 旧库直接补建，新库一次到位。
+    // ops.v1：提案/决策/操作/审计/outbox + 沙盒业务表。
+    // 全部 IF NOT EXISTS —— 存量库直接补建，新库一次到位。
     conn.exec(OPS_SCHEMA_V2);
     conn.exec('CREATE TABLE IF NOT EXISTS ops_proposal_commits(proposalId TEXT PRIMARY KEY, operationId TEXT UNIQUE NOT NULL)');
-    // 0.6.0 轮次回档：沙盒写入补偿的独立台账。与 ops_audit 并列，不覆盖原始回执 ——
-    // 回执记录"发生过什么"，本表记录"后来又撤回了什么"，两者都不改历史。
+    // 轮次回档：沙盒写入补偿的独立台账。与 ops_audit 并列，不覆盖原始回执 ——
+    // 回执记录"发生过什么"，本表记录"撤回了什么"，两者都不改历史。
     conn.exec(`CREATE TABLE IF NOT EXISTS ops_reverts (
       id TEXT PRIMARY KEY,
       conversationId TEXT NOT NULL,
@@ -234,7 +234,7 @@ function initDatabase(): DatabaseSync {
   }
 }
 
-/** 服务重启：遗留的 running/streaming 在事务内标为 interrupted（带原因），绝不假装还在执行 */
+/** 服务重启：遗留的 running/streaming 在事务内标为 interrupted（带原因），不谎称仍在执行 */
 function recoverInterrupted(conn: DatabaseSync): boolean {
   const now = new Date().toISOString();
   conn.exec('BEGIN');
@@ -430,7 +430,7 @@ export function insertAssistantPlaceholder(conversationId: string, runId: string
   return row;
 }
 
-/** 流式期间增量刷写助手消息（text + 可选 toolCalls + 可选 plan[A5]） */
+/** 流式期间增量刷写助手消息（text + 可选 toolCalls + 可选 plan） */
 export function updateAssistantPartial(messageId: string, text: string, toolCalls?: unknown[], plan?: unknown[]): void {
   if (toolCalls !== undefined && plan !== undefined) {
     getDb()
@@ -456,9 +456,9 @@ export function updateAssistantPartial(messageId: string, text: string, toolCall
 }
 
 /**
- * N01：创建消息三件套（user + assistant 占位 + run）必须在**一个短事务**内完成，
- * 任何一步失败整组回滚 —— 绝不留下"半写入"的孤立助手占位或假 running。
- * 活跃 run 互斥（N04）：同会话已有 running 时抛 RunConflictError。
+ * 创建消息三件套（user + assistant 占位 + run）必须在**一个短事务**内完成，
+ * 任何一步失败整组回滚 —— 绝不留下"半写入"的孤立助手占位或孤立的 running 记录。
+ * 活跃 run 互斥：同会话已有 running 时抛 RunConflictError。
  */
 export class RunConflictError extends Error {
   readonly activeRunId: string;
@@ -485,7 +485,7 @@ export function createMessageWithRun(
   const dup = d.prepare(`SELECT id FROM messages WHERE clientRequestId = ?`).get(clientRequestId);
   if (dup) return { duplicate: true };
   // 同会话活跃 run 互斥（部分唯一索引兜底并发）。
-  // R02：活跃登记里 finalizeFailed 的 run 是"保存失败残留"，先尽力修复再放行新请求，
+  // 活跃登记里 finalizeFailed 的 run 是"保存失败残留"，先尽力修复再放行新请求，
   // 用户不会被一次写库故障永久锁死。
   for (const [rid, entry] of activeRunMap) {
     if (entry.conversationId === conversationId && entry.finalizeFailed) {
@@ -551,7 +551,6 @@ export function createMessageWithRun(
   };
 }
 
-/** 活跃 run 上下文（取消接口用）：runId → conversationId */
 /** 活跃 run 登记（取消接口/并发互斥/保存失败修复用）：runId → 会话与控制句柄 */
 interface ActiveRunEntry {
   conversationId: string;
@@ -572,7 +571,7 @@ export function trackActiveRun(
     setAbort: (fn) => {
       entry.abort = fn;
     },
-    // R02：终态事务失败 → 尽力把 run 标为 save_failed；修复成功才允许释放登记
+    // 终态事务失败 → 尽力把 run 标为 save_failed；修复成功才允许释放登记
     markUnrecoverable: () => {
       entry.finalizeFailed = true;
       return tryMarkSaveFailed(entry.conversationId, runId);
@@ -584,7 +583,7 @@ export function releaseActiveRun(runId: string): void {
   activeRunMap.delete(runId);
 }
 
-/** R12：会话是否仍有活跃 run（删除拦截用）——内存活跃表 + 持久 running 双查 */
+/** 会话是否仍有活跃 run（删除拦截用）——内存活跃表 + 持久 running 双查 */
 export function hasActiveRunForConversation(conversationId: string): boolean {
   for (const entry of activeRunMap.values()) {
     if (entry.conversationId === conversationId) return true;
@@ -595,7 +594,7 @@ export function hasActiveRunForConversation(conversationId: string): boolean {
   return Boolean(row);
 }
 
-/** N06：显式取消接口 —— 记录取消意愿并中止执行；服务端终态将记为 cancelled */
+/** 显式取消接口 —— 记录取消意愿并中止执行；服务端终态将记为 cancelled */
 export function requestCancel(runId: string): 'requested' | 'not_found' | 'already_finished' {
   const entry = activeRunMap.get(runId);
   if (!entry) return 'not_found';
@@ -605,7 +604,7 @@ export function requestCancel(runId: string): 'requested' | 'not_found' | 'alrea
   return 'requested';
 }
 
-/** N07：会话上下文快照持久化（重启后承接不丢） */
+/** 会话上下文快照持久化（重启后承接不丢） */
 export interface ContextSnapshot {
   labName: string | null;
   date: string | null;
@@ -631,7 +630,7 @@ export function loadContext(conversationId: string): ContextSnapshot | null {
 }
 
 /**
- * R02：终态写入失败后的尽力修复 —— run/消息标为 save_failed（重启恢复也认这个状态）。
+ * 终态写入失败后的尽力修复 —— run/消息标为 save_failed（重启恢复也认这个状态）。
  * 这是"待修复登记"，不是把错误藏起来：界面上仍显示保存失败。
  */
 function tryMarkSaveFailed(_conversationId: string, runId: string): boolean {
@@ -655,7 +654,7 @@ function tryMarkSaveFailed(_conversationId: string, runId: string): boolean {
   }
 }
 
-/** B09/B12：权威运行状态查询 */
+/** 权威运行状态查询 */
 export function getRun(runId: string): Record<string, unknown> | null {
   const row = getDb()
     .prepare(`SELECT id, conversationId, assistantMessageId, status, engine, startedAt, endedAt FROM runs WHERE id = ?`)
@@ -664,9 +663,9 @@ export function getRun(runId: string): Record<string, unknown> | null {
 }
 
 // ===========================================================================
-//  ops.v1（阶段 2B）—— 任务 / 提案 / 决策 / 操作回执 / 审计 / outbox / 沙盒业务
+//  ops.v1 —— 任务 / 提案 / 决策 / 操作回执 / 审计 / outbox / 沙盒业务
 // ============================================================================
-//  规则（任务书 §9）：
+//  规则：
 //   · 业务事实以 ops_operations.receipt 为准；聊天文字不是凭据
 //   · 决策幂等：ops_decisions.clientRequestId 唯一；重放返回既有结果
 //   · 提案参数只存服务端（ops_proposals.payload）；决策请求只带 ID+版本+决定
@@ -954,7 +953,7 @@ export function createOpsProposal(input: CreateProposalInput): Proposal {
       expiresAt,
       createdAt
     );
-  // 新版本就绪后，同任务旧提案一律过期（批准不能跨版本，任务书 §9.3）
+  // 新版本就绪后，同任务旧提案一律过期（批准不能跨版本）
   getDb()
     .prepare(`UPDATE ops_proposals SET state = 'expired' WHERE taskId = ? AND id != ? AND state = 'awaiting_confirmation'`)
     .run(input.taskId, id);
@@ -1375,7 +1374,7 @@ export function upsertBizRoomStatus(input: {
 
 /** 终态落库：status ∈ completed|failed|cancelled|interrupted */
 /**
- * R02/C03：终态落库为**单事务**（Message + Run + Context + 会话时间），
+ * 终态落库为**单事务**（Message + Run + Context + 会话时间），
  * 任一失败整组回滚 —— 不再出现"消息 completed、run running"的半完成。
  * Run 终态转换带当前状态条件（running/streaming 才允许写终态），终态只确认一次。
  */
@@ -1421,14 +1420,14 @@ export function finalizeAssistantMessage(
 }
 
 // ===========================================================================
-//  轮次（round）—— 删除本轮 / 回档到本轮发起前（0.6.0）
+//  轮次（round）—— 删除本轮 / 回档到本轮发起前
 // ============================================================================
 //  一轮 = 一条 user 消息 + 紧随其后、直到下一条 user 之前的全部 assistant 消息。
 //  纪律：
 //   · 删除与回档都只动本会话的消息与 runs，绝不触碰 ops_* 历史与 biz_* 业务表
 //     （业务写入的撤销是独立的一步，见 operations/revert.ts，且必须在审计里留痕）。
 //   · 上下文快照按**与 finalizeAssistantMessage 完全一致**的语义重算：
-//     该函数用 COALESCE 写入 contextLab/Date/Task，所以"最后一个非空值"才是当时的真实值，
+//     该函数用 COALESCE 写入 contextLab/Date/Task，所以"最后一个非空值"才是那一刻的真实值，
 //     直接取最后一条消息的 context 会把仍有效的上下文误清空。
 // ============================================================================
 

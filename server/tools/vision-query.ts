@@ -1,5 +1,5 @@
 /**
- * query_vision_status —— 视觉现场事实的只读 Agent 工具（已接线 registry）
+ * query_vision_status —— 视觉现场事实的只读 Agent 工具
  * ============================================================================
  *  数据源（两路，与监控面板同源，保证「面板看到的 = Agent 说的」）：
  *    · server/vision/monitor.ts 内存环：边缘 HMAC 上报（剥离身份）——房间状态/事件，
@@ -68,7 +68,7 @@ export const VISION_STATUS_TOOL: VisionToolDefinition = {
     // 相关性：未指定房间 / 画面未标注房间（单路现场画面）/ 房间号一致（忽略大小写）都算相关——
     // 不能因为 room 没写或 e315≠E315 就把有数据的房间误判成「查不到」
     const liveRelevant = (room?: string) => Boolean(liveShot) && (!room || !liveShot!.room || normRoom(liveShot!.room) === normRoom(room));
-    // 摘要口径（2026-11-15 用户裁定）：**人数先行**，只讲监控结论。「不在边缘上报
+    // 摘要口径：**人数先行**，只讲监控结论。「不在边缘上报
     // 名单 / 未上报 / 已接入房间名单」这类内部通路措辞一律不上摘要——多余，且会被
     // 模型转述成「查不到」在前、人数在后，还让人以为该房间没被监控。
     const countPhrase = (label: string): string =>

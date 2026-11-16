@@ -1,5 +1,5 @@
 /**
- * 确定性链编排（批次D）—— 单元回归
+ * 确定性链编排 —— 单元回归
  * ============================================================================
  *  为什么测：这条链存在的唯一理由是"省掉模型的多轮机械往返"。省时间不能靠少做事，
  *  所以这里把三件事钉死：
@@ -155,7 +155,7 @@ test('D8 偏好可被用户话术改变，且默认值在正文里写明是默�
   }
 });
 
-// ============================ 批次E：调课提案链 ============================
+// ============================ 调课提案链 ============================
 
 const scheduleResult = (lessons: Array<{ timetableId: string; periodKey: string; courseName: string; className?: string }>) => ({
   ok: true, resultKind: 'schedule', summary: '课表已查询', result: { lessons, reason: 'ok' }
@@ -164,7 +164,7 @@ const scheduleResult = (lessons: Array<{ timetableId: string; periodKey: string;
 function moveHarness(spy: Array<{ tool: string; args?: Record<string, unknown> }>, opts: { lessons?: Array<{ timetableId: string; periodKey: string; courseName: string; className?: string }>; prepareFail?: { code: string; message: string } } = {}) {
   return async (tool: string, args: Record<string, unknown>) => {
     spy.push({ tool, args });
-    if (tool === 'query_schedule') return scheduleResult(opts.lessons ?? [{ timetableId: 'tt-1', periodKey: 'pm1', courseName: '示例程序设计', className: '评审示例班' }]);
+    if (tool === 'query_schedule') return scheduleResult(opts.lessons ?? [{ timetableId: 'tt-1', periodKey: 'pm1', courseName: '示例程序设计', className: '测试示例班' }]);
     if (opts.prepareFail) return { ok: false, code: opts.prepareFail.code, message: opts.prepareFail.message } as never;
     return { ok: true, resultKind: 'business_plan', summary: '方案已准备', result: { plan: { id: 'plan-move-1', state: 'awaiting_confirmation' } } } as never;
   };
@@ -260,7 +260,7 @@ test('E7 「原因是X」这种最自然的说法也要进链（彩排实测：�
   assert.equal(out.awaitingConfirmation, true);
 });
 
-// ============================ 批次F：钥匙借还链 ============================
+// ============================ 钥匙借还链 ============================
 const keyDs = { labs: [{ id: 'lab-e310', name: 'E310' }], openLabs: [] } as never;
 function keyHarness(spy: Array<{ tool: string; args?: Record<string, unknown> }>, keys: Array<{ id: string; name: string; labName: string; holder: string; borrowed: boolean }>, prepareFail?: { code: string; message: string }) {
   return async (tool: string, args: Record<string, unknown>) => {

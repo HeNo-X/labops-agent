@@ -1,11 +1,11 @@
 /**
- * 【批3 归档定位（2026-11-11）】本模块实现LLM 重排（可关，缺省关）。
+ * 本模块实现 LLM 重排（可关，缺省关）。
  *  当前语料仅 3049 字——知识检索**默认走全量注入**（KNOWLEDGE_FULL_INJECT 缺省开），
- *  本模块处于**归档维护态**：测试与回退口径仍可用（KNOWLEDGE_FULL_INJECT=0 启用），
- *  语料增长到数万字前不要在生产启用检索路径（复杂度必须与数据规模匹配）。
+ *  本模块保留为可配置分支：KNOWLEDGE_FULL_INJECT=0 时参与检索链路；
+ *  语料增长到数万字前不在生产启用检索路径（复杂度必须与数据规模匹配）。
  */
 /**
- * RAG 批次 3：LLM 重排（可关，缺省关）
+ * LLM 重排（可关，缺省关）
  * ============================================================================
  *  三路混合召回给出"候选"，重排决定"先后"。用当前会话模式的模型链对 top 候选
  *  段落做一次轻量打分（严格 JSON），按分数重排文档与段落。
@@ -27,7 +27,7 @@ export function isLlmRerankEnabled(): boolean {
 
 export interface RerankOptions {
   enabled?: boolean;
-  /** 测试注入：假的模型链生成器 */
+  /** 测试注入：替身模型链生成器 */
   chat?: typeof streamChatWithFallback;
   signal?: AbortSignal;
 }

@@ -168,7 +168,7 @@ const hasParams=computed(()=>['roomId','className','thresholdHours','maxMissedHo
 
 <style scoped>
 /* 分区纵向布局：每段一个问题，控件一行不超过两个。
-   旧版把所有 label 与控件放在同一行内联，宽度一挤就乱——这是"很乱"的主因。 */
+   label 与控件分行排布：同一行内联在宽度不足时会挤乱。 */
 .spec-form {
   display: grid;
   gap: 18px;

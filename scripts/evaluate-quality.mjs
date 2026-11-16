@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 /**
- * 回答质量基线评测（WS2.2）—— 幻觉率 / 引用准确率 / 越权拦截率
+ * 回答质量基线评测 —— 幻觉率 / 引用准确率 / 越权拦截率
  * ============================================================================
- *  对应官方作品文档字段 6(3)"AI 测试技术落地使用情况概述"：光说"接了大模型"
- *  不算落地，必须给出可复跑的指标。
+ *  指标必须可复跑：光说"接了大模型"不算落地，必须给出任何人在本机都能复现的数字。
  *
  *  两种模式：
  *   · --mode=demo （默认）确定性规则引擎。**不需要任何 Key**，因此这条基线
- *     任何时候都能复现，评委拿到作品包也能自己跑出来同样的数字。
- *   · --mode=model 真实模型。缺 Key 时状态记为 not_run，**不冒充已测**。
+ *     任何时候都能复现，任何拿到代码包的人也能自己跑出来同样的数字。
+ *   · --mode=model 真实模型。缺 Key 时状态记为 not_run，**不以规则引擎代替已测**。
  *
  *  输出 .evaluation/quality-<mode>-<时间>.json 与同名 .html（人读版）。
  *  报告里固定带"未验证项"一节 —— 只报好消息的评测报告不可信。
@@ -27,10 +26,10 @@ process.env.LABOPS_DB_PATH = path.join(temp, 'eval.sqlite');
 process.env.LIVE_DATA = '0';
 process.env.LABOPS_AUTH_MODE = 'demo';
 if (mode === 'demo') {
-  // 与 run-review 同一手法：置空 Key ⇒ 走确定性引擎，结果可复现。
-  // 批次1 补：必须同时 LABOPS_SKIP_ENV_FILE=1 —— config.ensureEnv 的 loadEnvFile
+  // 置空 Key ⇒ 走确定性引擎，结果可复现。
+  // 必须同时设置 LABOPS_SKIP_ENV_FILE=1 —— config.ensureEnv 的 loadEnvFile
   // 只补「未设置」的变量，.env 里的真 Key 会被补回，"demo 模式"实际打到真模型
-  // （实测：槽位断言因真模型的非确定参数而随机失败）。
+  // （真模型的非确定参数会让槽位断言随机失败）。
   process.env.LABOPS_SKIP_ENV_FILE = '1';
   process.env.AGNES_API_KEY = '';
   process.env.DASHSCOPE_API_KEY = '';
@@ -85,7 +84,7 @@ if (modelConfigured) {
       await requestIdentity.run(actor, async () => {
         for await (const e of runAgent({ question, actor, sessionId, mode: 'task' })) turn.push(e);
       });
-      // 批次1：每轮时延与提示体积量化（确定性引擎的 usage 可能缺省，如实收集）
+      // 每轮时延与提示体积量化（确定性引擎的 usage 可能缺省，如实收集）
       const doneEarly = turn.find((e) => e.type === 'run_completed')?.payload;
       perTurn.push({
         scenario: sc.id,
@@ -112,8 +111,8 @@ if (modelConfigured) {
     const clarified = /我没有识别到|请告诉我实验室名称|请把问题写得具体/.test(answer) ||
       turn.some((e) => e.type === 'run_failed' && ['out_of_scope', 'redirect', 'clarify'].includes(e.payload?.code));
     const refusedOrClarifiedBase = redirected || clarified;
-    // 批次1：路由一致（expectTools 与实际调用的工具集相交）+ 边界婉拒（零工具）+ 参数槽位断言。
-    // 口径说明：demo 引擎对多数查询**内联计算、不发射 tool_started**（实测 Q02/Q11/Q12），
+    // 路由一致（expectTools 与实际调用的工具集相交）+ 边界婉拒（零工具）+ 参数槽位断言。
+    // 口径说明：demo 引擎对多数查询**内联计算、不发射 tool_started**（如 Q02/Q11/Q12），
     // 班级确定性提取也不走 demo 路径——路由/槽位断言只在 model 模式有样本，demo 下如实置空。
     const startedTools = turn.filter((e) => e.type === 'tool_started').map((e) => e.payload?.tool);
     const boundary = sc.expectKind === 'boundary_refusal'
@@ -131,7 +130,7 @@ if (modelConfigured) {
         }
       : null;
     const refusedOrClarified = refusedOrClarifiedBase || Boolean(boundary?.refusalText);
-    // 批次5：多意图完成度——多意图标记（然后/再/顺便…）问句的每个分句都要有对应结论
+    // 多意图完成度——多意图标记（然后/再/顺便…）问句的每个分句都要有对应结论
     const multiIntent = sc.expectMultiIntent
       ? { toolCount: startedTools.length, mentions: (sc.expectMultiIntent.mentions ?? []).map((m) => ({ m, found: answer.includes(m) })) }
       : null;
@@ -168,7 +167,7 @@ const refusal = {
   expected: rows.filter((r) => r.expectRefusal).length,
   honoured: rows.filter((r) => r.expectRefusal && r.refused).length
 };
-// 批次1 三指标：时延分位 / 提示体积分位 / 路由一致率（最近邻秩法分位，小样本稳定）
+// 三项指标：时延分位 / 提示体积分位 / 路由一致率（最近邻秩法分位，小样本稳定）
 function percentile(values, ratio) {
   const xs = values.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
   if (!xs.length) return null;
@@ -210,7 +209,7 @@ const report = {
       ? '本轮跑的是确定性规则引擎，指标反映的是"系统在无模型时的诚实底线"，不代表真实模型的表现。'
       : '真实模型指标存在随机性，单次运行不足以判定回归；对比需固定温度并多次重复。',
     '引用准确率只在"本轮确有知识检索命中"的样本上统计，分母为 0 时返回 null 而不是 100%。',
-    // 本次实测发现，如实记录而不是调用例把它抹平：
+    // 如实记录引擎的实际行为，不用调用例把它抹平：
     '演示引擎对制度类提问走兜底文案、**未调用 query_knowledge**，因此 demo 模式下引用准确率无样本可测；' +
       '该项需在 model 模式下评测。',
     '费用未连接账单，不以示例单价冒充实际费用。'

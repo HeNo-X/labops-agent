@@ -12,7 +12,7 @@
  *  ⚠️ 与主流 Agent APP 的一处**有意偏离**：
  *  它们的定时任务只服务自己，所以"一句话创建"可以直接落库；
  *  本系统的规则会**给真人投递站内通知**，所以保留"影响核对"这一步 ——
- *  但在界面上做成同一页里的一段，而不是像旧版那样"预览 → 再确认"两次跳转。
+ *  但在界面上做成同一页里的一段，避免"预览 → 再确认"两次跳转。
  */
 import { computed, nextTick, ref, watch } from 'vue';
 import { t as tr } from '../../i18n';
@@ -35,9 +35,9 @@ const emit = defineEmits<{ requestPlan: []; confirm: []; cancel: [] }>();
 
 const applicable = params as Record<string, string[]>;
 
-// A-Z：设置|历史页签（编辑已有规则时才有历史）
+// 设置|历史页签（编辑已有规则时才有历史）
 const tab = ref<'settings' | 'history'>('settings');
-// ZCode 式调度：默认只是一行「+ 添加计划」，点击展开频率/时间/次数；编辑已有规则时默认展开。
+// 调度默认只是一行「+ 添加计划」，点击展开频率/时间/次数；编辑已有规则时默认展开。
 // schedTouched=用户动过调度——动过之后折叠行显示节奏摘要，否则保持「+ 添加计划」
 const schedOpen = ref(false);
 const schedTouched = ref(false);
@@ -54,7 +54,7 @@ const PARAM_LABEL: Record<string, string> = {
   maxMissedHours: '错过补报窗口（小时，缺省 6）',
   thresholdHours: '工单超时阈值（小时）'
 };
-// A-Z2：指令未填 → 主按钮禁用变灰
+// 指令未填 → 主按钮禁用变灰
 const createDisabled = computed(() => isAgentTemplate.value && !String(spec.value.prompt ?? '').trim());
 const schedSummary = computed(() => {
   if (schedOpen.value) return tr('收起调度设置');
@@ -75,7 +75,7 @@ function setExecMode(mode: 'message' | 'agent'): void {
     spec.value.autonomous = false; // 自主执行仅在 Agent 方式下有意义
   }
 }
-// B：自主执行勾选——第一次点只弹高危确认，二次点击才真正置位
+// 自主执行勾选——第一次点只弹高危确认，二次点击才真正置位
 const autonomyAsk = ref(false);
 function toggleAutonomous(e: Event): void {
   const input = e.target as HTMLInputElement;
@@ -102,7 +102,7 @@ function toggleTool(name: string): void {
 }
 const localError = ref('');
 
-// A-G3（对标 ZCode：标题保留用户原话短语）：agent 模板的指令正文变化时，
+// 标题保留用户原话短语：agent 模板的指令正文变化时，
 // 规则名默认跟随原话前 16 字；用户在完整设置里改过名（nameTouched）就绝不覆盖。
 const lastAutoName = ref('');
 const nameTouched = ref(false);
@@ -135,12 +135,12 @@ const triggerType = computed<SimpleTrigger>(() => {
   return type === 'weekly' || type === 'once' || type === 'duty' || type === 'interval' ? type : 'daily';
 });
 
-// B/C：interval 的友好输入（数字 + 单位），落库统一为 minutes（15—10080）
+// interval 的友好输入（数字 + 单位），落库统一为 minutes（15—10080）
 const intervalMinutes = computed<number>({
   get: () => Number(spec.value.trigger?.['minutes'] ?? 30),
   set: (v: number) => { if (Number.isFinite(v)) spec.value.trigger = { type: 'interval', minutes: Math.max(15, Math.min(10080, Math.round(v))) }; }
 });
-// B：maxRuns 有限次（可选；留空=不限，到次自动停止并保留历史）
+// maxRuns 有限次（可选；留空=不限，到次自动停止并保留历史）
 const maxRunsInput = computed<number | undefined>({
   get: () => (spec.value.trigger?.['maxRuns'] as number | undefined) ?? undefined,
   set: (v: number | undefined) => {
@@ -219,7 +219,7 @@ function submit(): void {
     return;
   }
   if (!spec.value.name.trim()) spec.value.name = templateLabel.value;
-  // B/C 客户端校验：把必然失败的请求挡在本地
+  // 客户端校验：把必然失败的请求挡在本地
   if (spec.value.kind === 'agent_prompt' && spec.value.trigger?.type === 'once' && spec.value.trigger.maxRuns !== undefined) { localError.value = '单次任务不需要 maxRuns'; return; }
   if (spec.value.trigger?.type === 'interval') { const m = Number(spec.value.trigger.minutes); if (!Number.isInteger(m) || m < 15 || m > 10080) { localError.value = '间隔应为 15—10080 分钟'; return; } }
   const mr = spec.value.trigger?.maxRuns;
@@ -268,7 +268,7 @@ watch(
     </header>
     <p v-if="tab === 'history'" class="auto-note">{{ tr('运行历史在保存后开始累积；编辑完成后在列表点开这条规则即可看到完整历史与执行摘要。') }}</p>
 
-    <!-- A-Z：ZCode 式三字段——任务标题 / 调度（默认折叠的「+ 添加计划」行）/ 指令（核心大输入） -->
+    <!-- 三字段布局——任务标题 / 调度（默认折叠的「+ 添加计划」行）/ 指令（核心大输入） -->
     <div v-else class="auto-composer__simple">
       <label class="auto-field">
         <span class="auto-field__label">{{ tr('任务标题') }}</span>
@@ -388,7 +388,7 @@ watch(
         </template>
       </div>
 
-      <!-- A-Z：主按钮在指令框下方右侧；指令未填时禁用变灰（A-Z2） -->
+      <!-- 主按钮在指令框下方右侧；指令未填时禁用变灰 -->
       <div class="auto-actions auto-actions--end">
         <button
           type="button"
@@ -404,7 +404,7 @@ watch(
     </div>
 
     <!-- 影响核对：与表单同页，用户看到"会被通知谁、会在哪几次运行"后才落库 -->
-          <!-- B：自主执行高危二次确认——第一次点勾选只弹窗，这里再点确认才真正勾上 -->
+          <!-- 自主执行高危二次确认——第一次点勾选只弹窗，这里再点确认才真正勾上 -->
       <div v-if="autonomyAsk" class="auto-risk" role="alertdialog" aria-modal="true" :aria-label="tr('高危操作确认')" @click.self="autonomyAsk = false">
         <div class="auto-risk__box">
           <h3 class="auto-risk__title">{{ tr('⚠️ 高危操作：允许 Agent 自主执行') }}</h3>
@@ -707,7 +707,7 @@ watch(
 }
 </style>
 <style scoped>
-/* A-Z：ZCode 式创建页（面包屑 + 标题块 + 页签 + 右上主按钮） */
+/* 创建页（面包屑 + 标题块 + 页签 + 右上主按钮） */
 .auto-crumb { margin: 0 0 14px; color: var(--text-faint); font-size: calc(var(--ui-font-size) * 0.84615); }
 .auto-composer__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .auto-composer__headtext h2 { margin: 0 0 4px; font-size: calc(var(--ui-font-size) * 1.3); }
@@ -723,7 +723,7 @@ watch(
 @media(max-width: 640px) { .auto-composer__top { width: 100%; } }
 </style>
 <style scoped>
-/* A-Z：ZCode 式调度折叠行与指令大输入 */
+/* 调度折叠行与指令大输入 */
 .auto-sched-row {
   display: flex; align-items: center; gap: 10px; width: 100%;
   border: 1px solid var(--border); border-radius: var(--radius, 10px);
@@ -760,7 +760,7 @@ watch(
 .auto-params .auto-inline span { font-size: calc(var(--ui-font-size) * 0.84615); color: var(--text-muted); }
 </style>
 <style scoped>
-/* A-Z2：指令框下方右侧的主按钮——圆角、稍大；禁用变灰 */
+/* 指令框下方右侧的主按钮——圆角、稍大；禁用变灰 */
 .auto-actions--end { justify-content: flex-end; margin-top: 4px; }
 .auto-primary--big {
   border-radius: 12px;
@@ -770,7 +770,7 @@ watch(
 }
 .auto-primary--big:disabled { opacity: .45; cursor: not-allowed; }
 
-/* 交互反馈补齐（2026-11-07） */
+/* 按钮与分段控件的交互反馈 */
 .auto-seg button:hover:not(.is-on),
 .auto-weekdays button:hover {
   background: var(--surface-3);

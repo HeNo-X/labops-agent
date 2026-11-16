@@ -1,17 +1,17 @@
 /**
  * 上下文预算决策 —— 确定性、可解释、可一键关闭
  * ============================================================================
- *  明确不做 LLM 摘要压缩（成本高、新增幻觉面）。这里只回答一个问题：
+ *  明确不做 LLM 摘要压缩（成本高、扩大幻觉面）。这里只回答一个问题：
  *  「这一轮该不该精简上下文？为什么？」并给出可观测的决策对象。
  *
- *  照抄两条关键设计：
+ *  两条关键设计：
  *   ① **分母先扣输出预留**：模型的 context window 是 input+output 共享窗口，
  *      自动精简只能让出输入侧，所以阈值必须按 (window - reserve) 算，
- *      否则会算出一个"看起来没超、实际已经挤掉输出"的假安全值。
+ *      否则算出的阈值看似安全，实际已挤掉输出。
  *   ② **连续失败达阈值后置 circuit_breaker 并停止再处理**：避免每一步都白算一遍。
  *
  *  ⚠️ token 数是**估算**（中文字符≈1 token 的保守系数，按字符计，偏保守 ——
- *  宁可早精简）。它绝不冒充 provider 的真实 usage，也绝不会被当作 usage 上报或展示。
+ *  宁可早精简）。它不等同于 provider 的真实 usage，也不会被当作 usage 上报或展示。
  *
  *  纯函数、无运行时依赖 —— 前后端共用，可直接单测。
  */
@@ -26,7 +26,7 @@ export interface TrimmedCounts {
 export interface BudgetDecision {
   shouldTrim: boolean;
   reason: BudgetReason;
-  /** 本轮只有估算；拿不到 provider usage 就写 estimate，禁止假称精确 */
+  /** 本轮只有估算；拿不到 provider usage 就写 estimate，不得声称精确 */
   tokenSource: 'estimate';
   estimatedTokens: number;
   threshold: number;

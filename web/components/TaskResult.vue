@@ -17,7 +17,7 @@ import { computed, ref } from 'vue';
 import { useRunStore } from '../stores/run';
 import { PERIODS } from '@shared/periods';
 
-// U12：移动端课表明细默认收起（前 2 节 + 展开），桌面保持全量（验收口径不变）
+// 移动端课表明细默认收起（前 2 节 + 展开），桌面端显示全量
 const mobileEdition = Boolean(typeof document !== 'undefined' && document.querySelector('.mobile-shell'));
 const lessonsExpanded = ref(false);
 import type { EngineType, FreeRoomsResult, LabStatusResult, ScheduleQueryResult } from '@shared/types';
@@ -26,7 +26,7 @@ import SourceBadge from './SourceBadge.vue';
 import type { Tone } from './ui-types';
 
 /**
- * N03：结果卡改为**纯 props 输入** —— 一条助手消息拥有自己的结果卡；
+ * 结果卡采用**纯 props 输入** —— 一条助手消息拥有自己的结果卡；
  * 不传 artifact 时回退到全局 run store（仅活跃轮渲染使用），历史与实时共用同一渲染器。
  * 注意：本组件只渲染查询类结果（schedule / lab_status / free_rooms）；
  * 提案卡与日报卡分别由 OperationCard / ReportCard 渲染。
@@ -45,7 +45,7 @@ const kind = computed<UiKind>(() => {
     const sr = props.artifact.result as ScheduleQueryResult;
     if (!sr.weekDeterminable || sr.reason === 'timetable_empty') return 'config_insufficient';
     // 查到"当天/该节次没课"时不再渲染任何结果卡：正文已明确说"没有课"，
-    // 卡片里的"无匹配结果""系统没有编造任何课程"属于开发侧措辞（2026-11-11 用户反馈）。
+    // 卡片里的"无匹配结果""系统没有编造任何课程"属于开发侧措辞。
     if (sr.reason === 'no_class_that_day' || sr.reason === 'no_class_in_that_period') return 'none';
     return sr.reason === 'ok' ? 'schedule_hit' : 'schedule_empty';
   }
@@ -372,7 +372,7 @@ const freeList = computed(() => {
         <template v-if="(extra.payload as FreeRoomsResult).weekNo !== null"> {{tr("· 第")}} {{ (extra.payload as FreeRoomsResult).weekNo }} {{tr("教学周")}} </template>
       </span>
     </header>
-    <!-- R08：覆盖不足 → 无法判断，候选是"未知"而不是"无空闲" -->
+    <!-- 覆盖不足 → 无法判断，候选是"未知"而不是"无空闲" -->
     <div v-if="(extra.payload as FreeRoomsResult).coverage !== 'complete'" class="alert alert--warn" role="status">
       <p class="alert__msg">
         {{tr((extra.payload as FreeRoomsResult).coverage === 'missing'

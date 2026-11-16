@@ -2,12 +2,12 @@
  * 配额短路探针（自包含）—— 供 tests/llm-quota.test.ts 在独立子进程里调用
  * ============================================================================
  *  为什么自包含：父进程若用 execFileSync 会**阻塞自己的事件循环**，子进程的
- *  fetch 回连父进程里的假上游时永远得不到响应（双向死锁）——所以假上游必须
+ *  fetch 回连父进程里的上游替身时永远得不到响应（双向死锁）——所以上游替身必须
  *  由子进程自己起。config.ts 首次 getConfig() 缓存整份配置，env 必须在
  *  import router 之前设好。
  *
  *  用法：node tests/fixtures/quota-probe.ts <quota|auth>
- *  输出：一行 JSON { code, hits }（hits = 假上游被真实请求的次数）
+ *  输出：一行 JSON { code, hits }（hits = 上游替身被真实请求的次数）
  */
 export {}; // 让本文件成为模块：顶层 await 只在模块里合法
 

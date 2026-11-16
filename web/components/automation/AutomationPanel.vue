@@ -1,16 +1,16 @@
 <script setup lang="ts">
 /**
- * 自动化（定时任务）主面板 —— 替代原 ScheduledJobsPanel 的内部实现
+ * 自动化（定时任务）主面板
  * ============================================================================
- *  形态对标主流 Agent APP：
+ *  形态：
  *    列表（卡片 + 开关） → 详情（概览 + 历史） → 新建（三控件 + 影响核对）
  *
- *  与旧版的差别（这是"乱"的具体解药）：
- *    · 一条规则一张卡，首屏只回答 4 个问题；参数/审计不再铺在列表上
- *    · 开关即暂停/恢复，不再要求用户走"修改→预览→确认"
- *    · 创建默认只要选模板 + 频率 + 时间；完整参数收进"完整设置"
- *    · 提醒偏好、事实结果、准备包降级为折叠区，不再与主任务混排
- *    · PC 与移动端共用本组件（移动端传 inline），口径天然一致
+ *  列表保持可扫读：
+ *    · 一条规则一张卡，首屏只回答 4 个问题；参数/审计不铺在列表上
+ *    · 开关即暂停/恢复，不必走"修改→预览→确认"
+ *    · 创建只需选模板 + 频率 + 时间；完整参数收进"完整设置"
+ *    · 提醒偏好、事实结果、准备包收在折叠区，不与主任务混排
+ *    · PC 与移动端共用本组件（移动端传 inline），口径一致
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { t as tr } from '../../i18n';
@@ -54,7 +54,7 @@ const composerOpen = ref(false);
 const editing = ref<AutomationJob | null>(null);
 const spec = ref<ScheduledSpec>(newSpec(business.profile?.username || ''));
 const savedNotice = ref('');
-  // A-Z：模板网格的静态展示元数据（图标 + 示例节奏），点击即按该模板新建
+  // 模板网格的静态展示元数据（图标 + 示例节奏），点击即按该模板新建
   const TEMPLATE_META: Record<string, { icon: string; schedule: string }> = {
     daily_report: { icon: 'clock', schedule: '每天 08:00' },
     tomorrow_courses: { icon: 'room', schedule: '每天 17:30' },
@@ -66,7 +66,7 @@ const savedNotice = ref('');
     patrol_reminder: { icon: 'file', schedule: '按值班班次' },
     agent_prompt: { icon: 'new', schedule: '你说时间，Agent 执行' }
   };
-  // A-Z2：模板卡预填推荐指令（新建统一指令驱动）
+  // 模板卡预填推荐指令（新建统一指令驱动）
   const PROMPT_PRESETS: Record<string, string> = {
     daily_report: '汇总今天的值班、报修与站内通知，生成今日日报',
     tomorrow_courses: '查一下明天有哪些课、哪些教室要用，提前一天整理成清单',
@@ -84,13 +84,13 @@ const savedNotice = ref('');
     composerOpen.value = true;
     automation.cancelPlan();
     spec.value = newSpec(business.profile?.username || '');
-    // A-Z2：新建统一指令驱动——kind=agent_prompt，模板卡预填推荐指令
+    // 新建统一指令驱动——kind=agent_prompt，模板卡预填推荐指令
     spec.value.kind = 'agent_prompt';
     spec.value.execMode = 'agent';
     spec.value.prompt = PROMPT_PRESETS[kind] ?? '';
     spec.value.name = automation.templates.value[kind] || kind;
   };
-// A-G4：示例话术复制（剪贴板不可用时如实降级——不假装复制成功）
+// 示例话术复制（剪贴板不可用时如实提示，不谎报复制成功）
 const copied = ref(false);
 async function copyExample(): Promise<void> {
   const phrase = '每天早上 8 点给我发昨天的日报';
@@ -160,7 +160,7 @@ function startCreate(): void {
   composerOpen.value = true;
   automation.cancelPlan();
   spec.value = newSpec(business.profile?.username || '');
-  // A-Z2：新建统一指令驱动——执行方式默认让 Agent 去做，标题留空由用户起
+  // 新建统一指令驱动——执行方式默认让 Agent 去做，标题留空由用户起
   spec.value.kind = 'agent_prompt';
   spec.value.execMode = 'agent';
 }
@@ -346,20 +346,20 @@ useVisibleRefresh(
             <dl class="auto-detail__grid">
               <div><dt>{{ tr('频率') }}</dt><dd>{{ tr(triggerText(detail.job.spec)) }}</dd></div>
               <div><dt>{{ tr('下次运行') }}</dt><dd>{{ formatDateTime(detail.job.nextRunAt) }}</dd></div>
-              <!-- 批次 B：maxRuns 用尽后 displayStatus=completed，这里显示进度 -->
+              <!-- maxRuns 用尽后 displayStatus=completed，这里显示进度 -->
               <div v-if="detail.job.spec.trigger.maxRuns"><dt>{{ tr('已运行') }}</dt><dd>{{ detail.runs.length }} / {{ detail.job.spec.trigger.maxRuns }} {{ tr('次') }}</dd></div>
               <div><dt>{{ tr('日历') }}</dt><dd>{{ tr(calendarText(detail.job.spec.calendarPolicy)) }}</dd></div>
               <div><dt>{{ tr('接收') }}</dt><dd>{{ tr(recipientsText(detail.job.spec.recipients)) }}</dd></div>
               <div><dt>{{ tr('效果') }}</dt><dd>{{ tr(effectsText(detail.job.spec.approvedEffects)) }}</dd></div>
               <div><dt>{{ tr('所有者') }}</dt><dd>{{ detail.job.ownerId }}</dd></div>
-              <!-- A-G5：编辑走版本化 change，这里让"上次改动"可见 -->
+              <!-- 编辑走版本化 change，这里让"上次改动"可见 -->
               <div v-if="detail.job.updatedAt"><dt>{{ tr('最近修改') }}</dt><dd>{{ formatDateTime(detail.job.updatedAt) }} · v{{ detail.job.version }}</dd></div>
             </dl>
 
             <div v-if="!readonly && detail.job.canManage" class="auto-actions">
               <button type="button" :disabled="busy" @click="startEdit(detail.job)">{{ tr('编辑') }}</button>
               <button type="button" :disabled="busy" @click="runNow(detail.job)">{{ tr('立即运行') }}</button>
-              <!-- B：已完成（maxRuns 用尽）的任务不再提供暂停/恢复——历史保留，语义已终结 -->
+              <!-- 已完成（maxRuns 用尽）的任务不再提供暂停/恢复——历史保留，语义已终结 -->
               <button
                 v-if="detail.job.displayStatus !== 'completed'"
                 type="button"
@@ -428,7 +428,7 @@ useVisibleRefresh(
           />
         </template>
 
-        <!-- 列表（A-Z：ZCode 式标题块 + 任务卡 + 模板网格） -->
+        <!-- 列表（标题块 + 任务卡 + 模板网格） -->
         <template v-else>
           <div class="auto-hero">
             <h1 class="auto-hero__title">{{ tr('定时任务') }}</h1>
@@ -458,7 +458,7 @@ useVisibleRefresh(
             <button type="button" class="auto-primary" :disabled="busy" @click="startCreate">
               {{ tr('创建定时任务') }}
             </button>
-            <!-- A-G4：ZCode 的自动化就是"跟 Agent 说一句话"——把这条最短的路径显性化 -->
+            <!-- 自动化的最短路径是"跟 Agent 说一句话"，这里把它显性化 -->
             <p class="auto-empty__try">
               {{ tr('也可以在会话里直接对我说：') }}
               <code>每天早上 8 点给我发昨天的日报</code>
@@ -881,7 +881,7 @@ useVisibleRefresh(
 }
 </style>
 <style scoped>
-/* A-Z：ZCode 式标题块（列表页） */
+/* 标题块（列表页） */
 .auto-hero { margin: 0 0 18px; }
 .auto-hero__title { margin: 0 0 6px; font-size: calc(var(--ui-font-size) * 1.7); font-weight: 700; color: var(--text); }
 .auto-hero__sub { margin: 0; color: var(--text-faint); font-size: calc(var(--ui-font-size) * 1.0); }
@@ -933,7 +933,7 @@ useVisibleRefresh(
 .auto-back:hover { background: var(--surface-3); color: var(--text); }
 .auto-back:disabled { opacity: .55; cursor: not-allowed; }
 
-/* 交互反馈补齐（2026-11-07）：面板头部/操作按钮此前无悬浮反馈 */
+/* 面板头部/操作按钮的悬浮反馈 */
 .auto-panel__head button:hover:not(:disabled),
 .auto-actions button:hover:not(:disabled),
 .auto-pref button:hover:not(:disabled) {

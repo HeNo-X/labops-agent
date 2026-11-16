@@ -2,8 +2,8 @@
  * 离线壳作用域判据 —— 被 public/sw.js 与测试共用。
  * ============================================================================
  *  抽出来的唯一理由：**"绝不缓存 /api/" 是安全声明，不是实现细节**。
- *  它一旦写死在 SW 内部就无法被测试覆盖，而这条规则破掉的后果是
- *  "用户把昨天的业务数据当成当前事实" —— 正是本项目全程在防的那类错误。
+ *  它一旦写死在 SW 内部就无法被测试覆盖，而这条规则被打破的后果是
+ *  "用户把昨天的业务数据当成当前事实" —— 正是本模块要防的错误。
  */
 
 export type OfflineAction = 'passthrough' | 'shell' | 'immutable' | 'static';
@@ -13,7 +13,7 @@ const STATIC_RE = /\.(?:js|css|svg|png|jpe?g|webp|woff2?|ico|webmanifest)$/i;
 const ASSET_RE = /^\/assets\/[\w.-]+$/;
 
 export function offlineAction(pathname: string): OfflineAction {
-  // 顺序即优先级：API 与 SSE 必须最先被排除，任何后续新增规则都不得越过它
+  // 顺序即优先级：API 与 SSE 必须最先被排除，任何后续规则都不得越过它
   if (pathname === '/api' || pathname.startsWith('/api/')) return 'passthrough';
   if (pathname.startsWith('/src/') || pathname.startsWith('/@')) return 'passthrough'; // Vite 开发期模块
   if (ASSET_RE.test(pathname)) return 'immutable';

@@ -4,14 +4,13 @@
  *  用法：
  *    npx tsx seed/make-snapshot.ts <源 state.json 绝对路径> [输出路径]
  *
- *  脱敏原则（比原规格书更严，原因见下）：
+ *  脱敏原则（按最小数据面与可自检来定）：
  *    1. 【最小数据面】第一阶段的 query_schedule 只需要 实验室 + 课表 + 学期配置。
  *       users / classRoster / keys / notifications / gamification **一个字段都不进快照**。
- *       原规格书 §4.1 的脚本会把 classRoster 的姓名与学号带进公开仓库，本脚本直接整表丢弃。
- *    2. 【字段名纠错】原规格书假设名册字段是 studentId，实际线上 data 里叫 **sno**，
- *       而且是完整 12 位学号。原脚本 `String(r.studentId).slice(-4)` 取不到值 →
- *       两条路都危险（要么报错要么原样泄漏）。本脚本不碰该表，从根上避免。
- *    3. 【补上漏项】原规格书漏了 timetable.teacher —— 真实课表里有 73 个真实教师姓名。
+ *       classRoster 的姓名与学号不能进公开仓库，本脚本直接整表丢弃。
+ *    2. 【字段名】名册字段在真实数据里叫 **sno**，而且是完整 12 位学号；按 studentId 取
+ *       会拿不到值，两条路都危险（要么报错要么原样泄漏）。本脚本不碰该表，从根上避免。
+ *    3. 【教师字段】timetable.teacher 在真实课表里带真实教师姓名。
  *       本脚本对教师做稳定伪名化（教师T01、教师T02…）。
  *    4. 自检：生成后扫描产物，确认不含 11 位手机号、12 位学号、以及源里出现过的任何
  *       真实教师姓名。任一命中即 exit(1) 且不写文件。
@@ -26,8 +25,8 @@ import { fileURLToPath } from 'node:url';
 
 type Any = Record<string, unknown>;
 
-// ⚠️ 必须用 fileURLToPath。早先手写 `new URL(import.meta.url).pathname` 在 Windows 上
-// 不会还原 %20，结果在 `D:/Web%20Project/…` 下建了一整棵错误目录树（已清理）。
+// ⚠️ 必须用 fileURLToPath：`new URL(import.meta.url).pathname` 在 Windows 上
+// 不还原 %20，会在 `D:/Web%20Project/…` 下建出错误目录树。
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(SCRIPT_DIR, '..');
 
@@ -66,7 +65,7 @@ function main() {
   }
   const outPath = process.argv[3] || path.join(PROJECT_ROOT, 'seed', 'snapshot.json');
 
-  // 落点自检：默认输出必须落在项目内，否则会像上面那条注释说的那样建到别处去
+  // 落点自检：默认输出必须落在项目内，否则会建到别处去
   if (!process.argv[3] && !path.resolve(outPath).startsWith(PROJECT_ROOT + path.sep)) {
     console.error('[seed] 输出路径异常，已中止：', outPath);
     process.exit(2);
@@ -149,7 +148,7 @@ function main() {
     scheduleAdjust: ((st['scheduleAdjust'] as Any[]) ?? []).map(a => pick(a, ['id', 'date', 'timetableId', 'action', 'toLabId', 'toPeriodKey', 'status']))
   };
 
-  // ---- 残留自检（A5 要求：导出后必须能证明没有真实姓名/手机号/学号残留）----
+  // ---- 残留自检（导出后必须能证明没有真实姓名/手机号/学号残留）----
   const text = JSON.stringify(snapshot, null, 2);
   const problems: string[] = [];
 

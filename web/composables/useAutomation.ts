@@ -1,15 +1,15 @@
 /**
  * 自动化（定时任务）数据层
  * ============================================================================
- *  把原来塞在 ScheduledJobsPanel.vue 模板里的 8 类请求收拢到这里：
+ *  自动化相关请求集中在此：
  *  列表 / 详情 / 预览 / 确认 / 开关 / 立即执行 / 归档 / 提醒偏好 / 事实结果 / 准备包。
  *
  *  三条设计约束：
  *  1) **scope 感知**：切换账号时丢弃上一账号的在途响应，避免把 A 的规则渲染给 B。
- *  2) **不静默失败**：任何失败都写进 error，由界面显式呈现（这是本项目踩过的坑）。
+ *  2) **不静默失败**：任何失败都写进 error，由界面显式呈现。
  *  3) **开关是一键的，创建不是**：暂停/恢复不外发任何消息，可以自动走完
  *     preview→confirm；创建/修改/立即执行/归档会改变外部世界（给人发通知），
- *     必须让用户看到影响核对后再确认（C6 human-in-the-loop）。
+ *     必须让用户看到影响核对后再确认（human-in-the-loop）。
  */
 
 import { computed, ref } from 'vue';
@@ -28,7 +28,7 @@ export interface AutomationJob {
   nextRunAt: string | null;
   lastRunAt?: string;
   lastRunStatus?: string;
-  /** RAG 之外的批次 A（G5）：最近修改时间（主系统 Job.updatedAt 透传，缺省无） */
+  /** 最近修改时间（主系统 Job.updatedAt 透传，缺省无） */
   updatedAt?: string;
   canViewDetails: boolean;
   canManage: boolean;
@@ -100,7 +100,7 @@ export function useAutomation() {
   const connected = computed(() => business.connected);
   const activeCount = computed(() => jobs.value.filter((j) => j.status === 'active').length);
 
-  /** 统一守卫：防并发、集中错误、丢弃跨账号的过期响应。忙时不再静默：显式提示，避免旧方案被误确认 */
+  /** 统一守卫：防并发、集中错误、丢弃跨账号的过期响应。忙时不再静默：显式提示，避免残留方案被误确认 */
   async function guard(fn: () => Promise<void>): Promise<void> {
     if (busy.value) {
       error.value = '上一个操作尚未完成，请稍候再试';
@@ -175,7 +175,7 @@ export function useAutomation() {
    */
   async function requestPlan(action: AutomationAction, spec?: ScheduledSpec, job?: AutomationJob): Promise<boolean> {
     let ok = false;
-    // 先清旧方案：即使本次请求被守卫挡掉或失败，也不会残留上一动作（如 run_now）被误确认
+    // 先清空已有方案：即使本次请求被守卫挡掉或失败，也不会残留上一动作（如 run_now）被误确认
     plan.value = null;
     await guard(async () => {
       const scope = business.scopeKey;
@@ -276,7 +276,7 @@ export function useAutomation() {
       try {
         await businessApi('proxy/scheduled-jobs/delete', { jobId: job.id, scopeKey: business.scopeKey });
       } catch (e) {
-        // 线上主系统未部署 delete 路由时的兜底解释（其 404 文案为「定时任务入口不存在」）
+        // 主系统未部署 delete 路由时的兜底解释（其 404 文案为「定时任务入口不存在」）
         const msg = (e as Error).message || '';
         if (msg.includes('入口不存在') || msg.includes('404')) {
           throw new Error('当前连接的主系统版本尚未支持删除历史记录，需更新部署主系统后可用');

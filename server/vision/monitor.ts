@@ -1,8 +1,8 @@
 /**
  * 视觉边缘上报 —— 数据面（不含 HTTP）
  * ============================================================================
- *  架构定位（对齐 Vision识别技术/docs/视觉接入LabOps-可行性分析与开发方向-20261026.md
- *  + 2026-10-30 用户裁定「场景识别只做底库匹配、PPE 废弃」）：
+ *  架构定位（对齐 Vision识别技术/docs/视觉接入LabOps-可行性分析与开发方向-20261026.md；
+ *  场景识别只做底库匹配，不做 PPE 识别）：
  *    · 摄像头是眼睛（边缘推理，画面与人脸永不出实验室局域网）；
  *    · 本模块是云端汇总层：只接收**剥离身份后的 JSON**。
  *      人脸只上报「已录入命中数 / 未知脸数」两个数量，姓名与特征永不出边缘机；
@@ -15,7 +15,7 @@
  *      faces?:{recognized,unknown},          // 只有数量
  *      library?:[{kind,name,score,mode}],    // 物品/场景底库命中
  *      quality?:{det} }
- *    v1 的 ppe_summary 已随 10-30 裁定废弃：接收时忽略、不再存储、不再展示。
+ *    v1 的 ppe_summary 已废弃：接收时忽略、不存储、不展示。
  *
  *  告警判定（云端按自己的数据判，边缘只报事实）：
  *    · count > capacity（边缘随报自己 rooms.json 的容量）；
@@ -198,7 +198,7 @@ export function coerceVisionReport(raw: unknown): CoerceResult {
   // 容量（v2）：边缘随报自己 rooms.json 的口径，云端只用来判超容量
   const capacity = intOrNull(root['capacity'], 0, 100000);
 
-  // v1 兼容：scene 字段透传（10-30 后边缘不再产出占用/着装语义，仅为旧端点保留）
+  // v1 兼容：scene 字段透传（边缘不再产出占用/着装语义，仅为既有端点保留）
   const sceneRaw = (root['scene'] ?? null) as Record<string, unknown> | null;
 
   const qualityRaw = (root['quality'] ?? {}) as Record<string, unknown>;
@@ -346,7 +346,7 @@ export interface VisionLabSummary {
   library: VisionLibraryHit[];
   sceneState: string | null;
   sceneReason: string | null;
-  /** 上报来源标记（quality.det）：mock-vision-feed 的模拟上报为 "mock-*"，真实边缘为检测模型名 */
+  /** 上报来源标记（quality.det）：mock-vision-feed 的联调用上报为 "mock-*"，真实边缘为检测模型名 */
   det: string | null;
   alert: boolean;
   snapshotAvailable: boolean;
@@ -388,7 +388,7 @@ export function visionSnapshot(labId: string): LabSnapshot | null {
 }
 
 // ---------------------------------------------------------------------------
-// 人工核查反馈（批C：误报回流 = 免费标注数据；事件唯一键 labId:receivedAt）
+// 人工核查反馈（误报回流可作标注数据；事件唯一键 labId:receivedAt）
 // ---------------------------------------------------------------------------
 
 export type VisionVerdict = 'false_alarm' | 'confirmed';

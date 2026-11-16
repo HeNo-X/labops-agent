@@ -1,19 +1,17 @@
 <script setup lang="ts">
 import {t as tr} from "../i18n";
 /**
- * 人工确认卡 —— 只在**真实待确认写操作**存在时渲染（阶段 2B 接入）
+ * 人工确认卡 —— 只在**真实待确认写操作**存在时渲染
  * ============================================================================
- *  第一阶段服务端没有注册任何写操作工具，store.pendingConfirm 恒为 null，
- *  因此本组件**不会被渲染** —— 不再有常驻的占位示意卡吸走注意力，
- *  也不再出现"看起来坏了"的禁用按钮。
+ *  没有待确认写操作时 store.pendingConfirm 为 null，本组件不渲染：
+ *  不出现常驻的占位示意卡，也不出现"看起来坏了"的禁用按钮。
  *
- *  将来（publish_notification / create_inspection_ticket）接入时：
+ *  存在待确认动作时（publish_notification / create_inspection_ticket）：
  *   · 服务端发出 need_confirm 事件 → store.pendingConfirm 出现结构化草稿
  *   · 本组件渲染草稿全文、影响范围与 确认/修改/取消 三个真实动作
  *   · 模型只产出草稿，服务端在确认后重验 + 幂等键执行
- *  在那之前，这里保持空实现是唯一诚实的做法。
  */
-defineProps<{ /* 阶段 2B：这里将接收结构化的待确认动作草稿 */ }>();
+defineProps<{ /* 接收结构化的待确认动作草稿 */ }>();
 </script>
 
 <template>

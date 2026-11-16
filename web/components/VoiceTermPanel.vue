@@ -23,14 +23,14 @@ import { lastAsrBias, lastAsrProtocol } from '../composables/useVoiceInput';
 const props = defineProps<{
   /**
    * 嵌入态（挂在 设置 → 个性化 里）：折叠头由设置的分栏承担，面板直接摊开内容。
-   * 独立态（默认）留给其它调用点，保持原来的"收起只占一行"行为。
+   * 独立态（默认）留给其它调用点，收起后只占一行。
    */
   embedded?: boolean;
 }>();
 
 const { pairs, count, add, remove, clear, keywords, keywordCount, addKeyword, removeKeyword, clearKeywords } = useUserTerms();
 
-// 独立态默认收起（这是它当初的设计：不占输入区空间）；嵌入设置时由 embedded 直接摊开
+// 独立态默认收起（不占输入区空间）；嵌入设置时由 embedded 直接摊开
 const open = ref(false);
 const from = ref('');
 const to = ref('');
@@ -267,7 +267,7 @@ function clearWords(): void {
   background: var(--surface);
 }
 /* 两种词汇的生效方式不同，这句话是唯一能一眼看出差别的地方，别藏进帮助里 */
-/* 关键文本跟设置面板同字号（现在默认 15px），解释性文本统一降一档 */
+/* 关键文本与设置面板同字号（默认 15px），解释性文本统一降一档 */
 .vtp__intro {
   margin: 0 0 var(--sp-3);
   color: var(--text-muted);

@@ -3,13 +3,13 @@ import {clientFetch} from '../client';
 
 import {t as tr} from "../i18n";
 /**
- * 办理单（提案）卡 —— ops.v1 的核心交互面
+ * 办理单（提案）卡 —— 核心交互面
  * ============================================================================
- *  · 信息顺序（任务书 §5.3）：环境标识 → 已解析对象 → 将执行的动作 → 回执/历史
+ *  · 信息顺序：环境标识 → 已解析对象 → 将执行的动作 → 回执/历史
  *  · 确认绑定版本：请求只提交 proposalId + proposalVersion + decision + clientRequestId，
- *    业务参数以服务端持久化提案为准（T04）；幂等键防重复提交（T05）
+ *    业务参数以服务端持久化提案为准；幂等键防重复提交
  *  · 历史消息刷新：挂载时向 /api/proposals/:id 核对当前状态 ——
- *    已执行显示回执、过期/已拒绝不可再确认（T11），绝不显示一个永远可点的旧按钮
+ *    已执行显示回执、过期/已拒绝不可再确认，绝不显示一个永远可点的旧按钮
  *  · 清单只读：交接清单状态由服务端提案锁定；与实际不符请拒绝后重新描述，
  *    前端不提供"改了参数再确认"的假编辑
  */
@@ -43,7 +43,7 @@ onMounted(async () => {
 
 async function decide(decision: 'confirm' | 'reject'): Promise<void> {
   if (busy.value) return;
-  // U02：移动端确认先弹底部摘要层（拇指区主按钮）；桌面维持卡内直提
+  // 移动端确认先弹底部摘要层（拇指区主按钮）；桌面端卡内直接提交
   if (decision === 'confirm' && document.querySelector('.mobile-shell')) {
     const feedback = useFeedback();
     const ok = await feedback.confirmSheet({

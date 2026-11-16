@@ -1,11 +1,11 @@
 /**
- * 方案B（上下文继承改造）纯函数单测 —— docs/上下文继承改造-方案B-20261108.md §6
+ * 上下文继承的纯函数单测
  * ============================================================================
  *  断言三层职责划分的核心机制：
- *    1. hints 模式下 carried 线索**只进 intent.hints、不写槽位**（沿用与否归模型）；
+ *    1. hints 模式下 carried 线索**只进 intent.hints、不写槽位**（是否沿用由模型决定）；
  *    2. 班级明确时与房间互斥（不产生房间的 carried 线索）；
- *    3. legacy 模式（CONTEXT_HINTS=0 对应 hintsMode:false）保持旧的写槽位行为；
- *    4. 确定性引擎入口 applyHintsToSlots 把 carried 线索落回槽位（与旧继承一致）；
+ *    3. legacy 模式（CONTEXT_HINTS=0 对应 hintsMode:false）保持直接写槽位的行为；
+ *    4. 确定性引擎入口 applyHintsToSlots 把 carried 线索落回槽位（与 legacy 继承一致）；
  *    5. buildTimeContext 在有线索时输出"线索不是结论"+ 沿用纪律 + 互斥规则话术。
  *
  *  用例输入选「然后呢」：parseIntent 对它四个槽位全空——carried 线索才是唯一来源。

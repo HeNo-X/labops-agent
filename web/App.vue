@@ -2,14 +2,14 @@
 import {clientFetch} from './client';
 
 /**
- * 会话工作台 —— 应用外壳（M2：左侧导航 + 连续消息流，F01/F23/F25）
+ * 会话工作台 —— 应用外壳
  * ============================================================================
  *  · 左侧导航：新聊天 / 工作会话 / 聊天会话（按模式分区，各自可折叠、可新建）/
  *    我的任务 / 业务工具（折叠区）/ 状态与主题
  *  · 中央：按「轮」渲染的连续消息流（每轮 = 一条提问 + 其回答），
- *    每轮带 hover 操作条：删除本轮（两种模式）/ 回档 + 修改（仅工作模式，0.6.0）
- *  · 房间点击只回填草稿，不自动发请求（F29）；发送后草稿清空（F27）
- *  · 主题：跟随系统 = 显式解析 prefers-color-scheme 并实时响应（F28 已修，保持）
+ *    每轮带 hover 操作条：删除本轮（两种模式）/ 回档 + 修改（仅工作模式）
+ *  · 房间点击只回填草稿，不自动发请求；发送后草稿清空
+ *  · 主题：跟随系统 = 显式解析 prefers-color-scheme 并实时响应
  */
 import {auth,bootstrapAuth as sharedBootstrap,switchEdition,clearAuth} from './auth/bootstrap';
 import Targets from '@shared/labops-targets.js';
@@ -98,7 +98,7 @@ async function logout():Promise<void>{
 const { start, cancel } = useAgentStream();
 
 const draft = ref(session.draftFor('__new'));
-// N21：草稿按会话保存；切回会话时恢复；无选中会话时同步设置页快捷发起写入的 __new 草稿
+// 草稿按会话保存；切回会话时恢复；无选中会话时同步设置页快捷发起写入的 __new 草稿
 watch(
   () => session.draftFor('__new'),
   (t) => { if (!session.currentId) draft.value = t; }
@@ -111,7 +111,7 @@ watch(
 );
 watch(draft, (t) => session.saveDraft(session.currentId ?? '__new', t));
 
-// ---- 运行中待发送（T3）：单条、按会话隔离；只是暂存意图，不构成第二条并发流 ----
+// ---- 运行中待发送：单条、按会话隔离；只是暂存意图，不构成第二条并发流 ----
 const pendingInput = usePendingInputStore();
 /** 一次性提示（草稿冲突填回等），几秒后自动消失 */
 const pendingNotice = ref<string | null>(null);
@@ -173,8 +173,8 @@ function consumePendingOnTerminal(convId: string | null): void {
     if (taken) session.saveDraft(folded.conversationId, mergeDraft(session.draftFor(folded.conversationId), taken.text));
     return;
   }
-  // 队列化之后语义变了：队里排的是**用户明确要求执行**的指令，
-  // 终态就该按序发出，不能因为输入框里还有草稿就改填回草稿（那会让队伍卡住）。
+  // 队列里排的是用户显式选择执行的指令：终态就该按序发出，
+  // 不能因为输入框里还有草稿就改填回草稿（那会让队伍卡住）。
   // 草稿保持原样不动，用户接着写自己的下一句。
   const outcome = resolvePendingOnTerminal({
     pending: pendingInput.pending,
@@ -260,7 +260,7 @@ watch(() => session.messagesLoading, async (loading) => {
 const navOpen = ref(false);
 /** 右侧房间侧边栏：宽屏默认展开，窄屏默认收起；用户选择持久化（停靠式，可收起为窄轨） */
 const roomsOpen = ref(window.innerWidth >= 1280);
-// PC-2 右栏视图互斥：'rooms'=房间清单（默认），'plan'=办理单钉住面板
+// 右栏视图互斥：'rooms'=房间清单（默认），'plan'=办理单钉住面板
 const sideView = ref<'rooms' | 'plan'>('rooms');
 watch(sideView, (v) => {
   if (v === 'plan' && !roomsOpen.value) toggleRooms(true);
@@ -287,7 +287,7 @@ function collapseRailOnMobile(): void {
 }
 onMounted(() => window.addEventListener('resize', collapseRailOnMobile));
 onUnmounted(() => window.removeEventListener('resize', collapseRailOnMobile));
-// 批C：实验室监控抽屉"让 Agent 起草工单"——新建工作会话并把 AI 线索填进命令栏（本人确认后才执行）
+// 实验室监控抽屉"让 Agent 起草工单"——新建工作会话并把 AI 线索填进命令栏（本人确认后才执行）
 function onVisionDraft(event: Event): void {
   const question = (event as CustomEvent<string>).detail;
   if (typeof question !== 'string' || !question.trim()) return;
@@ -296,18 +296,18 @@ function onVisionDraft(event: Event): void {
 }
 onMounted(() => window.addEventListener('labops-vision-draft', onVisionDraft));
 onUnmounted(() => window.removeEventListener('labops-vision-draft', onVisionDraft));
-// T5：切回前台且该轮长时间无新事件 → 主动回查快照（不静默停在假"运行中"）
+// 切回前台且该轮长时间无新事件 → 主动回查快照（不静默停在假"运行中"）
 onMounted(() => document.addEventListener('visibilitychange', onVisibilityChange));
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', onVisibilityChange);
   if (recoverPollTimer !== null) window.clearTimeout(recoverPollTimer);
 });
 
-// ---- 命令面板（T7）：Ctrl/Cmd+K 的唯一监听者在其自身组件内 ----
+// ---- 命令面板：Ctrl/Cmd+K 的唯一监听者在其自身组件内 ----
 /**
  * 命令面板的命令集**全部复用既有入口**：
  * 视觉 / 自动化 / 工作台都走既有的 window 'labops-target' 事件通道（App 内部本来
- * 就用它打开这些面板），不新增任何一套开关机制。
+ * 就用它打开这些面板），不另建一套开关机制。
  */
 const commandContext = computed(() => ({
   busy: store.inputLocked || Boolean(submitting.value),
@@ -331,9 +331,9 @@ const commandContext = computed(() => ({
 }));
 
 // ---- 会话类型（聊天 / 任务）----
-// hero（还没有会话）用 draftMode 选择；A8（2026-10-31 用户要求）：会话模式恢复
-// 可切换——顶栏模式胶囊即切换入口，服务端 PATCH 随时接受。语义边界：模式随
-// **发送时刻**的会话模式生效，历史消息保持其发生时的语义（办理单确认权仍在用户）。
+// hero（还没有会话）用 draftMode 选择；有会话后顶栏模式胶囊即切换入口，
+// 服务端 PATCH 随时接受。语义边界：模式随 **发送时刻** 的会话模式生效，
+// 历史消息保持其发生时的语义（办理单确认权仍在用户）。
 type ConvMode = 'chat' | 'task';
 const draftMode = ref<ConvMode>(preferences.value.defaultMode);
 watch(()=>preferences.value.defaultMode,value=>{if(!session.currentId)draftMode.value=value;});
@@ -353,7 +353,7 @@ const settingsOpen=ref(false);
 function closeSettings(){settingsOpen.value=false;void nextTick(()=>document.querySelector<HTMLButtonElement>('.sidebar-account')?.focus());}
 onMounted(()=>{void bootstrapAuth();});
 
-// ---- ops.v1：任务中心 + 沙盒演示身份（仅沙盒可切换视角，服务端校验）----
+// ---- 任务中心 + 沙盒身份切换（仅沙盒环境可切换视角，服务端校验）----
 const tasks = ref<TaskRow[]>([]);
 const tasksError = ref<string | null>(null);
 const actor = ref<ActorRole>(actorRole());
@@ -383,7 +383,7 @@ function switchRole(r: ActorRole): void {
   void loadTasks();
 }
 
-/** PC-2：右栏办理单"查看会话位置" → 滚动到对应消息并短暂高亮 */
+/** 右栏办理单"查看会话位置" → 滚动到对应消息并短暂高亮 */
 function locateMessage(messageId: string): void {
   if (!messageId) return;
   const el = msgsEl.value?.querySelector(`[data-msg-id="${CSS.escape(messageId)}"]`) ?? msgsEl.value?.querySelector('.msg--assistant:last-of-type');
@@ -393,7 +393,7 @@ function locateMessage(messageId: string): void {
     window.setTimeout(() => el.classList.remove('is-located'), 1800);
   }
 }
-/** PC-2：待确认方案到达（0→≥1）→ 右栏自动钉住为办理单视图 */
+/** 待确认方案到达（0→≥1）→ 右栏自动钉住为办理单视图 */
 function onPlanArrived(messageId: string): void {
   if (window.innerWidth > 900) sideView.value = 'plan';
   if (messageId) locateMessage(messageId);
@@ -411,7 +411,7 @@ const currentTitle = computed(() => {
   return c?.title ?? '新会话';
 });
 
-// ---- 活跃轮同步 + 滚动跟随（A33 简化版）----
+// ---- 活跃轮同步 + 滚动跟随 ----
 // 流式期间把 run store 的实时状态写进占位消息对象（同一引用，历史即时可见）
 function scrollFollow(): void {
   const el = msgsEl.value;
@@ -461,7 +461,7 @@ watch(
             : store.runStatus === 'cancelled'
               ? 'cancelled'
               : 'interrupted';
-    // 耗时优先用服务端权威值（run_completed.payload.ms）；拿不到时才退回本次实测跨度
+    // 耗时优先用服务端权威值（run_completed.payload.ms）；拿不到时才退回本地计时
     live.ms = store.serverMs ?? store.elapsedMs;
     live.model = store.model;
   }
@@ -475,11 +475,11 @@ watch(
   }
 );
 
-/** 统一提交入口（F02）：任何来源的提问都走这里，运行中一律拒绝并返回 */
+/** 统一提交入口：任何来源的提问都走这里，运行中一律拒绝并返回 */
 let submitting = ref(false);
 /** 本次提交的令牌：回调只处理自己这一次提交的事件（runId 采纳后由服务端生成） */
 let activeToken = '';
-/** R04：活跃轮按 (会话, 消息 ID) 解析目标 —— 历史刷新替换数组也不会跟丢 */
+/** 活跃轮按 (会话, 消息 ID) 解析目标 —— 历史刷新替换数组也不会跟丢 */
 let liveConvId: string | null = null;
 let liveMsgId: string | null = null;
 
@@ -488,7 +488,7 @@ function resolveLive(): ChatMessageData | null {
   return session.messages[liveConvId]?.find((m) => m.id === liveMsgId) ?? null;
 }
 
-// ---- 断线回查（T5）：把"请手工回查"升级为"按运行编号收敛到真实终态" ----
+// ---- 断线回查：按运行编号收敛到真实终态 ----
 /** 回查提示（细线一行）：恢复中 / 已补齐 / 仍在服务端运行 —— 必须让用户看到发生了什么 */
 const recoverNotice = ref<string | null>(null);
 let recoverPollTimer: number | null = null;
@@ -506,7 +506,7 @@ function convergeFromSnapshot(snapshot: RunSnapshot): void {
     live.model = snapshot.model;
     live.sourceType = snapshot.sourceType;
     if (ms !== null) live.ms = ms;
-    // A5：计划随快照回放（历史轮展示读消息 meta.plan；这里同步进 store 供活跃轮）
+    // 计划随快照回放（历史轮展示读消息 meta.plan；这里同步进 store 供活跃轮）
     live.plan = snapshot.plan ?? null;
     // 快照里的错误信息没有落库字段（如实缺省），不编造失败原因
     live.error = null;
@@ -520,7 +520,7 @@ function convergeFromSnapshot(snapshot: RunSnapshot): void {
  * 断线/中断后的收敛流程：
  *   ① 有明确终态 → 原子替换为该终态；
  *   ② 仍在服务端运行 → 继续轮询（有上限），拿不到就如实告知，不猜成功；
- *   ③ 快照不可得（服务端重启等原因）→ 保留原诚实文案，绝不假装成功。
+ *   ③ 快照不可得（服务端重启等原因）→ 保留如实的错误提示，不显示为成功。
  */
 async function recoverRunFromSnapshot(convId: string, runId: string, fallback: { code: string; message: string; hint?: string }, attempt = 0): Promise<void> {
   if (recoverPollTimer !== null) {
@@ -531,7 +531,7 @@ async function recoverRunFromSnapshot(convId: string, runId: string, fallback: {
   const res = await fetchRunSnapshot(convId, runId);
   if (!res.ok) {
     recoverNotice.value = null;
-    // 快照都拿不到：回到原诚实错误（保留内容，提示按编号回查），不静默
+    // 快照都拿不到：保留如实的错误提示（提示按编号回查），不静默
     store.failRun(fallback);
     return;
   }
@@ -566,8 +566,8 @@ function onVisibilityChange(): void {
   if (document.visibilityState === 'visible') checkForegroundStale();
 }
 async function onSubmit(q: string): Promise<void> {
-  // N04：**同步**占用提交锁，覆盖"await 创建会话"的窗口 —— 快速双击/连按 Enter 只发一次
-  // T3：运行中的提交由 CommandBar 转成"加入待发送"，走到这里的一律是真正的首轮提交，
+  // **同步**占用提交锁，覆盖"await 创建会话"的窗口 —— 快速双击/连按 Enter 只发一次
+  // 运行中的提交由 CommandBar 转成"加入待发送"，走到这里的一律是真正的首轮提交，
   // 锁语义未放宽（并发互斥仍然只有一条 SSE 流）。
   if (submitting.value || store.inputLocked || !q.trim()) return;
   submitting.value = true;
@@ -576,7 +576,7 @@ async function onSubmit(q: string): Promise<void> {
   const clientRequestId = session.uid('req');
   let convId: string | null = session.currentId;
   try {
-    // 模式以新建会话顶部胶囊显式选择的 draftMode 为准（覆盖原 PC-4 首句自动路由）
+    // 模式以新建会话顶部胶囊显式选择的 draftMode 为准
     const mode: ConvMode = draftMode.value;
     convId = await session.ensureConversation(q, convId, clientRequestId, mode);
   } catch (e) {
@@ -598,7 +598,7 @@ async function onSubmit(q: string): Promise<void> {
   submitting.value = false;
   activeToken = rid;
   liveConvId = convId;
-  // 助手占位：流式更新同一对象，结束后留在历史里（F01）
+  // 助手占位：流式更新同一对象，结束后留在历史里
   // ⚠️ 必须持有响应式代理（从 store 取回），持有原始对象的话 mutation 不触发更新
   session.appendLocal(convId, {
     id: `live-${rid}`,
@@ -611,7 +611,7 @@ async function onSubmit(q: string): Promise<void> {
   });
   liveMsgId = `live-${rid}`;
   await nextTick();
-  // 发送新消息是明确动作：无论此前是否在看历史，都落到最新消息
+  // 发送新消息是明确动作：无论当前是否在看历史，都落到最新消息
   jumpToBottom();
 
   void start({
@@ -620,11 +620,11 @@ async function onSubmit(q: string): Promise<void> {
     sessionId: store.sessionId ?? undefined,
     conversationId: convId,
     clientRequestId,
-    // 每个回调绑定本次提交令牌：旧流的迟到事件/错误/收尾不得触碰新任务（F02/F10/N01）
+    // 每个回调绑定本次提交令牌：旧流的迟到事件/错误/收尾不得触碰新任务
     onEvent: (ev) => {
       if (activeToken !== rid) return;
       if (ev.type === 'run_accepted') {
-        // runId 在事件信封顶层；R04：正式消息 ID 在此对齐临时 ID
+        // runId 在事件信封顶层；正式消息 ID 在此对齐临时 ID
         store.adoptRunId(String(ev.runId ?? ''));
         const p = ev.payload as Record<string, unknown>;
         session.adoptIds(
@@ -650,7 +650,7 @@ async function onSubmit(q: string): Promise<void> {
     },
     onError: (err) => {
       if (activeToken !== rid) return;
-      // T5：断流不再只丢一句"请手工回查" —— 先按运行编号取服务端快照收敛
+      // 断流时先按运行编号取服务端快照收敛，取不到再退回如实的错误提示
       if (err.code === 'stream_ended_early' && store.runId) {
         void recoverRunFromSnapshot(convId, store.runId, err);
         return;
@@ -688,14 +688,14 @@ async function onSubmit(q: string): Promise<void> {
     liveMsgId = null;
     void session.loadConversations();
     void loadTasks();
-    // T3：本轮已到终态 —— 消费属于该会话的待发送（自动发出 / 填回草稿）
+    // 本轮已到终态 —— 消费属于该会话的待发送（自动发出 / 填回草稿）
     const finishedConv = convId;
     void nextTick(() => consumePendingOnTerminal(finishedConv));
   }
 }
 
 async function onCancel(): Promise<void> {
-  // N06/R06：先送达取消请求（服务端记 cancelled），再断开本地流 —— 次序反了会被记成 interrupted
+  // 先送达取消请求（服务端记 cancelled），再断开本地流 —— 次序反了会被记成 interrupted
   if (session.currentId && store.runId) {
     try {
       await Promise.race([
@@ -733,7 +733,7 @@ function onRename(id: string, title: string): void {
 }
 
 function onDelete(id: string, title: string): void {
-  // N20/R12：按会话**实际**活跃状态拦截，不按当前选中页判断
+  // 按会话**实际**活跃状态拦截，不按当前选中页判断
   if (store.inputLocked && liveConvId === id) {
     window.alert('该会话正在执行任务，请先停止再删除。');
     return;
@@ -744,16 +744,16 @@ function onDelete(id: string, title: string): void {
 }
 
 function onPickRoom(q: string): void {
-  // F29：房间点击只回填草稿，不自动发送
+  // 房间点击只回填草稿，不自动发送
   draft.value = q;
 }
 
-// ---- 轮次操作：删除本轮 / 回档 / 修改（0.6.0）----
+// ---- 轮次操作：删除本轮 / 回档 / 修改 ----
 const rounds = computed<Round[]>(() => session.currentRounds);
 /** 操作结果横幅：回档/删除之后必须让用户看到"到底发生了什么"，而不是只弹一个"成功" */
 const roundNotice = ref<{ tone: 'ok' | 'warn' | 'danger'; lines: string[] } | null>(null);
 
-// ---- 顶部提示自动收起（2026-11-11 用户反馈）----
+// ---- 顶部提示自动收起 ----
 // 回档结果、断线回查结果都是"过程提示"，不该一直占着会话顶部。
 // 成功类 6 秒后自动消失；失败/危险提示保留，等用户手动关闭。
 let roundNoticeTimer: number | null = null;
@@ -845,7 +845,7 @@ function onDeleteRound(r: Round): void {
       ? { tone: 'ok', lines: [`已删除第 ${index} 轮（移除 ${res.removedCount ?? 0} 条消息）。`, ...effectsLines(res.effects)] }
       : { tone: 'danger', lines: [res.message ?? '删除失败'] };
     if (res.ok) void loadTasks();
-    // 消息变短后原来的 scrollTop 可能悬在中间，重新贴底
+    // 消息变短后原有 scrollTop 可能悬在中间，重新贴底
     if (res.ok) void nextTick().then(jumpToBottom);
   })();
 }
@@ -906,7 +906,7 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
       @task="openTask" @rooms="toggleRooms(!roomsOpen)" @actor="switchRole" @close="navOpen=false" @logout="logout"
       @settings="settingsOpen=true" />
     <SettingsDialog :open="settingsOpen" :task-mode="(session.currentId?convMode:draftMode)!=='chat'" @close="closeSettings" @logout="settingsOpen=false;logout()" @edition="switchEdition('mobile',session.currentId?{view:'conversation',conversationId:session.currentId}:{view:'assistant'})"/>
-    <!-- T7：命令面板挂在根级，快捷键入口只有它自己一个 -->
+    <!-- 命令面板挂在根级，快捷键入口只有它自己一个 -->
     <CommandPalette :context="commandContext" />
     <div v-if="navOpen" class="nav__mask" @click="navOpen = false"></div>
 
@@ -923,7 +923,7 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
         <button type="button" class="chat__noticedismiss" :aria-label="tr('关闭提示')" :title="tr('关闭')" @click="roundNotice = null">✕</button>
       </div>
 
-      <!-- T5：断线回查状态（细线一行，只为让用户知道"系统在做什么"） -->
+      <!-- 断线回查状态（细线一行，只为让用户知道"系统在做什么"） -->
       <p v-if="recoverNotice" class="chat__recover" role="status">
         {{ recoverNotice }}
         <button type="button" class="chat__recoverdismiss" :aria-label="tr('关闭提示')" @click="recoverNotice = null">✕</button>
@@ -1024,7 +1024,7 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
       </template>
     </main>
 
-    <!-- 右侧：房间清单 / 办理单（PC-2 互斥共用同一停靠轨道） -->
+    <!-- 右侧：房间清单 / 办理单（互斥共用同一停靠轨道） -->
     <aside class="side" :class="{ 'side--collapsed': !roomsOpen }" :aria-label="tr(sideView === 'plan' ? '办理单' : '实验室房间')">
       <template v-if="roomsOpen">
         <header class="side__head">
@@ -1059,7 +1059,7 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
       </template>
     </aside>
 
-    <!-- 回档/修改已改为气泡内联（InlineRoundEditor，见 ChatMessage），不再使用居中弹窗 -->
+    <!-- 回档/修改使用气泡内联编辑器（InlineRoundEditor，见 ChatMessage） -->
   </div>
 </template>
 
@@ -1078,12 +1078,12 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
 
 .nav__mask{display:none}
 @media(max-width:900px){.nav__mask{display:block;position:fixed;inset:0;background:#0005;z-index:30}}
-/* PC-2：右栏 tab 组与"定位高亮" */
+/* 右栏 tab 组与"定位高亮" */
 .side__tabs{display:inline-flex;border:1px solid var(--border);border-radius:999px;overflow:hidden}
 .side__tabs button{border:0;background:var(--surface-2);color:var(--text-muted);font-size:calc(var(--ui-font-size) * 0.84615);padding:3px 12px;cursor:pointer}
 .side__tabs button.is-on{background:var(--primary);color:var(--primary-contrast)}
 .chat__msgs .msg.is-located{outline:2px solid var(--primary);outline-offset:4px;border-radius:8px;transition:outline-color .3s}
-/* PC-3 微动效：卡片 hover 提亮 + 微浮（仅真 hover 设备，触屏自动禁用） */
+/* 微动效：卡片 hover 提亮 + 微浮（仅真 hover 设备，触屏自动禁用） */
 @media (hover: hover) {
   .chat__msgs .native-card:hover,
   .chat__msgs .res:hover {
@@ -1092,7 +1092,7 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
     transition: background 0.12s ease-out, transform 0.12s ease-out;
   }
 }
-/* PC-3 弹层开关淡入缩放 */
+/* 弹层开关淡入缩放 */
 .sidebar-account-menu,
 .sidebar-row-menu {
   animation: pc-pop 0.16s ease-out;
@@ -1183,7 +1183,7 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* A10：给居中的模式开关留出空间，长标题截断而不压到控件下面 */
+  /* 给居中的模式开关留出空间，长标题截断而不压到控件下面 */
   max-width: min(38%, 420px);
 }
 .chat__count {
@@ -1191,7 +1191,7 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
   color: var(--text-faint);
   flex: 0 0 auto;
 }
-/* A10：会话模式开关——主区顶部水平中央、左右分栏（左=工作，右=聊天），醒目切换 */
+/* 会话模式开关——主区顶部水平中央、左右分栏（左=工作，右=聊天），醒目切换 */
 .mode-switch {
   position: absolute;
   left: 50%;
@@ -1256,7 +1256,7 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
   font-size: calc(var(--ui-font-size) * 0.92308);
   color: var(--danger);
 }
-/* 消息区独立滚动：输入栏在布局内，不悬浮遮挡内容（F26） */
+/* 消息区独立滚动：输入栏在布局内，不悬浮遮挡内容 */
 .chat__msgs {
   flex: 1;
   overflow-y: auto;
@@ -1266,10 +1266,10 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
   padding: var(--sp-2) 2px var(--sp-4);
   min-height: 0;
 }
-/* PC-3 阅读宽度分级：正文文本列收窄（约中文 62 字/行，降低长答案阅读疲劳），
+/* 阅读宽度分级：正文文本列收窄（约中文 62 字/行，降低长答案阅读疲劳），
    结构化卡片/提案卡仍可占满 --chat-max（卡片需要宽度）。 */
-/* 正文列：MarkdownText 渲染为 .safe-markdown（GPT 重构后的正文包装），
-   历史遗留的 .msg__text 一并覆盖，双保险 */
+/* 正文列：MarkdownText 渲染为 .safe-markdown，
+   同时覆盖 .msg__text，双保险 */
 /* :deep() —— safe-markdown 是 MarkdownText 子组件根，scoped 选择器须穿透才能命中 */
 .chat__msgs :deep(.msg--assistant .safe-markdown),
 .chat__msgs .msg__text,
@@ -1334,7 +1334,7 @@ async function afterRoundRewind(payload: { userMessageId: string; revertEffects:
   border-left-color: var(--danger);
   color: var(--danger);
 }
-/* T5 断线回查状态行：一条细线，不抢正文注意力 */
+/* 断线回查状态行：一条细线，不抢正文注意力 */
 .chat__recover {
   display: flex;
   align-items: center;

@@ -1,13 +1,13 @@
 /**
- * 生产写回适配器（整合方案 §8.5 P0-b/P0-c，2026-11-09）
+ * 生产写回适配器
  * ============================================================================
  *  沙盒网关的隔离设计保留（防双写；biz_* 仍是本地台账与审计），
  *  这里在**本地提交成功之后**为已接通主系统端点的动作补一次真实写回：
  *   · 未连接主系统时不出网，回执如实标"仅沙盒记录"。
  *   · requestId 用 operationId（确定性）；主系统按 requestId+发布人去重，
  *     网络重试或重复提交不会把同一条通知发两次。
- *   · 失败绝不冒充成功：回执保持 sandbox 并在 deliveryNote 写明原因。
- *  先只接 notification.publish；其余动作按批 B 逐条验证端点后再接。
+ *   · 失败绝不记为成功：回执保持 sandbox 并在 deliveryNote 写明原因。
+ *  目前只接 notification.publish；其余动作需逐个验证主系统端点后再接入。
  */
 import { businessRequest, isBusinessConnected } from '../business/bridge.ts';
 import { normalizeNoticeAudience } from '../tools/business.ts';

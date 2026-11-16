@@ -1,7 +1,7 @@
 /**
- * 轮次操作测试 —— 删除本轮 / 回档到本轮发起前 / 业务写入补偿（0.6.0）
+ * 轮次操作测试 —— 删除本轮 / 回档到本轮发起前 / 业务写入补偿
  * ============================================================================
- *  独立临时库（R25-lite 约定）：LABOPS_DB_PATH 必须在任何 db 导入之前设置。
+ *  独立库（与其余测试文件同一约定）：LABOPS_DB_PATH 必须在任何 db 导入之前设置。
  *  覆盖的是**语义**，不依赖模型：轮次消息由 createMessageWithRun + finalizeAssistantMessage
  *  直接落库（与真实运行完全同一条写入路径），沙盒回执由 insertOpsOperation 直接落库
  *  （与 gateway + executor 产出同形）。
@@ -40,7 +40,7 @@ const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 
 const actor = { id: 'demo-round-actor', role: 'admin' as const, label: '演示管理员' };
 
-/** 演示会话：先要一次 /api/health 之外的受保护请求拿到 cookie，再带着它调新接口 */
+/** demo 会话：先要一次 /api/health 之外的受保护请求拿到 cookie，再带着它调新接口 */
 async function demoClient(): Promise<(url: string, body?: unknown, method?: string) => Promise<{ status: number; data: any }>> {
   const boot = await fetch(base + '/api/conversations');
   const cookie = boot.headers.get('set-cookie')!.split(';')[0]!;
@@ -369,7 +369,7 @@ test('A8 模式可切换：非空会话 PATCH 立即生效；同模式幂等；�
   assert.equal((await request(`/api/conversations/${fresh}`, { mode: 'chat' }, 'PATCH')).status, 200);
   assert.equal((await request(`/api/conversations/${fresh}`)).data.mode, 'chat');
 
-  // A8（2026-10-31 用户要求）：有对话的会话也能切换——模式随发送时刻生效，
+  // 有对话的会话也能切换——模式随发送时刻生效，
   // 历史消息保持其发生时的语义；chat→task、task→chat 双向都允许。
   const chat = await newConversation(request, 'chat');
   seedRound(chat, '随便聊聊', '聊完了', { labName: null, date: null, task: null });

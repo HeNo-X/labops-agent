@@ -1,11 +1,11 @@
 /**
- * ops.v1 业务操作契约 —— 提案 / 决策 / 回执 / 任务（任务书 §9–§11 最小实现版）
+ * ops.v1 业务操作契约 —— 提案 / 决策 / 回执 / 任务
  * ============================================================================
- *  定位（任务书 §2.3 三层交付）：本轮交付第 1–2 层 —— 快照 + Agent 自有存储的分析
- *  与草稿能力，以及**独立业务沙盒**的真实执行链路（创建 → 确认 → 执行 → 回执）。
- *  与 GPT 任务书的有意偏离（按本项目现状调整，README 记录）：
- *   · 身份：老系统无登录体系可复用 → 沙盒演示身份（三角色），服务端注入，
- *     前端仅可在沙盒内切换演示视角；模型参数里的任何身份字段一律不采信。
+ *  定位：快照 + Agent 自有存储的分析与草稿能力，以及**独立业务沙盒**的真实执行链路
+ *  （创建 → 确认 → 执行 → 回执）。
+ *  与通用设计的有意偏离（按本项目现状调整）：
+ *   · 身份：主系统无登录体系可复用 → 沙盒身份（三角色），服务端注入，
+ *     前端仅可在沙盒内切换视角；模型参数里的任何身份字段一律不采信。
  *   · roomId：直接采用数据集房间号（E310 等），与现有 3 个只读工具同一口径。
  *   · 值班：沙盒无排班实体 → start 以 roomId 建会话、handover 由用户逐项
  *     确认检查清单（服务端只存用户提交的清单，模型不得代填现场事实）。
@@ -19,10 +19,10 @@ import type { DataSourceType } from './types.ts';
 //  基础枚举
 // ===========================================================================
 
-/** 执行环境：draft=仅草稿未执行；sandbox=独立业务沙盒；production=真实业务（本轮未接入） */
+/** 执行环境：draft=仅草稿未执行；sandbox=独立业务沙盒；production=真实业务（尚未接入） */
 export type ExecutionEnvironment = 'draft' | 'sandbox' | 'production';
 
-/** 任务状态（任务书 §9.2 的本轮子集：单步沙盒操作立即终态，无 queued/running 停留） */
+/** 任务状态（当前子集：单步沙盒操作立即终态，无 queued/running 停留） */
 export type TaskStatus =
   | 'awaiting_confirmation'
   | 'completed'
@@ -44,7 +44,7 @@ export type ProposalState = 'awaiting_confirmation' | 'executed' | 'rejected' | 
 /** 业务对象种类（回执 objects[].kind） */
 export type ObjectKind = 'issue' | 'notification' | 'closure' | 'duty_session' | 'report' | 'room_status';
 
-/** 沙盒演示身份。role 决定能力集合（§7.2 权限模型的最小版） */
+/** 沙盒身份。role 决定能力集合（权限模型的最小版） */
 export type SandboxRole = 'admin' | 'volunteer' | 'student';
 
 export interface SandboxActor {
@@ -76,7 +76,7 @@ export interface EffectPreview {
 /**
  * 提案 = 一次可确认的业务计划。**实际业务参数只存在于服务端持久化的
  * payload 里**（见 operations 层）；决策请求只允许提交 ID + 版本 + 决定，
- * 前端不可能夹带一份不同的房间或收件人名单（任务书 §9.3）。
+ * 前端不可能夹带一份不同的房间或收件人名单。
  */
 export interface Proposal {
   proposalId: string;
@@ -125,7 +125,7 @@ export interface ObjectRef {
 
 /**
  * 沙盒回执。业务事实以这里的 operationId + objects 为准；
- * 聊天里的任何文字（包括"已完成"）都不构成凭据（任务书 §5.4）。
+ * 聊天里的任何文字（包括"已完成"）都不构成凭据。
  */
 export interface OperationReceipt {
   ok: true;
@@ -210,7 +210,7 @@ export interface NeedConfirmPayload {
   allowedDecisions: Array<'confirm' | 'reject'>;
 }
 
-/** task_updated：任务状态变化（本轮由决策 REST 端点驱动，SSE 侧登记备用） */
+/** task_updated：任务状态变化（由决策 REST 端点驱动，SSE 侧登记备用） */
 export interface TaskUpdatedPayload {
   taskId: string;
   status: TaskStatus;
@@ -219,7 +219,7 @@ export interface TaskUpdatedPayload {
   operationId: string | null;
 }
 
-/** operation_result：一次业务副作用的结果（SSE 侧登记备用；本轮经 REST 返回） */
+/** operation_result：一次业务副作用的结果（SSE 侧登记备用；经 REST 返回） */
 export interface OperationResultPayload {
   taskId: string;
   operationId: string;

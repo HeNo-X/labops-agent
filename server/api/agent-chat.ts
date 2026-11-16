@@ -1,7 +1,7 @@
 /**
  * POST /api/agent/chat —— SSE 事件流
  * ============================================================================
- *  协议（B3：先在文档里定死，前后端按同一份实现）：
+ *  协议（前后端按同一份实现）：
  *    Content-Type: text/event-stream
  *    每条事件形如：
  *      event: <type>
@@ -104,7 +104,7 @@ export async function handleAgentChat(req: IncomingMessage, res: ServerResponse)
   sseHeaders(res);
 
   const ac = new AbortController();
-  // F03：客户端断开要在**两个对象**上监听 —— 请求体早已读完，
+  // 客户端断开要在**两个对象**上监听 —— 请求体早已读完，
   // req 的 close 不一定代表响应连接断开；res 的 close 才是 SSE 断开的可靠信号。
   // 任一触发都中止 Agent 循环与进行中的模型请求（不烧 token、不产生新事件）。
   let aborted = false;
@@ -125,7 +125,7 @@ export async function handleAgentChat(req: IncomingMessage, res: ServerResponse)
   // 但也要带上 seq（取已发出事件的下一个值），否则前端的去重/排序判断会踩到 undefined。
   let lastSeq = -1;
 
-  // 第二片：旧兼容入口也过同一把全局闸门，否则并发上限可被它绕过
+  // 兼容入口也要过同一把全局闸门，否则并发上限可被它绕过
   let runSlot: RunSlot | null = null;
   try {
     runSlot = await acquireRunSlot({

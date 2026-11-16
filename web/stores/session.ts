@@ -3,11 +3,11 @@ import {auth} from '../auth/bootstrap';import {actorRole} from '../actor';
 import {responseError} from '../http';
 import { actorHeaders } from '../actor';
 /**
- * 会话 store —— 持久化会话与连续消息（M1/M2，F01·F08·F23）
+ * 会话 store —— 持久化会话与连续消息
  * ============================================================================
  *  · 服务端是历史权威：列表/消息全部来自 /api/conversations*
- *  · 消息按会话累积：新一轮提问追加 user + assistant 占位，绝不覆盖上一轮（F01）
- *  · currentId 存 sessionStorage：同源多标签页各自持有当前会话（F08）
+ *  · 消息按会话累积：新一轮提问追加 user + assistant 占位，绝不覆盖上一轮
+ *  · currentId 存 sessionStorage：同源多标签页各自持有当前会话
  *  · 活跃轮的渲染仍由 run store 驱动；流结束（finishRun）时由 App 提交为本 store
  *    的一条 assistant 消息，成为历史的一部分
  */
@@ -51,9 +51,9 @@ export interface ChatMessage {
   model?: string | null;
   sourceType?: string | null;
   ms?: number;
-  /** A6：provider 上报的真实 token 用量（run_completed.usage 落库进 meta）；拿不到为 null，不估数冒充 */
+  /** provider 上报的 token 用量（run_completed.usage 落库进 meta）；拿不到为 null，不做估算 */
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
-  /** A5：该轮最后登记的任务计划（meta.plan）；没有登记过就是 null */
+  /** 该轮最后登记的任务计划（meta.plan）；没有登记过就是 null */
   plan?: TaskPlanStep[] | null;
   error?: { code: string; message: string; hint?: string } | null;
   responseMode?: 'chat'|'task';
@@ -137,7 +137,7 @@ export const useSessionStore = defineStore('session', () => {
   const listLoading = ref(false);
   const listError = ref<string | null>(null);
   const messagesLoading = ref(false);
-  // R11：加载/错误状态按会话隔离 —— A 的失败不得显示在 B 上
+  // 加载/错误状态按会话隔离 —— A 的失败不得显示在 B 上
   const messagesErrors = ref<Record<string, string>>({});
   const loadGen = new Map<string, number>();
   let epoch=0,listGeneration=0;
@@ -146,7 +146,7 @@ export const useSessionStore = defineStore('session', () => {
   function clearPrivate(){epoch++;listGeneration++;for(const c of requests.values())c.abort();requests.clear();syncCursors.clear();loadGen.clear();messages.value={};conversations.value=[];messagesErrors.value={};convModes.value={};drafts.value={};try{for(let i=sessionStorage.length-1;i>=0;i--){const key=sessionStorage.key(i);if(key?.startsWith('labops.chat-drafts:'))sessionStorage.removeItem(key);}}catch{}activeRuns.value={};saveCurrentId(null);}
 
 
-  /** 当前会话的加载错误（R11：从当前实体派生，而不是全局单槽） */
+  /** 当前会话的加载错误（从当前实体派生，而不是全局单槽） */
   const currentMessagesError = computed<string | null>(() =>
     currentId.value ? messagesErrors.value[currentId.value] ?? null : null
   );
@@ -176,7 +176,7 @@ export const useSessionStore = defineStore('session', () => {
     if (c) c.mode = mode;
   }
 
-  // ---- 每标签页独立的当前会话（F08）----
+  // ---- 每标签页独立的当前会话 ----
   function loadCurrentId(): string | null {
     try {
       currentId.value = sessionStorage.getItem('labops.conv');
@@ -221,7 +221,7 @@ export const useSessionStore = defineStore('session', () => {
     }
   }
 
-  // N21：草稿按会话保存
+  // 草稿按会话保存
   const drafts = ref<Record<string, string>>({});
   function draftKey(){const profile=auth.profile.value;return 'labops.chat-drafts:'+(profile?profile.identity+':'+profile.username:'demo:'+actorRole()+':'+(sessionStorage.getItem('labops.auth')||''));}
   function draftFor(key: string): string {
@@ -292,7 +292,7 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   /**
-   * R04/C06：run_accepted 到达 —— 临时 ID 对齐服务端正式 ID。
+   * run_accepted 到达 —— 临时 ID 对齐服务端正式 ID。
    * 同一消息实体只换身份，不换引用，活跃流的更新不中断。
    */
   function adoptIds(convId: string, clientRequestId: string, clientRunId: string, userMessageId: string, assistantMessageId: string): void {
@@ -335,7 +335,7 @@ export const useSessionStore = defineStore('session', () => {
 
   /**
    * 删除本轮 / 回档 —— 两者共用一条"服务端权威 → 本地缓存整体重建"的收敛路径。
-   * ⚠️ 不能只调 openConversation：R04 的合并策略是"本地已有优先"，
+   * ⚠️ 不能只调 openConversation：合并策略是"本地已有优先"，
    * 服务端删掉的消息会被本地缓存原样保留，界面看起来"删了又回来"。
    * 所以先把该会话的本地缓存清空，再以服务端结果重建。
    */
@@ -379,8 +379,7 @@ export const useSessionStore = defineStore('session', () => {
     });
   }
 
-  // A8（2026-10-31 用户要求）：恢复会话模式切换——服务端锁定已解除，模式随
-  // 发送时刻生效，历史消息语义不变。改名照常走 renameConversation。
+  // 会话模式切换：模式随发送时刻生效，历史消息语义不变。改名照常走 renameConversation。
   async function renameConversation(id: string, title: string): Promise<void> {
     const response=await clientFetch(`/api/conversations/${encodeURIComponent(id)}`, {
       method: 'PATCH',

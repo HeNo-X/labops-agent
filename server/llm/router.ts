@@ -1,5 +1,5 @@
 /**
- * 大模型分流（2026-10-05 按负责人要求新增）
+ * 大模型分流
  * ============================================================================
  *  规则：**聊天模式**走阿里 DashScope（多模型按顺序 fallback）；
  *        **任务模式（工作模式）**走 Agnes。
@@ -8,14 +8,14 @@
  *    复用 server/llm/agnes.ts 的同一套客户端，仅覆盖 baseUrl / apiKey / model。
  *  · fallback 语义：链上任何一个模型**在吐出任何内容之前**失败（鉴权/模型不存在/超时/5xx），
  *    就换下一个；**一旦已经开始输出内容就不再换**（否则会把半截回答再答一遍，结果错乱）。
- *  · 未配置时返回空数组 → 上层按既有的 demo 规则引擎兜底，不会静默假装用了大模型。
+ *  · 未配置时返回空数组 → 上层由服务端规则引擎兜底，并在回答中明确标注未调用大模型。
  */
 import { getConfig } from '../config.ts';
 import { selectableProviders, recordFailure, recordSuccess, circuitStatus } from './circuit.ts';
 import { streamChat, AgnesError, type AgnesStreamEvent, type StreamOptions } from './agnes.ts';
 import type { Logger } from '../obs/trace.ts';
 
-/** 提供方标识。`dashscope/agnes` 是主链，`bigmodel/xfyun` 是 2026-10-31 新增的备用链。 */
+/** 提供方标识。`dashscope/agnes` 是主链，`bigmodel/xfyun` 是备用链。 */
 export type ProviderName = 'dashscope' | 'agnes' | 'bigmodel' | 'xfyun';
 
 export interface LlmProviderSpec {
@@ -38,7 +38,7 @@ function fallbackSpecs(role: 'chat' | 'task'): LlmProviderSpec[] {
   const spark = (model: string): LlmProviderSpec[] =>
     c.xfyun.apiKey ? [{ name: 'xfyun', apiKey: c.xfyun.apiKey, baseUrl: c.xfyun.baseUrl, model }] : [];
   // 去重：任务链里 spark(taskModel) 与 spark(chatModel) 可能是同一个模型
-  // （现实里常见——比如 4b 那个没额度、两个槽位都指向同一个可用模型），
+  // （两个槽位可能指向同一个可用模型），
   // 不去重就会对同一个端点连续打两次，白白多消耗一次失败/一次配额。
   const merged = role === 'chat' ? [...big, ...spark(c.xfyun.chatModel)] : [...spark(c.xfyun.taskModel), ...big, ...spark(c.xfyun.chatModel)];
   const seen = new Set<string>();
@@ -53,7 +53,7 @@ function fallbackSpecs(role: 'chat' | 'task'): LlmProviderSpec[] {
 /**
  * 按会话模式给出**按调用顺序**排列的提供方/模型链；未配置返回空数组。
  *
- * 2026-10-31 起是"主链 + 备用链"：
+ * 链路是"主链 + 备用链"：
  *   chat：DashScope 五模型 → BigModel(glm-4.7-flash) → 星火(spark-x2.6-4b)
  *   task：Agnes → 星火(spark-x2.6，第一备用) → BigModel → 星火(spark-x2.6-4b)
  * 两条链仍然**互不串用**：chat 链里永远不会出现 agnes，task 链的第一位永远是 agnes（配了 Key 时）。
@@ -70,7 +70,7 @@ export function providersForMode(mode: 'chat' | 'task'): LlmProviderSpec[] {
         }))
       : [];
     const chain = [...primary, ...fallbackSpecs('chat')];
-    // 2026-11-14 用户口径：聊天链里原来的 qwen3.8-flash 位换成星火 spark-x2.6
+    // 聊天链里 qwen3.8-flash 的位置由星火 spark-x2.6 承担
     if (c.xfyun.apiKey) {
       const idx = chain.findIndex((p) => /^qwen-?3\.8-?flash$/i.test(p.model));
       if (idx >= 0) {
@@ -81,17 +81,17 @@ export function providersForMode(mode: 'chat' | 'task'): LlmProviderSpec[] {
   }
 
   /**
-   * 2026-11-09 用户口径：工作模式改为 **spark → glm → agnes**（agnes 实测单次首字
-   * 35~47s，spark 约 4s、glm 约 1s，先让它顶上去）。
-   * 仍然**不串用聊天链模型**：这里只用 task 链的 spark 槽位 + bigmodel + agnes。
-   * 顺序可用 TASK_CHAIN_ORDER 覆盖（如 "agnes,spark,glm" 一键回到旧口径）。
+   * 工作模式顺序默认 **qwen → spark → glm → agnes**（agnes 单次首字约 35~47s，
+   * spark 约 4s、glm 约 1s，因此后置）。
+   * 除下面显式声明的 qwen 槽位外，不串用聊天链模型。
+   * 顺序可用 TASK_CHAIN_ORDER 覆盖。
    */
   const order = (process.env['TASK_CHAIN_ORDER'] ?? 'qwen,spark,glm,agnes')
     .split(',')
     .map((v) => v.trim().toLowerCase())
     .filter(Boolean);
     const byName: Record<string, LlmProviderSpec | null> = {
-      // 2026-11-14 用户口径：工作模式首位改为 qwen3.8-flash（它返回 reasoning_content，
+      // 工作模式首位用 qwen3.8-flash（它返回 reasoning_content，
       // 展示时能同时看到思维链与工具调用）；这是**有意**跨链取用聊天链的 dashscope 端点。
       qwen: c.dashscope.apiKey ? {
         name: CHAT_ENGINE as ProviderName,
@@ -113,7 +113,7 @@ export function providersForMode(mode: 'chat' | 'task'): LlmProviderSpec[] {
     seenChain.add(id);
     chain.push(spec);
   }
-  // 顺序表里没写到的提供方仍按旧备用链补齐（避免配置遗漏导致链变短）
+  // 顺序表里没写到的提供方仍按备用链补齐（避免配置遗漏导致链变短）
   for (const spec of fallbackSpecs('task')) {
     const id = `${spec.baseUrl}::${spec.model}`;
     if (seenChain.has(id)) continue;
@@ -165,7 +165,7 @@ export async function* streamChatWithFallback(
   mode: 'chat' | 'task',
   log?: Logger,
   onAttempt?: (spec: LlmProviderSpec) => void,
-  /** 方案B 多模型重答：从链上第 N 个模型开始（跳过前面已试错/答偏的） */
+  /** 多模型重答：从链上第 N 个模型开始（跳过前面已试错/答偏的） */
   startIndex = 0
 ): AsyncGenerator<AgnesStreamEvent> {
   const list = providersForMode(mode).slice(Math.max(0, startIndex));
@@ -208,9 +208,8 @@ export async function* streamChatWithFallback(
         // 也**不记熔断**：中途断流多半与本次回答有关，不该让该模型替后续所有请求背锅
         throw err;
       }
-      // A6：账号级配额/额度耗尽对链上**所有**模型同样生效——逐个换模型只会
-      // 白烧一遍（2026-10-30 实测 7 个模型全 403 AllocationQuota.FreeTierOnly）。
-      // 短路整条链并如实上报；记一次熔断让 /health 能看到该模型不可用。
+      // 账号级配额/额度耗尽对链上**所有**模型同样生效——逐个换模型只会
+      // 白烧一遍。短路整条链并如实上报；记一次熔断让 /health 能看到该模型不可用。
       if ((err as AgnesError)?.code === 'agnes_quota_exhausted') {
         recordFailure(provider);
         log?.warn('llm_quota_exhausted', { mode, provider: provider.name, model: provider.model });

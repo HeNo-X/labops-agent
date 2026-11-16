@@ -3,7 +3,7 @@ import { actorHeaders } from '../actor';
 import type { RunSnapshot } from '@shared/types';
 
 /**
- * 运行快照回查（只读）。断线后把一轮收敛到服务端真实终态，替代"请手工回查"。
+ * 运行快照回查（只读）。断线后把一轮收敛到服务端真实终态，无需用户手工回查。
  * ★ 只发 GET：恢复路径**绝不**重发原消息（消息本身的幂等由 clientRequestId 保证，
  *   但不该在恢复时试探性地重放请求）。
  */

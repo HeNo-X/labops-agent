@@ -1,15 +1,15 @@
 /**
- * 跨会话并发第二片 —— 全局 run 闸门（进程级并发上限 + FIFO 排队）
+ * 跨会话并发控制 —— 全局 run 闸门（进程级并发上限 + FIFO 排队）
  * ============================================================================
  * 设计边界（务必先看，避免重复造轮子）：
  *  · **同一会话互斥不归本模块管**：由 `persistence/db.ts` 的
  *    `createMessageWithRun` / `RunConflictError`（同会话 running → 409 run_conflict）
- *    与前端第一片（inputLocked 按会话、pending-input 队列）共同保证。
+ *    与前端（inputLocked 按会话、pending-input 队列）共同保证。
  *  · 本模块只回答一个问题：**同一进程最多允许几个 run 同时真的在跑**。
  *    超出上限时排队等待（不报错、不丢弃），避免并发把免费模型额度打爆。
  *  · run 的全部运行态仍是每请求局部（conversations.ts）；这里只登记
  *    `runId` 集合与等待队列，不持有任何执行上下文。
- *  · `AGENT_CONCURRENCY_GATE=0` 一键回退到接入前行为（完全不限流）。
+ *  · `AGENT_CONCURRENCY_GATE=0` 关闭闸门（完全不限流）。
  *
  * 队列纪律：FIFO、释放必走 `slot.release()`（调用方放在 finally 里）、
  * 客户端断开（AbortSignal）与等待超时都会把自己从队列里摘掉，绝不悬挂。
@@ -111,7 +111,7 @@ function grant(waiter: Waiter, track = true): void {
 function pump(): void {
   const cfg = runGateConfig();
   if (!cfg.enabled) {
-    // 一键回退：连已在队列里的也全部放行，且不再登记活跃名额
+    // 闸门关闭：连已在队列里的也全部放行，且不再登记活跃名额
     for (const waiter of waiting.splice(0)) grant(waiter, false);
     return;
   }

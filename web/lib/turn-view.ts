@@ -1,9 +1,9 @@
 /**
  * 轮次 render unit —— 把一轮的事件轨迹折叠成「可折叠的一段工作」
  * ============================================================================
- *  设计依据：正常完成的 segment 默认折叠成"已完成"（11-14 起不显示秒数），运行中 / 中断 / 失败
+ *  设计依据：正常完成的 segment 默认折叠成"已完成"（不显示秒数），运行中 / 中断 / 失败
  *  强制展开；冷恢复发现缺完成时间的轮次归一化为 interrupted（只显示"已停止"，
- *  **不带耗时**），绝不伪造"已完成"（R4）。
+ *  **不带耗时**），不把未知终态显示为"已完成"。
  *
  *  纯函数、无 Vue 依赖 —— 可直接单测。
  */
@@ -39,8 +39,6 @@ export interface BuildTurnUnitOptions {
   serverMs: number | null;
 }
 
-/** 秒数取整（向下），只在有服务端事实时才有数字 */
-
 export function buildTurnRenderUnit(steps: TraceStep[], opts: BuildTurnUnitOptions): TurnRenderUnit {
   const toolSteps = steps.filter((s) => s.kind === 'tool');
   const seen: string[] = [];
@@ -56,12 +54,12 @@ export function buildTurnRenderUnit(steps: TraceStep[], opts: BuildTurnUnitOptio
     // 运行中：有服务端耗时就用它累积（如取消前的已运行时间），没有就只说"工作中"
     workStatus = { state: 'running', label: '工作中' };
   } else if (interrupted) {
-    // 中断/取消：**不带耗时**（ZCode orphan 归一化口径）
+    // 中断/取消：**不带耗时**（孤儿轮归一化口径）
     workStatus = { state: 'interrupted', label: '已停止' };
   } else if (opts.serverMs !== null) {
     workStatus = { state: 'completed', label: '已完成' };
   } else {
-    // 终态缺完成时间（历史孤儿轮）→ interrupted，不得伪装成 completed
+    // 终态缺完成时间的孤儿轮 → interrupted，不得显示为 completed
     workStatus = { state: 'interrupted', label: '已停止' };
   }
 
@@ -79,12 +77,12 @@ export function buildTurnRenderUnit(steps: TraceStep[], opts: BuildTurnUnitOptio
 export function shouldForceExpand(unit: TurnRenderUnit): boolean {
   if (unit.workStatus.state !== 'completed') return true;
   if (unit.hasFailure) return true;
-  // 2026-11-14 用户要求：思维链与工具过程是展示重点，有思考步骤时默认展开
+  // 思维链与工具过程是展示重点，有思考步骤时默认展开
   return (unit.steps || []).some((s) => s.kind === 'thinking');
 }
 
 /**
- * 工具的中文展示名 —— **全仓唯一事实源**（此前 run.ts 与 ChatMessage.vue 各一份）。
+ * 工具的中文展示名 —— **全仓唯一事实源**。
  * 这是类别名（"课表查询"式），不是动作名；动作名由 tool-display.ts 的 family 提供。
  */
 const TOOL_TITLES: Record<string, string> = {

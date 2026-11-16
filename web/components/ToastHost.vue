@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Toast 宿主（批次 A）—— 渲染 feedback.ts 中的瞬态提示。
+ * Toast 宿主 —— 渲染 feedback.ts 中的瞬态提示。
  * 样式在 mobile.css（.m-toast-wrap / .m-toast）；动画遵守 reduced-motion。
  */
 import { useFeedback } from '../mobile/feedback';

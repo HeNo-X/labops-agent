@@ -2,12 +2,12 @@
 /**
  * 定时任务面板（兼容壳）
  * ============================================================================
- *  对外**保持原有 props / emits 完全不变**，内部换成重构后的 AutomationPanel。
+ *  对外 props / emits 与 AutomationPanel 对齐，内部渲染 AutomationPanel。
  *
- *  为什么这么做：本组件是 PC 与移动端**唯一的**自动挂载点 ——
+ *  本组件是 PC 与移动端**唯一的**自动挂载点：
  *    · PC ：components/AgentSidebar.vue  → <ScheduledJobsPanel :navigation :icon-only />
  *    · 移动：mobile/MobileApp.vue        → <ScheduledJobsPanel :inline :job-id />
- *  保持壳不变，两端都自动拿到新形态，且不可能出现"改了一端忘了另一端"。
+ *  两端因此共享同一套实现，不会出现"改了一端忘了另一端"。
  */
 import AutomationPanel from './automation/AutomationPanel.vue';
 import type { Target } from '@shared/labops-targets.js';

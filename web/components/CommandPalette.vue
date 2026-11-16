@@ -9,8 +9,8 @@ import {t as tr} from '../i18n';
  *  · `>` 限命令、`#` 限会话，可与 tab 叠加。
  *  · 键盘：↑↓ 移动、Enter 执行、Esc 关闭；关闭后焦点归还打开前的元素。
  *  · 无障碍：role=dialog + aria-modal；动效遵循 prefers-reduced-motion。
- *  · 快捷键冲突处置：原 AgentSidebar 的 Ctrl/Cmd+K 已上提到这里，
- *    "聚焦会话搜索"成为第一条建议命令 —— 不再有两个组件监听同一按键。
+ *  · 快捷键冲突处置：Ctrl/Cmd+K 只在这里监听，
+ *    "聚焦会话搜索"是第一条建议命令，不会有两个组件监听同一按键。
  */
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { Command, CommandContext, CommandScope } from '../lib/command-registry';

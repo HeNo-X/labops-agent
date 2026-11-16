@@ -1,8 +1,8 @@
 /**
- * 【批3 归档定位（2026-11-11）】本模块实现段落级混合召回（CJK 双字 BM25 + 关键词），RRF 融合。
+ * 本模块实现段落级混合召回（CJK 双字 BM25 + 关键词），RRF 融合。
  *  当前语料仅 3049 字——知识检索**默认走全量注入**（KNOWLEDGE_FULL_INJECT 缺省开），
- *  本模块处于**归档维护态**：测试与回退口径仍可用（KNOWLEDGE_FULL_INJECT=0 启用），
- *  语料增长到数万字前不要在生产启用检索路径（复杂度必须与数据规模匹配）。
+ *  本模块保留为可配置分支：KNOWLEDGE_FULL_INJECT=0 时参与检索链路；
+ *  语料增长到数万字前不在生产启用检索路径（复杂度必须与数据规模匹配）。
  */
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
@@ -11,13 +11,13 @@ import type { KnowledgeDocument } from './knowledge.ts';
 /**
  * 知识检索 —— 段落级混合召回（CJK 双字 BM25 + 关键词），RRF 融合。
  * ============================================================================
- *  为什么不是"直接上 FTS5 默认分词"：实测 unicode61 把整段中文当成**一个** token，
+ *  为什么不是"直接上 FTS5 默认分词"：unicode61 把整段中文当成**一个** token，
  *  任何中文查询都命中 0 条；trigram 能命中 3 字以上，但两字中文词（"调课""钥匙"）
  *  照样漏。中文可用的零依赖方案是把文本切成**相邻双字**再交给 unicode61，
  *  这样 BM25 的字段长度归一与逆文档频率才真正作用在中文语料上。
  *
  *  两路召回再融合，而不是二选一：
- *   · 关键词路（原有能力）擅长"命中了哪个受控词"，短词精准；
+ *   · 关键词路擅长"命中了哪个受控词"，短词精准；
  *   · BM25 路擅长长句与同义表述的段落级排序。
  *  RRF（Reciprocal Rank Fusion）只用名次不用原始分，避免两路量纲不同导致的偏置。
  *
@@ -31,7 +31,7 @@ export interface ScoredChunk {
   index: number;
   text: string;
   score: number;
-  /** 召回来源，便于评测归因与界面展示"为什么是这段"（RAG 批次1 新增 vector 路） */
+  /** 召回来源，便于评测归因与界面展示"为什么是这段"（含 vector 路） */
   via: Array<'keyword' | 'bm25' | 'vector'>;
 }
 
@@ -39,11 +39,11 @@ export interface ScoredChunk {
  * 相邻**重叠**双字切分；ASCII/数字词保持完整。
  * "课程管理与值班" → 课程 程管 管理与…值 值班
  *
- * ⚠ 早先的实现是"当前字 + 更早那个字"，实测只产出非重叠对
- *   （"妈妈来了"→ 只有 "妈来"），导致文档里"值班"永远生成不出 bigram、
- *   BM25 路对奇数偏移的词稳定漏召回。这里按中文串整段生成，避免再犯。
+ * ⚠ 必须按中文串整段生成：若取"当前字 + 更早那个字"，只会得到非重叠对
+ *   （"妈妈来了"→ 只有 "妈来"），文档里"值班"生成不出 bigram，
+ *   BM25 路对奇数偏移的词稳定漏召回。
  * 字符类只列区间、不夹裸 `-`：`[一-鿿-]` 会被解析成字面连字符，
- *   曾把 "A-B学" 切出脏 token。
+ *   会把 "A-B学" 切出脏 token。
  */
 const CJK = /[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff]/;
 const LATIN = /[a-z0-9]/;
@@ -131,7 +131,7 @@ function bm25Recall(query: string, docs: KnowledgeDocument[], topN: number): Map
   return out;
 }
 
-/** 关键词路召回：沿用原有"命中受控词按词长加权"的判据，落到段落上 */
+/** 关键词路召回：命中受控词按词长加权，落到段落上 */
 function keywordRecall(query: string, docs: KnowledgeDocument[], topN: number): Map<string, number> {
   const q = query.toLowerCase();
   const scored: Array<{ key: string; score: number }> = [];
@@ -150,7 +150,7 @@ function keywordRecall(query: string, docs: KnowledgeDocument[], topN: number): 
   return out;
 }
 
-/** RRF：只用名次，k=60 为业界常用平滑值。RAG 批次1 起支持任意多路（关键词/BM25/向量） */
+/** RRF：只用名次，k=60 为业界常用平滑值。支持任意多路（关键词/BM25/向量） */
 function rrfMerge(...legs: Array<{ ranks: Map<string, number>; via: ScoredChunk['via'] }>): Map<string, { score: number; via: ScoredChunk['via'] }> {
   const merged = new Map<string, { score: number; via: ScoredChunk['via'] }>();
   for (const leg of legs) {
@@ -178,7 +178,7 @@ export function searchChunks(query: string, role: string, date: string, docs: Kn
   const eligible = eligibleDocs(docs, role, date);
   if (!eligible.length || !query.trim()) return [];
   const pool = eligible.length * 3;
-  // RAG 批次1：向量路按需并入（未启用/未建索引/调用失败传 null，退回两路，检索不因向量路失败而失败）
+  // 向量路按需并入（未启用/未建索引/调用失败传 null，退回两路，检索不因向量路失败而失败）
   const merged = vectorRanks && vectorRanks.size
     ? rrfMerge(
         { ranks: keywordRecall(query, eligible, pool), via: ['keyword'] },

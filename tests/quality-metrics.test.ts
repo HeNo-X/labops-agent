@@ -38,7 +38,7 @@ test('本轮无事实且无数字 → no-facts，不参与幻觉率统计（拒�
 });
 
 test('回归：hits 只含部分段落时，不得拿它当"文档总段数"误判越界', () => {
-  // 段落级检索改造后，hits.paragraphs 只带命中的 ≤4 段，locator 仍是原文序号
+  // 段落级检索下，hits.paragraphs 只带命中的 ≤4 段，locator 仍是原文序号
   const partial = [{ id: 'occupancy', paragraphs: [{ locator: '§2' }, { locator: '§5' }, { locator: '§7' }] }];
   // 不传真值：以命中段落最大 §N 为下界，§7 合法
   assert.equal(checkCitations('见 occupancy §7。', partial).bad.length, 0, '命中过的段落序号不得判越界');

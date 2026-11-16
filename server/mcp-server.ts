@@ -50,8 +50,8 @@ async function callTool(name: string, args: Record<string, unknown>) {
   }
   const role = mcpRole();
   try {
-    // ctx 必须与 HTTP 链路同构：原先缺 dataset，query_schedule / query_lab_status /
-    // query_free_rooms 一调即抛（实测 Cannot read properties of undefined (reading 'labs')）。
+    // ctx 必须与 HTTP 链路同构：缺 dataset 时 query_schedule / query_lab_status /
+    // query_free_rooms 一调即抛（Cannot read properties of undefined (reading 'labs')）。
     const dataset = await loadAuthorizedDataset();
     const d = args['date'];
     const now = isValidDateString(d) ? serverNow(new Date(d + 'T12:00:00+08:00')) : serverNow();

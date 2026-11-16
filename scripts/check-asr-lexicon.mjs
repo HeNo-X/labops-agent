@@ -2,18 +2,18 @@
  * npm run check:asr-lexicon -- <候选文件.json>
  * ============================================================================
  *  面板「导出待并入条目」产出的是一份**候选**表，不是成品：并进 shared/asr-glossary.json
- *  之前必须过一遍真校验，因为内置表是装载即自检的（loadGlossaryData 抛错 = 整个纠错层不生效），
+ *  合并前必须过一遍真校验，因为内置表是装载即自检的（loadGlossaryData 抛错 = 整个纠错层不生效），
  *  一条坏数据会让 148 条好数据一起下线。这个脚本就是那道门，也是"为什么被拒"的说明书。
  *
  *  它检查什么（每条都对应一种真实失效形状）：
  *    - 音节数与字数不等、音节含大写/数字 → 这个词永远匹配不上（装载即抛错）
  *    - 缺拼音 → 给出用内置表已确认读音推导的建议值；推不出来就明说必须人工补
- *    - canonical 已在内置表 → 该改成"给老词条加 aliases"，而不是新开一条
+ *    - canonical 已在内置表 → 应给已有词条补 aliases，而不是新开一条
  *    - aliases 撞别的 canonical → 矛盾表，validateGlossary 会整表拒绝
  *    - aliases / canonical 命中 protect 常用词 → 要么永不生效，要么误伤日常用语
  *    - 音节串与内置某条完全相同 → 同音歧义，合并后**两条都会被跳过**（合了等于没合）
  *
- *  最后一步是真跑：合并后的表丢给 loadGlossaryData()（临时文件，不落库），
+ *  最后一步是真跑：合并后的表丢给 loadGlossaryData()（写入系统 tmp 目录，不落库），
  *  过不了就是不能合，不做"看起来差不多"的判断。
  */
 import fs from 'node:fs';
@@ -116,7 +116,7 @@ for (const item of list) {
 }
 
 // 真跑一遍：合并后的表必须能过装载自检，这比任何人工判断都硬
-// 装载器不看 version（它只认 terms/protect），所以这里不编造版本号
+// 装载器不看 version（它只认 terms/protect），所以这里不填版本号
 const merged = {
   protect: builtIn.protect,
   terms: [

@@ -36,10 +36,10 @@ export function retrieveRanked(query:string,role:string,date:string,docs=documen
 }
 
 /**
- * RAG 批次1：三路混合检索（关键词 + BM25 + 向量）。
+ * 三路混合检索（关键词 + BM25 + 向量）。
  * 向量路是**锦上添花**：未启用（EMBEDDING_ENABLED=0）、无 Key、索引未建、
  * 维度不符、调用失败——任何一种情况都静默退回两路词法检索，检索本身绝不因
- * 向量路失败而失败。opts 供测试注入（假上游 / 确定性向量 / :memory: 库）。
+ * 向量路失败而失败。opts 供测试注入（替身上游 / 确定性向量 / :memory: 库）。
  */
 export interface HybridOptions {
   enabled?: boolean;
@@ -81,7 +81,7 @@ export async function runKnowledge(args:Record<string,unknown>,ctx:ToolContext):
   if(typeof args['query']!=='string'||!args['query'].trim())return {ok:false,code:'query_required',message:'请提供检索问题',suggestions:[],summary:'缺少检索问题'};
   if(isBusinessConnected()&&/手册|设备|厂家|维修|投影|铭牌/.test(args['query'])){
     try{const raw=await businessRequest('/evidence/manuals?q='+encodeURIComponent(args['query']));const manuals=raw['manuals'] as Array<{id:string;title:string;device:string;version:string;sourceUrl:string;importedAt:string;paragraphs:Array<{id:string;text:string}>}>;
-      // RAG 批次2：向量路对**主系统已返回**的手册段落排序（集合权威在主系统侧，
+      // 向量路对**主系统已返回**的手册段落排序（集合权威在主系统侧，
       // 权限在它那边过滤；排序失败保持原序，不影响可用性）
       if(manuals.length&&isEmbeddingEnabled()){
         try{
@@ -94,16 +94,16 @@ export async function runKnowledge(args:Record<string,unknown>,ctx:ToolContext):
     }catch(e){return {ok:false,code:'evidence_unavailable',message:(e as Error).message,suggestions:[],summary:'未取得有效设备资料'};}
   }
   // 角色必须经 effectiveRole：它取服务端核验的真实身份，客户端声明的角色不得提权
-  // RAG 全量注入（整合方案 P1-6，2026-11-10）：语料仅 3049 字，检索排序的收益为负，
-  // 改为把当前角色可见的全部有效文档整体交给模型，由系统提示的引用纪律带 [N] 出处脚注。
-  // 三路检索与 LLM 重排代码保留，KNOWLEDGE_FULL_INJECT=0 一键回退旧口径。
+  // 全量注入（KNOWLEDGE_FULL_INJECT 缺省开）：语料仅 3049 字，检索排序的收益为负，
+  // 因此把当前角色可见的全部有效文档整体交给模型，由系统提示的引用纪律带 [N] 出处脚注。
+  // 三路检索与 LLM 重排保留为可配置分支，KNOWLEDGE_FULL_INJECT=0 时启用。
   const effective=effectiveRole(ctx.actor?.role||'student');
   const fullInject=process.env.KNOWLEDGE_FULL_INJECT!=='0';
   let hits:RankedHit[];
   if(fullInject){
     hits=eligibleDocs(documents(),effective,ctx.now.date).map((doc)=>({doc,paragraphs:doc.paragraphs.map((text,i)=>({index:i+1,text})),via:['keyword' as const],score:0}));
   }else{
-    // RAG 批次1：检索走三路混合（向量路按配置静默启用/降级）；批次3：LLM 重排按配置启用（缺省关）
+    // 检索走三路混合（向量路按配置启用，失败静默降级）；LLM 重排按配置启用（缺省关）
     const retrieved=await retrieveHybrid(args['query'],effective,ctx.now.date);
     hits=await rerankHits(args['query'],retrieved,(ctx.mode??'task')==='chat'?'chat':'task',undefined,{signal:ctx.signal});
   }

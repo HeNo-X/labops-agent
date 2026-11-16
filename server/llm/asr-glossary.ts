@@ -5,7 +5,7 @@
  *    · Tier A（asr-lexicon.lexiconFromDataset）—— 从数据集自动来的**封闭集合**
  *      （房间号 / 班级名 / 课程名），只认字符编辑距离，长度门槛维持 ≥4。
  *    · Tier B（本文件）—— 人工维护的实验室通用词（器材 / 操作 / 节次 / 单据），
- *      每条自带**逐字无声调音节**，因此敢参与 2–3 字短词纠错（B3 落地）。
+ *      每条自带**逐字无声调音节**，因此可参与 2–3 字短词纠错。
  *
  *  为什么拼音是「数据」而不是「算法」：
  *    本项目零运行时依赖，不能引 pinyin 库。把音节随词条写死，既免依赖，
@@ -141,7 +141,7 @@ export function validateGlossary(terms: readonly GlossaryTerm[]): string[] {
 
   for (const [c, n] of seenCanonical) if (n > 1) problems.push(`${c}: 重复出现 ${n} 次`);
 
-  // 别名撞上别的标准词：改到一半可能把 A 的词面换成 B 的标准词，属于矛盾表，必须人工裁决
+  // 别名撞上别的标准词：改到一半可能把 A 的词面替换成 B 的标准词，属于矛盾表，必须人工裁决
   const canonSet = new Set(terms.map((t) => t.canonical));
   for (const t of terms) {
     for (const a of t.aliases) if (canonSet.has(a) && a !== t.canonical) {
@@ -391,7 +391,7 @@ export function buildContextText(terms: readonly GlossaryTerm[], opts: ContextTe
     const wantedLabel = `${item.label} `;
     const current = lines[lines.length - 1] ?? '';
     const next = current.startsWith(wantedLabel) ? [...lines.slice(0, -1), `${current} ${item.word}`] : [...lines, `${wantedLabel}${item.word}`];
-    // 以最终文本总长为唯一预算口径，不拿"词字数"冒充，避免出现"号称 1200 实际 1600"
+    // 以最终文本总长为唯一预算口径，不拿"词字数"代替，避免出现"号称 1200 实际 1600"
     if (!fits(next)) {
       omitted += 1;
       continue;

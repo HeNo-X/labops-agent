@@ -1,7 +1,7 @@
 /**
  * 测试替身：只替换 streamChat，用于验证 router 的**记账时机**。
- *  · CANCEL_STUB_MODE=cancel（默认）⇒ 抛 run_cancelled，模拟用户取消
- *  · CANCEL_STUB_MODE=upstream-500 ⇒ 抛可重试的上游错误，模拟真实故障
+ *  · CANCEL_STUB_MODE=cancel（默认）⇒ 抛 run_cancelled，表示用户取消
+ *  · CANCEL_STUB_MODE=upstream-500 ⇒ 抛可重试的上游错误，表示真实故障
  *
  * 刻意不 import server/llm/agnes.ts —— 本文件正是用来顶替它的，import 会绕回自己。
  * router 只按 `err.code` 判定，故用同名同形的轻量错误即可。

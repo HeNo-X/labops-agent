@@ -1,12 +1,11 @@
 /**
  * 实验室监控（vision）共享数据层
  * ============================================================================
- *  为什么要有它：移动端 MobileVision.vue 把「取数 + 轮询 + 探活 + 快照 URL」写在组件里，
- *  PC 若再写一遍，就会出现本次审计里点名的第 3 份分叉实现。
- *  这里把数据面抽出来，PC 现在用它；移动端后续可以迁过来（本次不改他人在制品）。
+ *  为什么要有它：取数 / 轮询 / 探活 / 快照 URL 需要 PC 与移动端共用，
+ *  各写一份就会出现分叉实现。这里把数据面抽出来，PC 直接使用。
  *
  *  数据全部来自本服务 /api/vision/*，未接入时 configured=false ——
- *  **界面必须给配置指引，不能拿 0 冒充"没人"**（视觉是线索不是结论）。
+ *  **界面必须给配置指引，不能把 0 当作"没人"**（视觉是线索不是结论）。
  */
 
 import { computed, ref } from 'vue';
@@ -33,7 +32,7 @@ export interface VisionLab {
   recognized: number | null;
   unknownFaces: number | null;
   library: VisionLibraryHit[];
-  /** v1 兼容：旧边缘端点的场景状态（10-30 后边缘不再产出占用语义） */
+  /** v1 兼容：v1 边缘端点的场景状态（当前边缘协议不再产出占用语义） */
   sceneState: string | null;
   sceneReason: string | null;
   alert: boolean;
@@ -48,11 +47,11 @@ export interface VisionEvent {
   count: number;
   recognized: number | null;
   library: VisionLibraryHit[];
-  /** v1 兼容：旧边缘端点的场景状态 */
+  /** v1 兼容：v1 边缘端点的场景状态 */
   sceneState: string | null;
   sceneReason: string | null;
   cameraOnline: boolean;
-  /** 人工核查回流（批C）：现场人员对该事件的误报/确认标注 */
+  /** 人工核查回流：现场人员对该事件的误报/确认标注 */
   feedback: { verdict: 'false_alarm' | 'confirmed'; by: string; at: string } | null;
 }
 
@@ -87,7 +86,7 @@ export function useVision(pollMs = 15_000) {
   const alertLabs = computed(() => labs.value.filter((lab) => lab.alert));
   const onlineCount = computed(() => labs.value.filter((lab) => lab.online).length);
   /**
-   * 只合计**在线**房间。离线房间的 count 是最后那次上报的旧值，
+   * 只合计**在线**房间。离线房间的 count 是最后那次上报的值，
    * 加进"合计"会让用户以为"现在一共有这么多人" —— 视觉是线索不是结论。
    */
   const totalCount = computed(() =>
@@ -134,7 +133,7 @@ export function useVision(pollMs = 15_000) {
     }
   }
 
-  /** 拓扑感知：只有本服务与 vision 同机/同内网时才返回可达，云端不造假画面 */
+  /** 拓扑感知：只有本服务与 vision 同机/同内网时才返回可达，云端不渲染不可达画面 */
   async function probeLive(): Promise<void> {
     try {
       const res = await clientFetch('/api/vision/live-probe');
@@ -165,14 +164,14 @@ export function useVision(pollMs = 15_000) {
     void refresh();
     void probeLive();
     // 探活必须随轮询持续重跑：只探一次的话，抽屉先开、Vision 会话后启动时
-    // liveAvailable 会永远停在 false，画面卡再也不出现（2026-11-07 实测踩过）
+    // liveAvailable 会永远停在 false，画面卡再也不出现
     timer = window.setInterval(() => {
       void refresh();
       void probeLive();
     }, pollMs);
   }
 
-  /** 人工核查回流：误报/确认标注（批C）。成功后本地事件立即更新，等下轮轮询对齐服务端 */
+  /** 人工核查回流：误报/确认标注。成功后本地事件立即更新，等下轮轮询对齐服务端 */
   async function sendFeedback(event: VisionEvent, verdict: VisionVerdict): Promise<boolean> {
     try {
       const res = await clientFetch('/api/vision/feedback', {

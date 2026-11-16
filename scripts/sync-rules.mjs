@@ -2,10 +2,9 @@ import fs from 'node:fs';
 /**
  * 共享契约镜像同步 —— 上游源双源解析
  * ============================================================================
- *  上游是主系统 Pages/lib/（工作区里两侧并存时以它为准，保持既有开发流程）；
- *  参赛仓库要求自包含，独立 clone 没有外层 Pages/ —— 这时回退到仓内
- *  vendor/pages/ 快照（收编时点的源副本）。SYNC_RULES_SOURCE=vendor 可强制
- *  走仓内源（用于验证独立 clone 语义）。
+ *  上游是主系统 Pages/lib/（工作区里两侧并存时以它为准）；
+ *  独立 clone 没有外层 Pages/ 时改用仓内 vendor/pages/ 快照（源副本）。
+ *  SYNC_RULES_SOURCE=vendor 可强制走仓内源（用于验证独立 clone 语义）。
  *  生成物（shared/、public/lib|operations.html）与源位置无关，逐字节稳定。
  */
 const forceVendor = process.env.SYNC_RULES_SOURCE === 'vendor';
@@ -42,8 +41,7 @@ for(const [name,globalName] of [['sse','LabOpsSSE'],['labops-targets','LabOpsTar
 
 for(const name of ['scheduled-params']){const from=sourceUrl('Pages/lib/'+name+'.json'),to=new URL('../shared/'+name+'.json',import.meta.url);if(process.argv.includes('--check')){if(fs.readFileSync(from,'utf8')!==fs.readFileSync(to,'utf8'))throw new Error(name+' mirror differs');}else fs.copyFileSync(from,to);}
 
-// 镜像清单只能保证"清单内的文件一致"，保证不了"清单是完整的"。
-// operations.html 引用 lib/client-runtime.js，而它一度不在上面任何一条映射里，
+// 镜像清单只能保证"清单内的文件一致"，保证不了"清单是完整的"——清单漏掉某个引用文件时，
 // check:rules 全绿、页面却 404。这里补上引用侧的闭环：HTML 引用的本地资源必须真实存在。
 const publicDir = new URL('../public/', import.meta.url);
 const broken = [];

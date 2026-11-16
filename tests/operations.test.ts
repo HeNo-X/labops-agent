@@ -1,8 +1,8 @@
 /**
- * ops.v1 单元测试 —— 提案 → 决策 → 回执 → 幂等 / 越权 / 过期（任务书 T04/T05/T02）
+ * ops.v1 单元测试 —— 提案 → 决策 → 回执 → 幂等 / 越权 / 过期
  * ============================================================================
- *  独立于 unit.test.ts：本文件在**任何 db 导入之前**把 LABOPS_DB_PATH 指到临时文件，
- *  避免污染真实用户数据库（R25-lite 的测试约定）。
+ *  独立于 unit.test.ts：本文件在**任何 db 导入之前**把 LABOPS_DB_PATH 指到独立的库文件，
+ *  避免污染真实用户数据库（各测试文件沿用的约定）。
  *
  *  运行：node --test tests/operations.test.ts
  */
@@ -233,7 +233,7 @@ test('提案过期：expireStaleProposals 标记后不可确认', async () => {
     ctx(ADMIN)
   );
   const p = (r as { result: { proposalId: string; version: number; taskId: string } }).result;
-  // 直接把过期时间改到过去（模拟 TTL 到期）
+  // 直接把过期时间改到过去（构造 TTL 到期）
   db.getDb().prepare(`UPDATE ops_proposals SET expiresAt = '2020-01-01T00:00:00.000Z' WHERE id = ?`).run(p.proposalId);
   db.expireStaleProposals();
   const outcome = decideOnProposal({
@@ -423,7 +423,7 @@ test('能力协商：capabilities 描述沙盒环境与当前身份', async () =
   const caps = typeRegistry.toolNames();
   assert.ok(caps.includes('prepare_issue_ticket'));
   assert.ok(caps.includes('create_operations_report'));
-  // 2026-11-10 批次3：新增 query_user_directory 账号目录（只读）→ 29；此前 28 的明细构成文字已过时，只补新项不重写。
+  // 能力清单共 29 项（含只读的 query_user_directory 账号目录）；明细见下一条断言里的说明文案。
   assert.equal(caps.length,29,'12 个只读（含 analyze_evidence_image 视觉初判、query_checkin_status 本人签到状态、query_checkin_summary 签到汇总（仅管理员）、query_vision_status 现场事实、query_user_directory 账号目录）+ 10 个准备/草稿（9 个 prepare_* 含开门/关门 prepare_room_status + create_operations_report）+ 1 个任务计划（A5 maintain_task_plan，工作记录非业务工具）');
   assert.ok(caps.includes('analyze_evidence_image'),'视觉初判必须是只读能力，不得带草稿效果');
   const visionTool = typeRegistry.REGISTRY.find((t) => t.spec.name === 'analyze_evidence_image');

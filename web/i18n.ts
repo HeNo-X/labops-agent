@@ -553,7 +553,7 @@ Object.assign(en,{
  '结构化观察，非人工核验':'Structured observation, not a human verification',
  '完整日报见下方卡片':'The full report is in the card below',
  '内容已截断，完整依据见结果卡或引用链接':'Content truncated — see the result card or citation link for the full source',
- // 命令面板（T7）
+ // 命令面板
  '命令面板':'Command palette',
  '搜索命令或会话':'Search commands or chats',
  '搜索命令或会话（> 只看命令，# 只看会话）':'Search commands or chats (> commands only, # chats only)',
@@ -576,35 +576,35 @@ Object.assign(en,{
  '切换演示身份为管理员':'Switch demo role to administrator',
  '切换演示身份为志愿者':'Switch demo role to volunteer',
  '切换演示身份为学生':'Switch demo role to student',
- // A6 token 用量（provider 真实上报才显示）
+ // token 用量（provider 上报时才显示）
  'tokens':'tokens',
- // A5 任务计划面板（'任务计划' 词条已在工具展示族块登记）
+ // 任务计划面板（'任务计划' 词条已在工具展示族块登记）
  '已完成':'Done',
  '已放弃':'Dropped',
  '待办':'To do',
- // A8 会话模式切换（顶栏胶囊即入口）
+ // 会话模式切换（顶栏胶囊即入口）
  '点击切换为{mode}。模式随发送时刻生效：历史消息保持其发生时的语义；切换为聊天后只查询、不准备办理单。':'Click to switch to {mode}. The mode applies from the moment of sending: past messages keep the semantics they were created with; in Chat mode only queries are answered, no business drafts.',
  '已切换为聊天会话：之后只查询数据，不准备办理单':'Switched to Chat: only queries from now on, no business drafts.',
  '已切换为工作会话：之后可准备办理单，执行仍需本人确认':'Switched to Work: business drafts can be prepared, execution still requires your confirmation.',
  '模式切换失败：':'Mode switch failed: ',
- // A11/RAG 批次2：知识向量索引（管理端）
+ // 知识向量索引（管理端）
  '导入后重建知识向量索引（RAG）':'Rebuild knowledge vector index after import (RAG)',
  '向量索引已重建：内置 {n} 块':'Vector index rebuilt: {n} built-in chunks',
  '，手册 {n} 块':', {n} manual chunks',
  '（⚠️ 查询期未启用向量路：EMBEDDING_ENABLED=0）':'(warning: vector recall is not enabled at query time: EMBEDDING_ENABLED=0)',
- // A-G3/G4/G5 自动化对标 ZCode（批次 A）
+ // 自动化入口文案
  '也可以在会话里直接对我说：':'Or just tell me in the chat:',
  '每天早上 8 点给我发昨天的日报':'Every day at 8am, send me yesterday\'s daily report',
  '复制这句话':'Copy this sentence',
  '我会核对其影响后建成为自动化；上面的「新建自动化」走表单，效果一样。':'I will verify the impact and turn it into an automation; the New button above does the same via the form.',
  '最近修改':'Last modified',
  '复制失败，请手动选择复制：':'Copy failed — please select and copy manually:',
- // B/C：maxRuns 有限次运行 + interval 友好触发
+ // maxRuns 有限次运行 + interval 友好触发
  '每隔':'Every', '分钟（15—10080）':'minutes (15–10080)',
  '最多运行次数（可选）':'Max runs (optional)', '不限':'Unlimited',
  '已按次数完成，历史保留':'Completed after the set number of runs; history retained',
  '已运行':'Runs done', '次':'×',
- // A-Z：ZCode 式自动化界面（列表页/创建页）
+ // 自动化界面（列表页/创建页）
  '定时任务模板':'Scheduled task templates', '还没有定时任务':'No scheduled tasks yet',
  '创建定时任务':'Create scheduled task', '新建定时任务':'New scheduled task',
  '编辑定时任务':'Edit scheduled task', '新建任务':'New task',
@@ -614,11 +614,11 @@ Object.assign(en,{
  '你说时间，Agent 执行':'You set the time, the Agent runs it',
  '调度':'Schedule', '打开这条规则的详情与历史':"Open this rule's detail and history",
  '运行历史在保存后开始累积；编辑完成后在列表点开这条规则即可看到完整历史与执行摘要。':'Run history accumulates after saving; open the rule from the list after editing to see full history and summaries.',
- // A10 会话模式开关（主区顶部居中左右分栏）
+ // 会话模式开关（主区顶部居中左右分栏）
  '会话模式':'Conversation mode',
  '聊天会话：只查询数据，不准备办理单。模式随发送时刻生效，历史消息保持其发生时的语义。':'Chat: read-only queries, no business drafts. The mode applies from the moment of sending; past messages keep the semantics they were created with.',
  '工作会话：可查询、可准备办理单并执行（执行仍需本人确认）。模式随发送时刻生效，历史消息保持其发生时的语义。':'Work: queries, business drafts and execution (still requires your confirmation). The mode applies from the moment of sending; past messages keep the semantics they were created with.',
- // 签到接入批次3：CheckinCard 与定时任务工具说明
+ // CheckinCard 与定时任务工具说明
  '本人签到状态':'My check-in status', '签到汇总':'Check-in summary',
  '该日期没有本人的课程安排。':'No classes for you on this date.',
  '未录入':'Not recorded', '实验室未录入':'Lab not recorded', '班级未录入':'Class not recorded', '时间未录入':'Time not recorded',

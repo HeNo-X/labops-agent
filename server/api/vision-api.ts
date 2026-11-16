@@ -125,10 +125,10 @@ async function handleReport(req: IncomingMessage, res: ServerResponse): Promise<
   reply(res, 200, { ok: true, alert: ingested.event.alert, snapshotIgnored: ingested.snapshotIgnored ?? null });
 }
 
-// ---- 展示口径（2026-11-11 用户裁定）------------------------------------------
+// ---- 展示口径 ---------------------------------------------------------------
 // 检测结果区只呈现**真实 vision 侧上报**的房间结果（按房间分卡）：
-//   · DEMO（本机演示摄像头）房间的结果不进结果展示——其原画面仍在实时画面卡照常展示；
-//   · mock-vision-feed 的模拟上报（quality.det 前缀 "mock"）不是真实现场数据，不展示。
+//   · DEMO（本机摄像头）房间的结果不进结果展示——其原画面仍在实时画面卡照常展示；
+//   · mock-vision-feed 的联调用模拟上报（quality.det 前缀 "mock"）不是现场数据，不展示。
 // 仅作用于展示端点（status/events）；上报接收、落盘与 Agent 工具口径不受影响。
 const DEMO_LAB_ID = 'DEMO';
 
@@ -243,14 +243,6 @@ async function handleLiveProbe(res: ServerResponse): Promise<void> {
 
 
 /**
- * 实时画面识别结果（2026-11-14）
- * ---------------------------------------------------------------
- * 背景：卡片上的"人数/已录入/更新"过去只认**边缘上报**（ingest），
- * 一旦边缘没推、显示就是"离线"，但实际画面是通的（feed 能拉到）。
- * 这条端点补上"从**当前画面**现取一次识别结果"：抓 MJPEG 的一帧 →
- * 交给边缘视觉服务的 /api/count → 返回人数。15 秒内复用结果，避免每次刷新都推理。
- */
-/**
  * 实时画面识别结果 —— 数据面在 server/vision/live.ts（Agent 工具 query_vision_status
  * 与本端点共用同一份实时数据，保证「监控面板看到的 = Agent 说的」）。
  */
@@ -277,7 +269,7 @@ async function handleLiveCount(res: ServerResponse): Promise<void> {
 
 async function handleFeed(res: ServerResponse): Promise<void> {
   // 超时 10s：live/start 后模型预热期（约 2s）内生成器不产帧、Werkzeug 不发响应头，
-  // 4s 超时会在预热窗口内 502（2026-11-07 实测）——放宽到 10s 等过预热
+  // 4s 超时会在预热窗口内 502 ——放宽到 10s 等过预热
   const upstream = await fetchLiveFeed(10000);
   if (!upstream || !upstream.ok || !upstream.body) {
     if (upstream) await upstream.body?.cancel().catch(() => undefined);
@@ -292,7 +284,7 @@ async function handleFeed(res: ServerResponse): Promise<void> {
   const stream = Readable.fromWeb(upstream.body as WebReadableStream<Uint8Array>);
   // ⚠️ 必须挂 error 监听：上游中断（Vision 服务重启/网络抖动/客户端断开）会让
   // fromWeb 流发 error 事件——Node 中未处理的 'error' 事件直接把进程带崩
-  // （2026-11-07 两次 "exit code 1" 的根因，pipe 不会自动转发可读流错误）
+  // （未处理 'error' 时进程会以 exit code 1 退出，pipe 不会自动转发可读流错误）
   stream.on('error', (err) => {
     log.warn('vision_feed_stream_error', { message: err instanceof Error ? err.message : String(err) });
     res.destroy();
@@ -306,9 +298,9 @@ async function handleFeed(res: ServerResponse): Promise<void> {
 // ---- 总分发 -----------------------------------------------------------------
 
 export async function handleVisionApi(req: IncomingMessage, res: ServerResponse, pathname: string, query: URLSearchParams): Promise<void> {
-  // VISION_MODULE=off：本部署不提供实验室监控模块（用户裁定：本地保留完整模块，
-  // 上传部署到线上服务器的部分不显示）。本地运行不设该变量即保留；线上部署在
-  // 服务器 .env 设 VISION_MODULE=off。前端 web/vision-ui.ts 据此 404 隐藏入口。
+  // VISION_MODULE=off：本部署不提供实验室监控模块（完整模块本地保留，部署实例可关闭）。
+  // 不设该变量即保留；部署所在的服务器 .env 设 VISION_MODULE=off 即可隐藏。
+  // 前端 web/vision-ui.ts 据此 404 隐藏入口。
   if (process.env.VISION_MODULE === 'off') {
     res.writeHead(404, {'Content-Type':'application/json'}); res.end(JSON.stringify({error:'vision_disabled'})); return;
   }

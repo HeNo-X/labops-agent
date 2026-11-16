@@ -24,7 +24,7 @@ const ASSET_RE = /^\/assets\/[\w.-]+$/;
 
 /** 与 shared/offline-scope.ts 的 offlineAction 逐条对应 */
 function offlineAction(pathname) {
-  // 顺序即优先级：API 与 SSE 必须最先被排除，任何后续新增规则都不得越过它
+  // 顺序即优先级：API 与 SSE 必须最先被排除，任何后续规则都不得越过它
   if (pathname === '/api' || pathname.startsWith('/api/')) return 'passthrough';
   if (pathname.startsWith('/src/') || pathname.startsWith('/@')) return 'passthrough';
   if (ASSET_RE.test(pathname)) return 'immutable';

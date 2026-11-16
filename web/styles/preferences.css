@@ -23,6 +23,6 @@ html[data-reduced-motion=true] *,html[data-reduced-motion=true] *::before,html[d
 
 html .mobile-shell select{min-height:44px}
 
-/* 隐藏所有滚动条但保留滚动（2026-11-07 设置全屏化批次） */
+/* 隐藏所有滚动条但保留滚动 */
 *{scrollbar-width:none}
 *::-webkit-scrollbar{display:none;width:0;height:0}

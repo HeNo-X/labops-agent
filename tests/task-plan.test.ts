@@ -1,10 +1,10 @@
 /**
- * A5 任务计划复述（todo recitation）+ 计划面板
+ * 任务计划复述（todo recitation）+ 计划面板
  * ============================================================================
- *  借鉴 Manus 经验 6 / ZCode TodoWrite：多步任务让模型维护步骤计划，每轮重读。
+ *  多步任务让模型维护步骤计划，每轮重读。
  *  本文件锁死：① 步骤规范化边界（≤12 步、80 字、状态回退）；② 工具执行口径
  *  （工作记录，空计划拒绝）；③ 注册表暴露面（chat/task 都可用）；④ 事件契约
- *  （plan_updated 在 RUN_EVENT_TYPES）；⑤ UI 装配（PC/移动共用一个面板，R6）。
+ *  （plan_updated 在 RUN_EVENT_TYPES）；⑤ UI 装配（PC/移动共用一个面板）。
  */
 import {registerHooks} from 'node:module';
 registerHooks({resolve(specifier,context,next){if(specifier.startsWith('@shared/'))return next(new URL('../shared/'+specifier.slice(8)+'.ts',import.meta.url).href,context);if(specifier.startsWith('.')&&!/\.[a-z]+$/i.test(specifier)&&context.parentURL?.includes('/web/'))return next(new URL(specifier+'.ts',context.parentURL).href,context);return next(specifier,context);}});

@@ -1,5 +1,5 @@
 /**
- * 数据层 —— 脱敏快照 / 实时 / 模拟演示 三选一
+ * 数据层 —— 脱敏快照 / 实时 / 内置示例 三选一
  * ============================================================================
  *  与老系统的关系：**只读**。老系统继续跑，它的 state.json 是这里的"粮草"，
  *  本模块绝不写回、绝不连接老系统的写接口。
@@ -7,7 +7,7 @@
  *  优先级：
  *    1. LIVE_DATA=1 且 LABOPS_LIVE_STATE 存在 → live（实时数据，读真实 state.json）
  *    2. seed/snapshot.json 存在                → snapshot（脱敏快照，默认）
- *    3. 否则                                   → demo（模拟演示，内置示例）
+ *    3. 否则                                   → demo（内置示例，随仓库提供）
  *
  *  无论哪条路径，教师姓名都在**载入时**伪名化（live 路径也不例外）——
  *  也就是说真实姓名从不进入本进程的业务对象，更不会进日志或响应体。
@@ -60,7 +60,7 @@ export interface Dataset {
   roomClosures?: Array<{id:string;roomId:string;roomName?:string;startDate:string;endDate:string;periodKeys:string[];status:string;reason:string}>;
   sourceType: DataSourceType;
   sourceLabel: string;
-  /** 快照/演示文件的取证信息，直接进结果体的 provenance */
+  /** 快照/示例文件的取证信息，直接进结果体的 provenance */
   meta: {
     sourceSha256Prefix?: string;
     snapshotAt?: string;
@@ -269,7 +269,7 @@ function resolveSourceFile(): { file: string; kind: 'live' | 'snapshot' | 'demo'
     return {
       file: c.data.fallbackDemoPath,
       kind: 'demo',
-      warnings: ['未找到 seed/snapshot.json，已回落到内置示例数据（模拟演示）']
+      warnings: ['未找到 seed/snapshot.json，已回落到内置示例数据']
     };
   }
   return null;

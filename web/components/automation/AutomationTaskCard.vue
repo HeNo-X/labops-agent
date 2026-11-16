@@ -45,7 +45,7 @@ function askDelete(): void {
   confirmDel.value = false;
   emit('delete');
 }
-// B：maxRuns 用尽后 displayStatus=completed——开关按 displayStatus 判定（OFF+不可点），
+// maxRuns 用尽后 displayStatus=completed——开关按 displayStatus 判定（OFF+不可点），
 // 否则会出现"卡片说已完成、开关却是开的"的自相矛盾
 const on = computed(() => isOn(props.job.displayStatus || props.job.status));
 const toggleEnabled = computed(() => !props.readonly && props.job.canManage && canToggle(props.job.displayStatus || props.job.status));

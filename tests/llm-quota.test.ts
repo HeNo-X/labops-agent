@@ -1,15 +1,15 @@
 /**
- * A6 配额感知的诚实降级
+ * 配额感知的诚实降级
  * ============================================================================
- *  2026-10-30 部署实测：账号免费额度耗尽时，7 个模型逐个 403
- *  AllocationQuota.FreeTierOnly，旧 classify 把它归为 agnes_auth_failed
- *  （提示"检查 KEY"——误导），且 fallback 链把其余模型白试一遍。
+ *  配额耗尽的形态：账号免费额度用尽时，7 个模型逐个 403
+ *  AllocationQuota.FreeTierOnly；若 classify 把它归为 agnes_auth_failed
+ *  （提示"检查 KEY"——误导），fallback 链还会把其余模型白试一遍。
  *  本文件锁死三件事：
  *    ① 403 + 配额签名 → agnes_quota_exhausted（不再误报鉴权失败）；
  *    ② 配额错误**短路整条链**（账号级配额对链上所有模型同样生效，上游只被打 1 次）；
  *    ③ 非配额的 403（真鉴权失败）仍照常走完整条链（分类必须可区分，上游被打 2 次）。
  *
- *  ② ③ 用自包含子进程探针（tests/fixtures/quota-probe.ts，假上游由子进程自己起）：
+ *  ② ③ 用自包含子进程探针（tests/fixtures/quota-probe.ts，上游替身由子进程自己起）：
  *  config 进程内只读一次配置，两个场景必须各起一个进程；且父进程不能用
  *  execFileSync——它会冻结自己的事件循环，与回连父进程的子进程互等死锁。
  */
@@ -88,7 +88,7 @@ test('A10 配额耗尽时确定性引擎兜底：run_completed（非 run_failed�
   assert.equal(out.engine, 'demo', '兜底回答的 engine 如实标 demo');
   assert.equal(out.hits, 1, '假上游只被打一次（短路后立刻兜底）');
   assert.match(out.answer, /E310/, '310 → E310 解析照常工作');
-  // 披露语按数据源分两种：demo 源=「演示引擎」，live 源=「确定性事实引擎」——都必须如实标注未用大模型
+  // 披露语按数据源分两种：demo 源的引擎标签与 live 源的「确定性事实引擎」——都必须如实标注未用大模型
   assert.match(out.answer, /确定性事实引擎|演示引擎：/, '兜底回答必须如实标注未用大模型');
   assert.match(out.answer, /未调用大模型/, '标注必须明说没用大模型');
   assert.ok(!/在室人数：\d+ 人/.test(out.answer), '无业务通道时不得编造在室人数');

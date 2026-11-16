@@ -9,7 +9,7 @@ test('A07 纯文本课表逐项保留中间课程、时间、班级与对象；�
  const ds=structuredClone(loadDataset()),row=ds.timetable.find(r=>r.labId===ds.labs.find(l=>l.name==='E310')!.id)!;ds.timetable=['首门课','中间课程','最后课程'].map((courseName,i)=>({...row,id:'text-lesson-'+i,weekday:1,periodKey:(['am1','pm1','eve_ab'] as const)[i]!,courseName,classNames:['文本测试班'],className:'文本测试班',weeks:{from:1,to:99,parity:'all' as const}}));
  const result=runQuerySchedule({labName:'E310',date:'2026-09-28'},ds,serverNow(new Date('2026-09-28T04:00:00Z'))),answer=renderDemoAnswer(result,{dateWasDefaulted:false,periodFiltered:false,textOnly:true,scopeLabel:'本人授权范围'});
  for(const name of ['首门课','中间课程','最后课程','text-lesson-0','text-lesson-1','text-lesson-2','文本测试班'])assert.ok(answer.includes(name),name);assert.ok(!answer.includes('下方课表卡'));assert.ok(!answer.includes('下方结果卡'));
- // A8（2026-10-31 用户裁定）：查询时间/数据版本/数据来源等取证行不再刷正文——
+ // 查询时间/数据版本/数据来源等取证行不刷正文——
  // 来源徽章与运行记录承担；正文只留重点与逐项明细
  assert.ok(!/查询时间|数据版本|数据来源/.test(answer),answer);
 });

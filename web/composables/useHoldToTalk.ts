@@ -2,7 +2,7 @@
  * 长按说话（press-and-hold to talk）
  * ============================================================================
  *  为什么抽成 composable：PC 的 CommandBar 与移动端 MobileConversation 都要这个交互，
- *  各写一份必然分化（本仓库已被"同一能力两端各写一遍"坑过多次）。
+ *  各写一份必然分化。
  *
  *  交互契约：
  *    · 按下（pointerdown / 空格·回车 keydown）→ 请求麦克风并开始录音
@@ -14,10 +14,10 @@
  *  为什么没做"边说边出字"（实时流式）：
  *    现有链路是「录完整段 → base64 → POST /api/agent/transcribe → 返回整段文本」。
  *    真流式要浏览器直连百炼 WebSocket —— 那会把 API Key 暴露到前端，不可接受；
- *    走服务端中转则要新增 WS 通道与流式配额模型。
+ *    走服务端中转则需要额外的 WS 通道与流式配额模型。
  *    而"分段上传伪流式"会撞上 **每账号每小时 60 次** 的转写配额
  *    （见 server/api/transcribe.ts），2 秒一段的话两分钟就把配额烧光。
- *    所以本轮只做长按 + 松手回填，一次按住 = 一次请求。
+ *    所以只做长按 + 松手回填，一次按住 = 一次请求。
  */
 
 import { onUnmounted, ref } from 'vue';
@@ -171,7 +171,7 @@ export function useHoldToTalk(options: HoldToTalkOptions) {
      * 直接 `v-on="handlers"` 到按钮上。
      * ⚠️ 键名必须是 **DOM 事件名**（pointerdown / click…），不能写成 `onClick`：
      * Vue 的 v-on 对象语法按事件名 addEventListener，写 `onClick` 等于监听一个
-     * 永远不会触发的事件 —— 按钮点了没反应（实测踩过）。
+     * 永远不会触发的事件 —— 按钮点了没反应。
      */
     sliding,
     pointerKind,

@@ -1,8 +1,8 @@
 import { effectiveSchedule } from '../data/calendar.ts';
 /**
- * ops.v1 准备类工具（任务书 P1 首批：F01 报修 / F02 停用 / F03 通知 / F06 值班 / F10 日报）
+ * ops.v1 准备类工具（报修 / 停用 / 通知 / 值班 / 日报）
  * ============================================================================
- *  纪律（任务书 §11.2）：
+ *  纪律：
  *   · prepare 只做"理解 + 校验 + 落提案"——绝不执行业务写操作；
  *     实际提交只经受权 UI 的决策端点（executor.decideOnProposal），模型无权调用。
  *   · 任务与提案由服务端在这里创建（持久化），提案载荷只存服务端；
@@ -77,7 +77,7 @@ function fail(err: OpsToolError): ToolExecution {
   };
 }
 
-/** 严格取字符串参数：缺失/空 → null；类型非法 → 报错（不静默放宽，沿用 R10 纪律） */
+/** 严格取字符串参数：缺失/空 → null；类型非法 → 报错（不静默放宽） */
 function strArg(args: Record<string, unknown>, key: string, opts: { required?: boolean } = {}): string | null {
   const v = args[key];
   if (v === undefined || v === null || v === '') {
@@ -186,7 +186,7 @@ function persistAndReturn(c: PrepareCommon): ToolExecution {
 }
 
 // ===========================================================================
-//  F01 prepare_issue_ticket —— 巡检与报修
+//  prepare_issue_ticket —— 巡检与报修
 // ===========================================================================
 
 const ISSUE_CATEGORIES = ['equipment', 'environment', 'network', 'door_window_lighting', 'other'] as const;
@@ -259,7 +259,7 @@ export async function runPrepareIssueTicket(args: Record<string, unknown>, ctx: 
 }
 
 // ===========================================================================
-//  F02 prepare_room_closure —— 临时停用（可联动建单 + 通知）
+//  prepare_room_closure —— 临时停用（可联动建单 + 通知）
 // ===========================================================================
 
 const MAX_CLOSURE_DAYS = 14;
@@ -396,7 +396,7 @@ export async function runPrepareRoomClosure(args: Record<string, unknown>, ctx: 
 }
 
 // ===========================================================================
-//  F02b prepare_room_status —— 开门/关门（即时门禁/开放状态，区别于长周期停用）
+//  prepare_room_status —— 开门/关门（即时门禁/开放状态，区别于长周期停用）
 // ===========================================================================
 
 export async function runPrepareRoomStatus(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolExecution> {
@@ -438,7 +438,7 @@ export async function runPrepareRoomStatus(args: Record<string, unknown>, ctx: T
 }
 
 // ===========================================================================
-//  F03 prepare_notification —— 定向通知（站内）
+//  prepare_notification —— 定向通知（站内）
 // ===========================================================================
 
 export async function runPrepareNotification(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolExecution> {
@@ -518,7 +518,7 @@ export async function runPrepareNotification(args: Record<string, unknown>, ctx:
 }
 
 // ===========================================================================
-//  F06 prepare_duty_session —— 值班开始与收尾交接
+//  prepare_duty_session —— 值班开始与收尾交接
 // ===========================================================================
 
 const DUTY_CHECKLIST_TEMPLATE: Array<{ key: string; label: string }> = [
@@ -623,7 +623,7 @@ export async function runPrepareDutySession(args: Record<string, unknown>, ctx: 
 }
 
 // ===========================================================================
-//  F10 create_operations_report —— 运营日报（直接产物，不走确认）
+//  create_operations_report —— 运营日报（直接产物，不走确认）
 // ===========================================================================
 
 const REPORT_SECTIONS = ['schedule', 'issues', 'notifications', 'closures', 'duty'] as const;

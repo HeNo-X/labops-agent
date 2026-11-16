@@ -2,9 +2,9 @@ import {businessScope,isBusinessConnected,businessRequest} from '../business/bri
 import crypto from 'node:crypto';
 import {nativeDelegation} from '../security/context.ts';
 /**
- * 会话 API —— 持久化会话/消息/运行的 REST 与 SSE（M0/M1 加固版）
+ * 会话 API —— 持久化会话/消息/运行的 REST 与 SSE
  * ============================================================================
- *  本轮加固（对应任务书 N01/N02/N04/N05/N06/N07/N17）：
+ *  加固点：
  *    · 路由可 await、统一异常边界 —— 任何异步失败返回明确 HTTP 错误，不炸进程
  *    · runId 由**服务端生成**（客户端 runId 仅旧接口兼容）；user+assistant+run 三件套
  *      在一个短事务内创建，冲突/约束失败整组回滚，绝不半写入
@@ -13,7 +13,7 @@ import {nativeDelegation} from '../security/context.ts';
  *    · 终态**先落库成功再发 end**；落库失败发 save_failed 事件，绝不静默承诺已保存
  *    · run_failed 的错误码/说明落库（meta.error），刷新后失败仍有原因
  *    · 增量刷写：32 个 delta **或 1.5 秒**（取先到者）—— 慢速短回答也有恢复点
- *    · 会话上下文（房间/日期/任务类型）在终态事务中持久化，重启后承接不丢（N07）
+ *    · 会话上下文（房间/日期/任务类型）在终态事务中持久化，重启后承接不丢
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -68,7 +68,7 @@ function json(res: ServerResponse, status: number, body: unknown): void {
 
 /**
  * 由**已落库事实**拼出运行快照（只读投影）。
- * 规则：取不到就 null / 空数组 —— 不推测、不补默认值（R4）。
+ * 规则：取不到就 null / 空数组 —— 不推测、不补默认值。
  * 相位只在能确定时给值：终态直接映射；仍有未确认提案 → awaiting_confirm；其余 null。
  */
 function buildRunSnapshot(conversationId: string, run: Record<string, unknown>): RunSnapshot {
@@ -119,12 +119,12 @@ function buildRunSnapshot(conversationId: string, run: Record<string, unknown>):
     startedAt: (run['startedAt'] as string | null) ?? null,
     endedAt: (run['endedAt'] as string | null) ?? null,
     assistantMessageId: assistant?.id ?? null,
-    // A5：meta.plan 回放（没有登记过计划就是 null）
+    // 计划回放（没有登记过计划就是 null）
     plan: Array.isArray(meta['plan']) ? (meta['plan'] as RunSnapshot['plan']) : null
   };
 }
 
-/** 统一异步边界：路由层 await 本函数，任何异常都变成 500 而不是进程退出（N01） */
+/** 统一异步边界：路由层 await 本函数，任何异常都变成 500 而不是进程退出 */
 export async function handleConversations(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<boolean> {
   try {
     return await routeConversations(req, res, pathname);
@@ -144,7 +144,7 @@ export async function handleConversations(req: IncomingMessage, res: ServerRespo
 async function routeConversations(req: IncomingMessage, res: ServerResponse, pathname: string): Promise<boolean> {
   const method = (req.method ?? 'GET').toUpperCase();
 
-  // R01：持久层初始化失败时明确 503 + 恢复说明，健康检查不再谎报就绪
+  // 持久层初始化失败时明确 503 + 恢复说明，健康检查如实报告未就绪
   if (!dbReady()) {
     json(res, 503, {
       error: 'persistence_unavailable',
@@ -154,7 +154,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
     return true;
   }
 
-  // ---- 显式取消（N06）：幂等；只作用于目标 run ----
+  // ---- 显式取消：幂等；只作用于目标 run ----
   const cancelMatch = /^\/api\/runs\/([^/]+)\/cancel$/.exec(pathname);
   if (cancelMatch && method === 'POST') {
     const runId = decodeURIComponent(cancelMatch[1]!);
@@ -163,7 +163,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
     if (!target || !getConversationMeta(String(target['conversationId']))) return json(res, 404, {error:'run_not_found'}), true;
     const outcome = requestCancel(runId);
     if (outcome === 'not_found') {
-      // R06：内存活跃表没有 ≠ 运行不存在 —— 查持久 Run，已终态返回既有状态
+      // 内存活跃表没有 ≠ 运行不存在 —— 查持久 Run，已终态返回既有状态
       const { getRun } = await import('../persistence/db.ts');
       const run = getRun(runId);
       if (run) {
@@ -173,7 +173,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
     json(res, 200, { runId, outcome });
     return true;
   }
-  // ---- 权威运行状态（B09/B12 用） ----
+  // ---- 权威运行状态 ----
   const runMatch = /^\/api\/runs\/([^/]+)$/.exec(pathname);
   if (runMatch && method === 'GET') {
     const { getRun } = await import('../persistence/db.ts');
@@ -330,8 +330,8 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
         return json(res, 400, { error: 'missing_title', message: 'title 必须是非空字符串' }), true;
       }
       if (mode) {
-        // A8（2026-10-31 用户要求，覆盖 2026-10-06 的"模式锁定"决定）：恢复可切换。
-        //   PC 顶栏模式胶囊即切换入口。语义安全边界保留：模式随**发送时刻**的
+        // 模式可随发送时刻切换（不锁定）：PC 顶栏模式胶囊即切换入口。
+        //   语义安全边界保留：模式随**发送时刻**的
         //   会话模式生效——历史消息保持其发生时的语义不变（办理单的确认权仍在
         //   用户），切换只影响之后的新消息路由（chat=只读查询；task=可准备办理单）。
         updateConversationMode(conversationId, mode);
@@ -346,7 +346,7 @@ async function routeConversations(req: IncomingMessage, res: ServerResponse, pat
       return true;
     }
     if (!isMessages && method === 'DELETE') {
-      // R12：会话仍有活跃 run 时拒绝软删除（前后端一致），不能隐藏正在执行的工作
+      // 会话仍有活跃 run 时拒绝软删除（前后端一致），不能隐藏正在执行的工作
       if (hasActiveRunForConversation(conversationId)) {
         json(res, 409, { error: 'conversation_busy', message: '该会话仍有正在执行的任务，请先停止再删除' });
         return true;
@@ -387,10 +387,10 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
   const rawClientRequestId =
     typeof payload['clientRequestId'] === 'string' && payload['clientRequestId'] ? payload['clientRequestId'] : newTraceId('req');
   const clientRequestId = `${resolveActor(undefined).id}:${conversationId}:${rawClientRequestId.slice(0,128)}`;
-  // N01：正式 runId 一律由服务端生成（客户端 runId 只在旧 /api/agent/chat 兼容）
+  // 正式 runId 一律由服务端生成（客户端 runId 只在旧 /api/agent/chat 兼容）
   const runId = newTraceId('run');
 
-  // N01/N04：三件套短事务创建；重复 → 引用既有执行；并发 → 409 + 活跃 runId
+  // 三件套短事务创建；重复 → 引用既有执行；并发 → 409 + 活跃 runId
   let created;
   try {
     created = createMessageWithRun(conversationId, message, clientRequestId, runId);
@@ -412,7 +412,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
   const { userMessage, assistant } = created;
 
   sseHeaders(res);
-  // N01：接受确认事件携带全部正式 ID（前端据此对齐乐观消息）
+  // 接受确认事件携带全部正式 ID（前端据此对齐乐观消息）
   send(res, 'run_accepted', {
     seq: -1,
     v: 1,
@@ -430,7 +430,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
   let authorityScope=isBusinessConnected()?businessScope().scopeKey:null;
   const ac = new AbortController();
   let aborted = false;
-  // F03/N06：客户端断开在 req/res 两个对象上都可能表现为 close —— 任一触发即中止
+  // 客户端断开在 req/res 两个对象上都可能表现为 close —— 任一触发即中止
   // 执行（模型请求停止、不再产生事件）；断连未终态由 finally 记为 interrupted。
   const onDisconnect = (): void => {
     if (aborted) return;
@@ -440,7 +440,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
   req.on('close', onDisconnect);
   res.on('close', onDisconnect);
 
-  // N06：取消接口需要能中止本 run
+  // 取消接口需要能中止本 run
   const runHandle = trackActiveRun(runId, conversationId);
   runHandle.setAbort(() => ac.abort());
 
@@ -458,7 +458,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
   let elapsedMs = 0;
   let failedError: { code: string; message: string; hint?: string } | null = null;
   const toolCalls: Array<Record<string, unknown>> = [];
-  /** A5：本轮最后一次登记的任务计划（plan_updated 事件载荷；终态随 meta 落库） */
+  /** 本轮最后一次登记的任务计划（plan_updated 事件载荷；终态随 meta 落库） */
   let planSteps: Array<Record<string, unknown>> | null = null;
   let completedPayload: Record<string, unknown> | null = null;
   let cancelEventSent = false;
@@ -477,12 +477,12 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
       /* 刷写失败不中断流；终态会再尝试完整落库（失败则发 save_failed） */
     }
   };
-  // R07：真正的定时快照 —— 上游停顿时也按时间上限落盘，不再依赖下一个 delta 才检查
+  // 定时快照 —— 上游停顿时也按时间上限落盘，不依赖下一个 delta 才检查
   const flushTimer = setInterval(() => {
     if (deltaSinceFlush > 0 && Date.now() - lastFlushAt > 700) flush();
   }, 700);
 
-  // 跨会话并发第二片：全局并发闸门。释放口只放在 finally —— 终态、断连、取消、
+  // 全局并发闸门。释放口只放在 finally —— 终态、断连、取消、
   // 排队超时都必须归还名额，否则后续任务会被永久堵在队列里。
   let runSlot: RunSlot | null = null;
   try {
@@ -508,17 +508,17 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
       sessionId: conversationId,
       // 会话类型由服务端存储决定：chat=纯聊天（无工具）；task=任务工作台（默认）
       mode: meta.mode,
-      // ops.v1：服务端解析的沙盒演示身份（写操作准备必需；模型参数不采信）
+      // ops.v1：服务端解析的沙盒身份（写操作准备必需；模型参数不采信）
       actor: resolveActor(req.headers['x-labops-sandbox-role']),
       signal: ac.signal,
-      // N07：本轮最终可信上下文由 runAgent 回传，终态事务一并落库
+      // 本轮最终可信上下文由 runAgent 回传，终态事务一并落库
       onContext: (ctx) => {
         lastContext.labName = ctx.labName;
         lastContext.date = ctx.date;
         lastContext.task = ctx.task;
       }
     })) {
-      // N06/B10：本地断连或显式取消（abort 信号）都立即停止消费 ——
+      // 本地断连或显式取消（abort 信号）都立即停止消费 ——
       // 取消必须压过随后到达的 run_completed，否则"已完成"会覆盖"已取消"
       if (aborted || ac.signal.aborted) break;
       lastSeq = ev.seq;
@@ -533,7 +533,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
       } else if (ev.type === 'answer_delta') {
         answerText += String((ev.payload as Record<string, unknown>)['text'] ?? '');
         deltaSinceFlush += 1;
-        // N02：32 个增量或 1.5 秒（先到者，另有 700ms 定时兜底）
+        // 32 个增量或 1.5 秒（先到者，另有 700ms 定时兜底）
         if (deltaSinceFlush >= 32 || Date.now() - lastFlushAt > 1500) flush();
       } else if (ev.type === 'tool_started') {
         const p = ev.payload as Record<string, unknown>;
@@ -552,7 +552,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         }
         flush(true);
       } else if (ev.type === 'plan_updated') {
-        // A5：计划落 meta.plan（流式期间即时刷写，刷新后仍能看到）
+        // 计划落 meta.plan（流式期间即时刷写，刷新后仍能看到）
         const p = ev.payload as { steps?: unknown };
         if (Array.isArray(p.steps)) {
           planSteps = p.steps as Array<Record<string, unknown>>;
@@ -567,7 +567,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         terminal = true;
         finalStatus = 'completed';
         const p = ev.payload as Record<string, unknown>;
-        // R03：权威全文在此对齐（delta 可能漏块）；确认事件在保存成功后才发给浏览器
+        // 权威全文在此对齐（delta 可能漏块）；确认事件在保存成功后才发给浏览器
         answerText = String(p['answer'] ?? answerText);
         elapsedMs = Number(p['ms'] ?? 0);
         completedPayload = p;
@@ -577,7 +577,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         terminal = true;
         finalStatus = 'failed';
         const p = ev.payload as { code: string; message: string; hint?: string };
-        // N05：失败原因落库，刷新后仍有原因；hint 是"下一步怎么办"，同样必须留痕（否则刷新后就只剩错误码）
+        // 失败原因落库，刷新后仍有原因；hint 是"下一步怎么办"，同样必须留痕（否则刷新后就只剩错误码）
         failedError = { code: p.code, message: p.message, ...(p.hint ? { hint: p.hint } : {}) };
         send(res, ev.type, ev);
       } else if (ev.type === 'run_cancelled') {
@@ -615,13 +615,13 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
     clearInterval(flushTimer);
     cancelRequested = runHandle.cancelRequested();
     if (cancelRequested) {
-      // N06：用户显式取消（经取消接口）→ cancelled；单纯断连 → interrupted
+      // 用户显式取消（经取消接口）→ cancelled；单纯断连 → interrupted
       finalStatus = 'cancelled';
       terminal = true;
     }
     if (aborted && !terminal) finalStatus = 'interrupted';
 
-    // R02/R03：终态单事务（Message+Run+Context+会话时间）成功后，才发权威确认。
+    // 终态单事务（Message+Run+Context+会话时间）成功后，才发权威确认。
     // 失败必须让用户知道"执行已结束但保存失败"，保留可见内容，不静默承诺已保存。
     let saved = true;
     let saveError = '';
@@ -638,7 +638,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
         sourceType,
         ms: elapsedMs,
         toolCalls,
-        // U07：一行结论摘要（工具 summary），会话列表预览优先取它，避免拼入业务口径长文
+        // 一行结论摘要（工具 summary），会话列表预览优先取它，避免拼入业务口径长文
         headline:(toolCalls as Array<{ok?:boolean|null;summary?:string}>).filter(t=>t.ok&&typeof t.summary==='string'&&t.summary).at(-1)?.summary??null,
         error: failedError,
         clientRequestId,
@@ -651,7 +651,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
       saveError = err instanceof Error ? err.message : String(err);
     }
     if (saved && finalStatus === 'completed' && completedPayload) {
-      // R03：权威完成事件在事务提交后发出（携带最终全文，durable 标记）
+      // 权威完成事件在事务提交后发出（携带最终全文，durable 标记）
       lastSeq += 1;
       send(res, 'run_completed', {
         seq: lastSeq,
@@ -670,7 +670,7 @@ async function handleConversationMessage(req: IncomingMessage, res: ServerRespon
       });
     }
     if (!saved) {
-      // R02：终态写入失败 → 尽力把 run 标为 save_failed，避免悬挂的假 running 锁；
+      // 终态写入失败 → 尽力把 run 标为 save_failed，避免悬挂的 running 记录锁住会话；
       // 连这步都失败时保留活跃登记（createMessageWithRun 冲突时会对 finalizeFailed 修复）
       lastSeq += 1;
       send(res, 'save_failed', {

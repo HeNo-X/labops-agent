@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * 语音术语评测（B1）—— 实验室专用名词的识别/纠正可复跑指标
+ * 语音术语评测 —— 实验室专用名词的识别/纠正可复跑指标
  * ============================================================================
- *  为什么先有这把尺子：上游偏置（上下文词表 / asr_options）与纠正层升级（拼音同音）
+ *  为什么需要这把尺子：上游偏置（上下文词表 / asr_options）与同音匹配纠错层
  *  都容易"感觉变好了"，而感觉不能验收。本脚本把两件事钉成数字：
  *    · 术语有没有以**标准写法**出现（召回）
  *    · 出现的写法对不对（精确率）
@@ -11,10 +11,10 @@
  *  三种模式：
  *   · --mode=correction（默认）文本层，离线、零 Key、确定性，随时可复跑。
  *     输入是 evaluation/asr-term-scenarios.json 里人工构造的同音/近音误写文本，
- *     过一遍**线上正在用的** correctTranscript，得到 B3 要击败的基线。
+ *     过一遍**生产环境在用的** correctTranscript，作为同音纠正层要超越的基线。
  *   · --mode=live 真实音频走上游。需要 ASR Key + evaluation/asr-recordings/。
  *     **默认 --dry-run 不发请求、不烧每小时配额**；缺任何一样就整项 not_run，不猜。
- *   · --mode=e2e 识别文本喂 Agent 的工具命中率。B1 未接线，恒 not_run 并写明原因。
+ *   · --mode=e2e 识别文本喂 Agent 的工具命中率。端到端评测尚未接线，恒 not_run 并写明原因。
  *
  *  输出 .evaluation/asr-<mode>-<时间>.json 与同名 .html（人读版）。
  *  报告固定带「未验证项」一节 —— 只报好消息的评测报告不可信。
@@ -35,7 +35,7 @@ const flag = (name) => process.argv.includes(`--${name}`);
 const mode = arg('mode', 'correction');
 const quiet = flag('quiet');
 
-// 确定性：不读 .env、不落真库、不碰实时数据 —— 评委拿到作品包也能跑出同一个数字
+// 确定性：不读 .env、不落真库、不碰实时数据 —— 任何拿到代码包的人都能跑出同一个数字
 process.env.LABOPS_SKIP_ENV_FILE = '1';
 process.env.LIVE_DATA = '0';
 process.env.LABOPS_AUTH_MODE = 'demo';
@@ -96,7 +96,7 @@ function declinedSurface(s, surface) {
 
 /**
  * 安全审计：declined 场景里那些误写串必须**仍然原样在输出里**。
- * 一旦哪条被改了，说明豁免失效 —— 那是把常用词改成术语的实锤误改。
+ * 一旦某条被替换，说明豁免失效 —— 把常用词当作术语替换属于误改。
  */
 function declineAudit(rows, apply) {
   const broken = [];
@@ -138,7 +138,7 @@ function harmfulness(controls, apply) {
   };
 }
 
-// ---------------------------------------------------------------- Tier A（线上正在用的那套）
+// ---------------------------------------------------------------- Tier A（生产环境使用的词表层）
 let tierA = [];
 let datasetBasis = null;
 let datasetError = null;
@@ -163,8 +163,8 @@ const applyCurrent = (text) => {
 const applyRaw = (text) => ({ text, corrections: [] });
 
 /**
- * 新层（B3）：Tier A ∪ Tier B + 音节/保护/歧义三份数据。
- * 口径必须与 server/api/transcribe.ts 的 currentBundle() 一致，否则测的就不是线上跑的。
+ * 纠错层：Tier A ∪ Tier B + 音节/保护/歧义三份数据。
+ * 口径必须与 server/api/transcribe.ts 的 currentBundle() 一致，否则测的就不是生产口径。
  */
 const mergedEntries = [...tierA, ...glossaryToLexicon(glossary)];
 const mergedOpts = { syllables: syllTable, protect: new Set(glossaryData.protect), ambiguous };
@@ -190,7 +190,7 @@ for (const d of new Set(termRows.map((s) => domainOf(s.id)))) {
   };
 }
 
-// ---------------------------------------------------------------- 缺口量化（B3 要补多少）
+// ---------------------------------------------------------------- 缺口量化（Tier B 还需覆盖多少）
 const shortTargets = new Set(termRows.flatMap((s) => s.targetTerms).filter((t) => Array.from(t).length <= 3));
 const shortInGlossary = [...shortTargets].filter((t) => glossary.some((g) => g.canonical === t));
 const shortMissingGlossary = [...shortTargets].filter((t) => !glossary.some((g) => g.canonical === t));
@@ -263,10 +263,10 @@ if (mode === 'live') {
       result.metrics = { raw: null, current: null, merged: null, perDomain: null, harmful: null, harmfulMerged: null, e2eToolHit: result.metrics.e2eToolHit };
     } else {
       // 真跑：同一段音频走两遍 —— 一遍不发上下文、一遍发 —— 才把"偏置有没有用"和
-      // "事后纠正有没有用"分开。只跑一遍就归功于偏置，是这类评测最容易犯的假账。
+      // "事后纠正有没有用"分开。只跑一遍就归功于偏置，两项收益会混在一起。
       const { transcribeAudio } = await import('../server/llm/asr.ts');
-      // 产品侧 ASR_CONTEXT_ENABLED 默认关（收益未量化 + 静音样本实测到词表回显），
-      // 但 A/B 的"偏置臂"必须真的发出去：这里只在本次评测进程里把开关打开，
+      // 产品侧 ASR_CONTEXT_ENABLED 默认关（收益未量化 + 静音输入下模型会回显词表），
+      // 但偏置组的请求必须真的发出去：这里只在本次评测进程里把开关打开，
       // 不改 .env、不改产品默认，跑完就消失。
       if (!cfg.contextEnabled) process.env.ASR_CONTEXT_ENABLED = '1';
       const contextText = buildContextText(glossary, {
@@ -425,7 +425,7 @@ if (!quiet) {
 }
 
 fs.rmSync(temp, { recursive: true, force: true });
-// 发布硬门槛：两个口径的误改率都必须是 0，尤其是**现在线上这套**
+// 发布硬门槛：两个口径的误改率都必须是 0，尤其是**生产口径这套**
 if (mode === 'correction') {
   for (const key of ['harmful', 'harmfulMerged']) {
     if (result.metrics[key].harmfulEditRate !== 0) {

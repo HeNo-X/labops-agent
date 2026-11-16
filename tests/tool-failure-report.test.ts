@@ -1,7 +1,7 @@
 /**
  * 回归防护：工具失败时，run_failed 必须上报**真实原因**
  * ============================================================================
- *  起因：用户问「帮我发一条通知：请当前节次志愿者来5楼一趟」，界面只显示
+ *  问题形态：用户问「帮我发一条通知：请当前节次志愿者来5楼一趟」，界面只显示
  *
  *     失败原因：evidence_missing  本轮未取得可验证业务依据，未生成事实结论。
  *     请明确日期、房间或所需操作后重试。
@@ -9,9 +9,9 @@
  *  对"已经说清操作"的请求给出"请明确日期、房间"是无效建议，会诱导用户反复重试；
  *  而真实原因其实就在 tool_result.error 里。
  *
- *  根因（代码可证）：旧实现用 lastToolSummary 兜底 run_failed.message，
- *  但 lastToolSummary 只在**工具成功**时赋值，而走到该分支时不可能有任何成功调用
- *  （成功必进 verifiedAnswers）⇒ 它恒为 null ⇒ 通用文案 100% 命中。
+ *  口径（代码可证）：lastToolSummary 只在**工具成功**时赋值，
+ *  走到该分支时不可能有任何成功调用（成功必进 verifiedAnswers）
+ *  ⇒ 它恒为 null ⇒ 若拿它兜底 run_failed.message，通用文案会 100% 命中。
  *
  *  本测试把模型替换成照剧本演的替身，确定性地制造"工具失败且无成功调用"，
  *  断言真实错误码与工具名必须出现在用户可见的失败信息里。
@@ -64,7 +64,7 @@ async function run(question: string, sessionId: string): Promise<Array<{ type: s
   return events;
 }
 
-/** 旧实现的通用文案 —— 出现即视为回归 */
+/** 通用兜底文案 —— 出现即视为回归 */
 const LEGACY_GENERIC = '本轮未取得可验证业务依据，未生成事实结论。请明确日期、房间或所需操作后重试。';
 
 test('工具失败且无成功调用：run_failed 必须带上真实工具名与错误码，不得退化成通用文案', async () => {
@@ -89,7 +89,7 @@ test('工具失败且无成功调用：run_failed 必须带上真实工具名与
   const message = String(failed.payload['message']);
   const hint = String(failed.payload['hint']);
 
-  // 机器码保持稳定：现有前端与测试按 'evidence_missing' 识别该终态，不在本次改动中变更
+  // 机器码保持稳定：现有前端与测试按 'evidence_missing' 识别该终态，不随实现调整而变更
   assert.equal(failed.payload['code'], 'evidence_missing');
   // 真实原因必须到达用户可见位置
   assert.match(message, /query_schedule/, `失败信息必须点明是哪个工具：${message}`);

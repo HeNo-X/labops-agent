@@ -1,13 +1,13 @@
 /**
- * RAG 批次 4：知识检索质量门（金样本 30 条）
+ * 知识检索质量门（金样本 30 条）
  * ============================================================================
- *  **改检索（分块/召回/融合/重排/语料）必须跑本测试**（或 npm run knowledge:eval）。
- *  门槛按 2026-10-31 实测词法基线校准（生产参数 maxDocs=3/maxParagraphs=4）：
+ *  **调整检索（分块/召回/融合/重排/语料）必须跑本测试**（或 npm run knowledge:eval）。
+ *  门槛按词法基线校准（生产参数 maxDocs=3/maxParagraphs=4）：
  *    hit@1 22/30（73%）｜hit@3 29/30（97%）｜引文片段 29/30
- *  断言"不低于基线"——分块、融合或重排的改动让指标变差时会先在这里红。
+ *  断言"不低于基线"——分块、融合或重排让指标变差时会先在这里红。
  *  向量路（hybrid）在测试环境因 Key 净化通常不可得 → 该份对比如实标 skipped；
  *  本机单独运行（EMBEDDING_ENABLED=1 + 索引在库）时输出两份对比
- *  （2026-10-31 实测：hybrid hit@1 25/30、hit@3 30/30、引文 30/30——向量路
+ *  （hybrid hit@1 25/30、hit@3 30/30、引文 30/30——向量路
  *  hit@1 +10pp、hit@3 +3pp）。
  */
 import { test } from 'node:test';
@@ -18,7 +18,7 @@ import { documents } from '../server/tools/knowledge.ts';
 
 const GOLD = (JSON.parse(readFileSync(new URL('./fixtures/knowledge-eval.json', import.meta.url), 'utf8')) as { cases: GoldCase[] }).cases;
 
-/** 基线门槛（2026-10-31 词法基线；只许更好，不许更差） */
+/** 基线门槛（词法基线；只许更好，不许更差） */
 const GATE = { hit1: 22, hit3: 29, textHit: 29 };
 
 test('A13-01 质量门：词法两路不低于实测基线（hit@1/hit@3/引文片段）', async () => {

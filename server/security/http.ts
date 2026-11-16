@@ -23,7 +23,7 @@ function allowance(bucket: string, limit: number, duration: number): boolean {
 }
 const limit = (name: string, fallback: number) => Math.max(1, Number(process.env[name]) || fallback);
 
-/** Demo identity is a random server-issued browser session, never a public shared role ID. */
+/** Sandbox identity is a random server-issued browser session, never a public shared role ID. */
 export async function withHttpIdentity(req: IncomingMessage, res: ServerResponse, next: () => Promise<void>): Promise<void> {
   if(clientCors(req,res))return;
   const requestId=typeof req.headers['x-request-id']==='string'&&/^[A-Za-z0-9_-]{8,100}$/.test(req.headers['x-request-id'])?req.headers['x-request-id']:randomBytes(12).toString('hex');res.setHeader('X-Request-ID',requestId);

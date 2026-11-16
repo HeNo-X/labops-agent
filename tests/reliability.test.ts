@@ -1,4 +1,4 @@
-// Legacy regression fixture explicitly uses the isolated demo workspaces.
+// Legacy regression fixture explicitly uses the isolated sandbox workspaces.
 process.env.LABOPS_AUTH_MODE='demo';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';

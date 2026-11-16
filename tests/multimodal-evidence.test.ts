@@ -1,9 +1,9 @@
 /**
- * 多模态证据理解验收（WS1.1）
+ * 多模态证据理解验收
  * ============================================================================
  *  这一组测试锁的是本项目最容易"名不副实"的一件事：照片到底有没有进模型。
- *  以前它只做到"上传并登记编号"，模型从未看过图像内容 —— 若改成"看起来支持了"
- *  但实际没入模，比不做更糟。所以第一条断言就是**请求体里必须有 image_url**。
+ *  只做到"上传并登记编号"而模型从未看过图像内容，却宣称"看起来支持了"，
+ *  比不做更糟。所以第一条断言就是**请求体里必须有 image_url**。
  *
  *  同时锁死三条纪律：
  *   · 视觉未配置 / 未连接原系统时如实说拿不到，不伪造观察；
@@ -90,13 +90,13 @@ after(() => {
   try {
     fs.rmSync(temp, { recursive: true, force: true });
   } catch {
-    /* Windows 下可能被占用，泄漏临时目录不影响结论 */
+    /* Windows 下可能被占用，目录残留不影响结论 */
   }
 });
 
 test('回归：baseUrl 带路径前缀时不得被 new URL 绝对路径吃掉', async () => {
   // `new URL('/chat/completions', base)` 会把 base 的 pathname 整段替换掉，
-  // 默认配置（…/compatible-mode/v1）下必然 404。此前测试用无前缀的本地替身，掩盖了它。
+  // 默认配置（…/compatible-mode/v1）下必然 404。无前缀的本地替身会掩盖它。
   captured.length = 0;
   replies = [{ json: { choices: [{ message: { content: '{"deviceType":"x"}' } }] } }];
   await analyzeImages([{ mimeType: 'image/png', dataBase64: PNG_1PX }], '', undefined, {

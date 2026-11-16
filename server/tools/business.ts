@@ -43,12 +43,12 @@ export async function queryBusiness(args:Record<string,unknown>,ctx:ToolContext)
 }
 export async function queryDuty(args:Record<string,unknown>,ctx:ToolContext):Promise<ToolExecution>{return queryBusiness({...args,view:'duty'},ctx);}
 /**
- * 原系统通知受众的口径归一（2026-10-06 修复 bad_audience）
+ * 原系统通知受众的口径归一
  * ============================================================================
  *  事实：沙盒工具 `prepare_notification` 的受众是 `{kind:'class_ids'|'role_scope'|'all'}`，
  *  而原系统 `/workflow/preview`（notification.publish）只认 `{kind:'all'|'role'|'class'|'user'}`
  *  （见 Pages/server/operations.js 的 validateAudience）。两个工具同处一份工具清单，
- *  模型很容易把沙盒词表套到原系统工具上 —— 实测就会出现 `bad_audience 接收对象无效`。
+ *  模型容易把沙盒词表套到原系统工具上，从而得到 `bad_audience 接收对象无效`。
  *
  *  这里只做**语义等价的词表翻译**（role_scope→role；单班级的 class_ids→class）。
  *  一旦有歧义（多班级、角色不明、给管理员群发）就明确报错并列出可选形式 ——
@@ -116,7 +116,7 @@ export async function prepareWorkflow(args:Record<string,unknown>,ctx:ToolContex
     payload={...payload,labId:args['labId']||args['roomId'],periodKey:args['periodKey']||(Array.isArray(args['periodKeys'])&&args['periodKeys'].length?args['periodKeys'][0]:undefined)};
     delete payload['roomId'];delete payload['periodKeys'];
   }
-  // 名册班级变更（批W1）：目标与令牌去空白；缺目标就地报错，省一次往返，也不让模型去猜学号
+  // 名册班级变更：目标与令牌去空白；缺目标就地报错，省一次往返，也不让模型去猜学号
   if(args['kind']==='roster.update'){
     const trim=(k:string)=>typeof payload[k]==='string'?String(payload[k]).trim():payload[k];
     payload={...payload,targetName:trim('targetName'),targetAccount:trim('targetAccount'),className:trim('className'),expectedRosterVersion:trim('expectedRosterVersion')};
@@ -132,7 +132,7 @@ export async function queryIncident(args:Record<string,unknown>,ctx:ToolContext)
 /**
  * 主系统 /incidents/draft 需要 roomId+date+description+periodKeys 四项，但工具清单只把
  * action 标成必填——模型据此漏项时，请求会在原系统撞成一句"请选择故障影响节次"，
- * 既没给合法值也没给映射，只能反复重试到步数上限（2026-11-10 实机演示实测到）。
+ * 既没给合法值也没给映射，只能反复重试到步数上限。
  * 这里在发起请求前按同一口径校验，并把缺什么、合法值是什么一次说清；缺资料时模型应先问用户。
  */
 function assertIncidentDraftArgs(args:Record<string,unknown>,ctx:ToolContext):{roomId:string}{
@@ -140,7 +140,7 @@ function assertIncidentDraftArgs(args:Record<string,unknown>,ctx:ToolContext):{r
   const rawRoom=typeof args['roomId']==='string'?args['roomId'].trim():'';
   if(!rawRoom)throw bad('missing_room','登记故障事件需要 roomId：房间编号或房号都可（如 E310），建议取 query_business_context 返回的 rooms[].id。');
   // 主系统只认 rooms[].id，模型常交房间名（"E310"）→ 撞一句"请选择实验室"再回头查清单，
-  // 一次演示要多烧两轮。服务端已有房间清单，这里做唯一映射：编号或名字都收，歧义才报错。
+  // 一次交互要多烧两轮。服务端已有房间清单，这里做唯一映射：编号或名字都收，歧义才报错。
   // 清单必须同时含上机实验室与开放实验室——只查 labs 会让 5 楼 D5xx 全部报"找不到房间"。
   const known=[...(ctx.dataset?.labs||[]),...(ctx.dataset?.openLabs||[])] as Array<{id:string;name:string}>;
   const byId=known.find(l=>l.id===rawRoom);

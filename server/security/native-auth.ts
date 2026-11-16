@@ -14,7 +14,7 @@ function fail(message:string,status=401):never{throw Object.assign(new Error(mes
 function principal(raw:unknown,channel:'full_labops'|'main_shared_chat'='full_labops'):NativeDelegation['profile']{
  const p=raw as Record<string,unknown>;if(!p||typeof p['username']!=='string'||!['admin','volunteer','student'].includes(String(p['identity'])))return fail('主系统未返回有效身份',502);
  if(p['mustChangePassword'])return fail('请先在主系统修改临时密码',403);
- // 2026-10-05 按用户要求：LabOps 仅对管理员与志愿者开放；学生账号一律拒绝（学生请用主系统学生端）。
+ // LabOps 仅对管理员与志愿者开放；学生账号一律拒绝（学生请用主系统学生端）。
  // 放在 principal() 内 → 登录与会话恢复两条路径都会拦，已登录的学生会话也会失效。
  if(p['identity']==='student'&&channel==='full_labops')return fail('学生账号暂不能登录 LabOps（仅志愿者与管理员可用）',403);
  return {username:p['username'],identity:p['identity'] as NativeDelegation['profile']['identity'],className:String(p['className']||''),name:String(p['name']||p['username'])};

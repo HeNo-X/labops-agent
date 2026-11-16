@@ -1,5 +1,5 @@
 /**
- * 批次2（整合方案 §8.5）——通知发布真实写回主系统 + 回执如实区分 + 生产通知不假回退
+ * 通知发布真实写回主系统 + 回执如实区分 + 生产通知失败必须如实上报
  * 运行：node --test tests/production-notification.test.ts
  */
 process.env.LABOPS_SKIP_ENV_FILE = '1';

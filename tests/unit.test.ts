@@ -153,12 +153,12 @@ test('结果必带来源标记，且脱敏快照不得被标成实时', () => {
   assert.ok(r.provenance.queryTime);
 });
 
-test('demo 数据集的结果必须标成"模拟演示"', () => {
+test('demo 数据集的结果必须标成"内置示例"', () => {
   const ds = dataset({ sourceType: 'demo', sourceLabel: DATA_SOURCE_LABELS['demo'] });
   const r = runQuerySchedule({ date: '2026-09-30', labName: 'E310' }, ds, NOW);
   assert.equal(r.provenance.sourceType, 'demo');
-  assert.equal(r.provenance.sourceLabel, '模拟演示');
-  assert.match(r.provenance.coverage, /构造/);
+  assert.equal(r.provenance.sourceLabel, '内置示例');
+  assert.match(r.provenance.coverage, /示例数据/);
 });
 
 test('不存在的房间 → lab_not_found + 候选列表 + 零课程（不编造）', () => {
@@ -299,7 +299,7 @@ test('F17：coerce 显式非法参数必须报错，绝不静默丢弃后扩大�
   assert.deepEqual(coerceQueryScheduleArgs({}), {});
   assert.deepEqual(coerceQueryScheduleArgs({ labName: '  E310  ' }), { labName: 'E310' });
   assert.deepEqual(coerceQueryScheduleArgs({ date: '2026-09-30', extra: 'ignored' }), { date: '2026-09-30' });
-  // 显式给了但非法 → 抛参数错误（此前静默丢弃会变成"查全天/查今天"）
+  // 显式给了但非法 → 抛参数错误（静默丢弃会变成"查全天/查今天"）
   assert.throws(() => coerceQueryScheduleArgs({ periodKey: 'noon' }), (e: unknown) => e instanceof ToolArgumentError);
   assert.throws(() => coerceQueryScheduleArgs({ date: 20260930 }), (e: unknown) => e instanceof ToolArgumentError);
 });

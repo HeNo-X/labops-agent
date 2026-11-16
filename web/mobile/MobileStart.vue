@@ -22,10 +22,10 @@ watch(draft,value=>session.saveDraft('__new',value));
 watch(()=>preferences.value.defaultMode,value=>{if(!props.section)mode.value=value;});
 async function send(){if(!draft.value.trim()||busy.value)return;session.startDraft();await props.controller.submit(draft.value,mode.value);}
 function key(event:KeyboardEvent){if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();void send();}}
-/** U05：建议点击即发起（不再是回填草稿），失败可在会话内重试 */
+/** 建议点击即发起，失败可在会话内重试 */
 /** 快捷胶囊：只把内容填进输入框待用户确认，绝不替他直接发出去 */
 function fill(text:string):void{if(busy.value)return;draft.value=text;void nextTick(()=>textareaRef.value?.focus());}
-/** 身份驱动的开场与建议（U05）：志愿者偏值班/报修，管理员偏办理与查询 */
+/** 身份驱动的开场与建议：志愿者偏值班/报修，管理员偏办理与查询 */
 const identity=computed(()=>business.profile?.identity??'');
 const greeting=computed(()=>business.profile?.username?business.profile.username+tr('，要处理什么实验室事务？'):tr('需要处理什么实验室事务？'));
 /** 语音错误诚实提示（与 MobileConversation 同口径） */

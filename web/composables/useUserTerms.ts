@@ -9,8 +9,8 @@
  *
  *  为什么不放服务端：
  *   - 这是**个人**的说话习惯（同一间实验室里两个人错的词不一样），不是全实验室的事实；
- *   - 服务端存它就得新增一个写入口，而本仓库的红线是"业务数据只有一个写入进程"，
- *     配置类的写入也不该顺手开新口子；
+ *   - 服务端存它就要多一个写入口，而本仓库的红线是"业务数据只有一个写入进程"，
+ *     配置类的写入也不该开新口子；
  *   - 随请求带上去，服务端只在本次转写里用，不落盘 —— 换浏览器丢的是自己的偏好，
  *     不是系统数据，这个失败方向可以接受。
  *
@@ -72,7 +72,7 @@ function read(): UserTermPair[] {
 /** 模块级单例：PC 命令栏、移动端会话页、移动端起始页共用同一份登记表 */
 const pairs = ref<UserTermPair[]>(read());
 
-/** 只填正确写法的那一列：它们不进纠正层，只作为"事前提示"发给模型（见 §U2 的通道说明） */
+/** 只填正确写法的那一列：它们不进纠正层，只作为"事前提示"发给模型 */
 const keywords = ref<string[]>(readKeywords());
 
 function persist(): void {
@@ -182,7 +182,7 @@ export function useUserTerms() {
   };
 }
 
-/** 给 useVoiceInput 用：没有登记时返回空数组，请求体里就不带这个字段（与旧客户端一致） */
+/** 给 useVoiceInput 用：没有登记时返回空数组，请求体里就不带这个字段 */
 export function currentUserTermPairs(): UserTermPair[] {
   return pairs.value;
 }

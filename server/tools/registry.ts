@@ -17,28 +17,25 @@ import { prepareSchedule, queryDuty, queryBusiness, prepareWorkflow, queryIncide
 import type { KnowledgeResult, BusinessPlanResult, EvidenceObservationResult } from '../../shared/types.ts';
 /**
  * ============================================================
- *  文件导航（批6 可读性）：本文件按块分区——
+ *  文件导航：本文件按块分区——
  *    §1 imports + 类型（ToolContext/ToolSpec/ToolExecution…）
  *    §2 summarize 人话摘要（summarizeSchedule/LabStatus/FreeRooms）
  *    §3 REGISTRY 工具注册表（约 28 个条目，按领域：故障/业务/定时/课表/签到/钥匙/值班/知识/视觉/证据）
  *    §4 executeTool 运行时（白名单硬拦/scope 门控/效果路由）
  *    §5 toolsForMode 模式过滤 + 单程白名单
- *  拆分建议：REGISTRY 条目可按 §3 内的领域注释提取为独立文件（纯移动+重导出）；
- *  机制部分（executeTool/toolsForMode）与条目耦合较深，拆分需一并迁 ToolContext。
  * ============================================================
 /**
  * 工具注册表 —— JSON Schema + 白名单 + 参数类型校验 + 人话摘要
  * ============================================================================
- *  阶段 2A 注册 3 个只读工具：query_schedule / query_lab_status / query_free_rooms。
  *  注册表 = 真实能力清单：没有数据支撑的能力（值班 / 签到 / 钥匙 / 在室人数）与
  *  写操作**一律不注册** —— 注册了却不实现，只会让模型选到一个必然失败的工具。
  *
- *  难点 1 对策 2/3 落在这里：
+ *  错误处理落在这里：
  *    · 工具名不在注册表 → 回一条"工具 X 不存在，可用工具有：…"，让模型重试
  *    · 参数值非法       → 回"没有 E999，可选：E310/E312/…"，让模型改正
  *  两条都是**可恢复错误**（ok=false + 结构化提示），而不是抛异常中断任务。
  *
- *  摘要原则（工作台改造引入）：summarize() 只给**一行可读结论**，
+ *  摘要原则：summarize() 只给**一行可读结论**，
  *  完整明细在结构化 result 里（界面渲染结构化卡片，模型读 result 全量）。
  */
 
@@ -83,13 +80,13 @@ export interface RegisteredTool {
   execute: (args: Record<string, unknown>, ctx: ToolContext) => ToolExecution | Promise<ToolExecution>;
   /**
    * 展示用效果标注（不发给模型）：read=只读查询；draft=生成办理单草稿（不执行业务）。
-   * 真正的权限边界在服务端 policy/executor，不由这个标记决定（任务书 §11.2）。
+   * 真正的权限边界在服务端 policy/executor，不由这个标记决定。
    */
   effect: 'read' | 'draft' | 'write';
 }
 
 /**
- * 工具上下文。actor / conversationId 由服务端注入（ops.v1 起生效）：
+ * 工具上下文。actor / conversationId 由服务端注入（ops.v1 约定）：
  * 身份绝不出现在模型可写的参数里；只读工具不使用这两个字段。
  */
 export interface ToolContext {
@@ -97,7 +94,7 @@ export interface ToolContext {
   signal?: AbortSignal;
   dataset: Dataset;
   now: ServerNow;
-  /** 服务端解析的沙盒演示身份（ops.v1 写操作必需） */
+  /** 服务端解析的沙盒身份（ops.v1 写操作必需） */
   actor?: SandboxActor;
   /** 发起本轮的会话 id（任务与提案挂靠用；直连 /api/agent/chat 时为空） */
   conversationId?: string | null;
@@ -287,7 +284,7 @@ const QUERY_CHECKIN_SUMMARY_SPEC: ToolSpec = {
 // ===========================================================================
 
 /**
- * 把模型给的任意对象收敛成严格类型（F17）：
+ * 把模型给的任意对象收敛成严格类型：
  *   · 缺省字段保持缺省（由工具用安全默认值）；
  *   · **显式提供但非法的字段必须报错**，绝不静默丢弃后扩大查询范围
  *     （例如 periodKey='bad' 被丢弃会变成"查全天"，把受限查询悄悄放大）。
@@ -323,7 +320,7 @@ export function coerceQueryScheduleArgs(raw: Record<string, unknown>): QuerySche
       );
     }
   } else if (periodKey !== undefined && periodKey !== null && periodKey !== '') {
-    // R10：显式给了错误类型（如数字 999）也是参数错误，不能静默丢弃后放宽为全天
+    // 显式给了错误类型（如数字 999）也是参数错误，不能静默丢弃后放宽为全天
     throw new ToolArgumentError('bad_period', `periodKey 必须是字符串节次键，收到：${typeof periodKey}(${String(periodKey)})`);
   }
   return out;
@@ -529,7 +526,7 @@ function internalError(toolName: string, err: unknown): ToolExecution {
 }
 
 function executeQuerySchedule(args: Record<string, unknown>, ctx: ToolContext): ToolExecution {
-  // N11：参数收敛也在工具受控边界内 —— 非法参数返回 ok=false 的结构化错误，不抛出包装层
+  // 参数收敛也在工具受控边界内 —— 非法参数返回 ok=false 的结构化错误，不抛出包装层
   try {
     const normalized = coerceQueryScheduleArgs(args);
     const result = runQuerySchedule(normalized, ctx.dataset, ctx.now);
@@ -586,8 +583,7 @@ export const REGISTRY: RegisteredTool[] = [
   // 学期安排 / 周值班模板：读走 GET，写走 POST（主系统唯一写入进程，权限由其判定）
   {
     spec: QUERY_TERM_SCHEDULE_SPEC as unknown as ToolSpec,
-    // runQueryTermSchedule 返回的是裸结果（不是 ToolExecution），这里包一层；
-    // 它此前一直没注册进 REGISTRY，导致读侧是死代码（2026-11-08 修正）
+    // runQueryTermSchedule 返回的是裸结果（不是 ToolExecution），这里包一层
     execute: async (a, ctx) => {
       try {
         const result = await runQueryTermSchedule(a as unknown as Parameters<typeof runQueryTermSchedule>[0], ctx.signal);
@@ -620,7 +616,7 @@ export const REGISTRY: RegisteredTool[] = [
     execute: (a, ctx) => applyTermSchedule(a, ctx.signal),
     effect: 'write'
   },
-  // 逐人明细 / 开放实验室签到签退 / 钥匙台账（2026-11-08 开放；学号与借用人由服务端掩码）
+  // 逐人明细 / 开放实验室签到签退 / 钥匙台账（学号与借用人由服务端掩码）
   { spec: QUERY_CHECKIN_RECORDS_SPEC as unknown as ToolSpec, execute: (a, ctx) => queryCheckinRecords(a, ctx.signal), effect: 'read' },
   { spec: QUERY_OPENLAB_RECORDS_SPEC as unknown as ToolSpec, execute: (a, ctx) => queryOpenlabRecords(a, ctx.signal), effect: 'read' },
   { spec: QUERY_KEY_RECORDS_SPEC as unknown as ToolSpec, execute: (a, ctx) => queryKeyRecords(a, ctx.signal), effect: 'read' },
@@ -631,7 +627,7 @@ export const REGISTRY: RegisteredTool[] = [
   { spec: PREPARE_NOTICE_SPEC, execute: runPrepareNotification, effect: 'draft' },
   { spec: PREPARE_DUTY_SPEC, execute: runPrepareDutySession, effect: 'draft' },
   { spec: REPORT_SPEC, execute: runCreateOperationsReport, effect: 'draft' },
-  // A5 任务计划复述：effect='read'（chat/task 都可用），是工作记录不是业务结果
+  // 任务计划复述：effect='read'（chat/task 都可用），是工作记录不是业务结果
   {
     spec: {
       name: 'maintain_task_plan',
@@ -698,8 +694,8 @@ export function isRegisteredTool(name: unknown): boolean {
 
 /**
  * 统一的工具入口。工具名不在白名单时**不抛异常**，而是返回可恢复错误，
- * 附带可用工具清单 —— 让模型有一次自我纠正的机会（难点 1 对策 2）。
- * ops.v1 起支持异步工具（准备类工具要落库），统一 await。
+ * 附带可用工具清单 —— 让模型有一次自我纠正的机会。
+ * ops.v1 支持异步工具（准备类工具要落库），统一 await。
  */
 export async function executeTool(name: unknown, args: Record<string, unknown>, ctx: ToolContext): Promise<ToolExecution> {
   const tool = typeof name === 'string' ? BY_NAME.get(name) : undefined;
@@ -751,7 +747,7 @@ export function summarizeLabStatus(r: LabStatusResult): string {
     return `${src}系统里查不到房间号；可选：${r.suggestions.slice(0, 6).join('、')}${r.suggestions.length > 6 ? ' 等' : ''}`;
   }
   const next = r.schedule.nextLesson ? `，下一节 ${r.schedule.nextLesson.startTime} ${r.schedule.nextLesson.courseName}` : '';
-  // 在室人数：有授权实时值就报值，取不到才说"无数据来源"（2026-10-06 修正：此前恒报未知）
+  // 在室人数：有授权实时值就报值，取不到才说"无数据来源"
   const occupancy = r.occupancy ? `；在室人数 ${r.occupancy.present} 人（${r.occupancy.date}，当日有效签到−有效签退）` : '；在室人数未知（当前无签到数据来源）';
   return `${src}${r.labName}：${r.statusLabel}，容量 ${r.capacity ?? '未知'}，${r.date}（${r.weekdayLabel}）${r.schedule.lessonCount} 条排课${next}${occupancy}`;
 }

@@ -1,13 +1,13 @@
 /**
- * 模型不支持的参数 → 摘掉重发，而不是把模型判死（2026-10-31）
+ * 模型不支持的参数 → 摘掉重发，而不是把模型判死
  * ============================================================================
- *  真实触发：把聊天链换成新一批模型后，排第一的 kimi-k3 **每次都 400**：
+ *  触发形态：聊天链里排第一的 kimi-k3 对带 temperature 的请求**每次都 400**：
  *    InternalError.Algo.InvalidParameter:
  *    Parameter 'temperature'=0.3 is not supported for kimi-k3 model.
- *  旧行为：classify → agnes_bad_request（不可重试）→ router 记一次熔断失败 → 换下一个模型。
+ *  若按不可重试错误处理：classify → agnes_bad_request → router 记一次熔断失败 → 换下一个模型。
  *  后果不是"出错"，而是**每次聊天都白跑一趟**（约 250 ms）+ 日志持续报警 + 熔断反复冷却。
  *
- *  新行为：从 400 正文里认出参数名，摘掉该参数重发一次；不换模型、不计重试次数。
+ *  现在的行为：从 400 正文里认出参数名，摘掉该参数重发一次；不换模型、不计重试次数。
  *  边界写死在 DEGRADABLE_PARAMS 里：只有采样类参数可摘，
  *  tools / tool_choice / messages 这类删了会**功能缺失**的一律不碰。
  *
@@ -51,7 +51,7 @@ before(async () => {
     req.on('end', () => {
       const body = JSON.parse(raw || '{}') as Record<string, unknown>;
       seen.push(body);
-      // 守门：只要请求里带 temperature 就按上游原文拒绝，模拟 kimi-k3
+      // 守门：只要请求里带 temperature 就按上游原文拒绝，复现 kimi-k3 的拒绝行为
       if (body['model'] === 'kimi-k3' && 'temperature' in body) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(KIMI_400);

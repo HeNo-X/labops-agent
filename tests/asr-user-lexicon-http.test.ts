@@ -1,9 +1,9 @@
 /**
- * U1 + U2 的服务端 HTTP 端到端 —— 真起服务、真走 handleTranscribe，只把最外层上游换成替身
+ * U1 + U2 的服务端 HTTP 端到端 —— 真起服务、真走 handleTranscribe，只把最外层上游替换为替身
  * ============================================================================
- *  之前 U1/U2 的验证分布是：浏览器探针（桩掉 /api/agent/transcribe，验前端契约）+
- *  纯函数单测（验纠正层）。中间那段 **"请求体里的 termPairs / extraTerms 到底走没走到
- *  handleTranscribe 的两条通道"** 一直没被真 HTTP 覆盖过。这条文件就是补这段空白：
+ *  覆盖范围：浏览器探针（桩掉 /api/agent/transcribe，验前端契约）与纯函数单测（验纠正层）
+ *  之间存在一段空白 —— **"请求体里的 termPairs / extraTerms 到底走没走到
+ *  handleTranscribe 的两条通道"** 没有真 HTTP 覆盖。这条文件补的就是这段：
  *    ① termPairs 经 HTTP 生效，且与词典改动共存（第零遍先占位，后面的规则不再二次改）；
  *    ② skipTermCorrect 停的是词典自动改动，**不停用户自己登记的词对**（U1 的语义声明）；
  *    ③ extraTerms 经 HTTP 进了首位 system 上下文，并且开关关着时整个字段不出现（U2 的语义声明）。
